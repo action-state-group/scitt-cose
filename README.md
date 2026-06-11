@@ -280,12 +280,16 @@ self-consistency:
   `cose-wg/Examples` corpus) — anchoring the *signature* layer to the spec's
   reference output, just as the RFC 6962 vectors anchor the Merkle layer.
   (`tests/test_cose_wg_vectors.py`)
-- **A real Transparency-Service verifier.** A downstream consumer (the Action
-  State Group verifier, built on a *different* COSE stack —
-  `python-cwt`) cross-verifies the same Signed Statements and the same
-  TS-issued Receipts and agrees on the reconstructed Merkle root. This exercises
-  the real register→issue→verify shape; the integration test lives in the
-  consuming repo (so this package stays standalone).
+- **A real Transparency-Service verifier.** A downstream Transparency
+  Service's own verifier — written independently of this package, on a
+  *different* COSE stack (`python-cwt`, vs this package's from-scratch
+  `cbor2`/`cryptography`) — cross-verifies the same Signed Statements and the
+  same TS-issued Receipts and agrees on the reconstructed Merkle root, in both
+  directions. This exercises the real register→issue→verify shape; the
+  integration test lives in the consuming repo (so this package stays
+  standalone). This is **not** the hosted verify endpoint: that endpoint runs
+  this package unchanged (a convenience deployment, deliberately the *same*
+  library), so it is not an independent oracle — the python-cwt verifier is.
 - **IANA values, not library enums.** Every wire code point is asserted against
   its registry/RFC number (CWT Claims **15**, not python-cwt's `13`).
   (`tests/test_iana_codepoints.py`)
