@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+# CI for the standalone repo (repo root = this package; the Go cross-verifier
+# lives at ./scitt-cose-go-verify — see docs/launch-checklist.md for layout).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install
+        run: pip install -e ".[dev,serve]"
+      - name: Tests (Go cross-language check REQUIRED, never skipped)
+        run: python -m pytest -q
+        env:
+          SCITT_REQUIRE_GO: "1"
+      - name: Lint
+        run: python -m ruff check .
+
+  go-verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build + vet the independent Go verifier
+        working-directory: scitt-cose-go-verify
+        run: |
+          go vet ./...
+          go build ./...
+
+  neutrality-gate:
+    # The shipped tree must contain no downstream/reserved code references.
+    # (The pytest suite enforces this for scitt_cose/; this job covers the
+    # whole tree, including docs and the Go tool.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No downstream package references anywhere in the tree
+        run: |
+          # (pattern split so this workflow file doesn't match itself, in the
+          # tree or in `git grep` over history — see the launch checklist)
+          ! grep -rn "goph""er_ai" --include='*.py' --include='*.go' . || {
+            echo "reserved/downstream code reference found"; exit 1; }

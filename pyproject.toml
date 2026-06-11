@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scitt-cose"
+version = "0.0.1"
+description = "Generic, payload-agnostic IETF SCITT + COSE Receipts substrate for Python (receipts strictly RFC9162_SHA256)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Action State Group" }]
+keywords = ["scitt", "cose", "cose-sign1", "receipts", "merkle", "rfc9162", "transparency"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = [
+    "cbor2>=5.5",
+    "cryptography>=42.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/action-state-group/scitt-cose"
+Source = "https://github.com/action-state-group/scitt-cose"
+Issues = "https://github.com/action-state-group/scitt-cose/issues"
+
+[project.optional-dependencies]
+# pycose is a THIRD-PARTY COSE library used ONLY in tests as an independent
+# conformance oracle (test_thirdparty_cose.py); never imported at runtime.
+dev = ["pytest>=7.0", "ruff>=0.4", "pycose>=1.1"]
+# serve: run the stateless HTTP verifier as a standalone SCITT-only service under
+# a production ASGI server. The library/CLI need NO web deps; this is opt-in.
+# (The stdlib `scitt-cose-serve` entry point needs nothing extra.)
+serve = ["uvicorn[standard]>=0.27"]
+
+[project.scripts]
+scitt-cose = "scitt_cose.cli:main"
+scitt-cose-serve = "scitt_cose.hosted:serve"
+
+[tool.setuptools]
+packages = ["scitt_cose"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
