@@ -81,6 +81,13 @@ Three things an adopter should know up front:
    vendor. Which foundation is deliberately not yet decided; until then it is
    governed in the open under DCO + Apache-2.0 (see
    [CONTRIBUTING.md](CONTRIBUTING.md)).
+4. **Development.** This project is built and maintained by Action State
+   Group, with AI-assisted engineering (Claude Code) used as a development
+   tool. Every contribution is human-reviewed and DCO-signed. Correctness
+   does not rest on trusting any author — human or otherwise: conformance is
+   enforced in CI by the published RFC 6962/9162 test vectors, an independent
+   clean-room Go implementation, and cross-checks against a third-party COSE
+   library, none of which can be skipped.
 
 ## Scope
 
