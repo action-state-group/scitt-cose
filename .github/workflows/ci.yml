@@ -32,6 +32,21 @@ jobs:
       - name: Lint
         run: python -m ruff check .
 
+  third-party-oracle:
+    # The pycose oracle skips itself on cbor2>=6 (pycose 1.1 limitation). The
+    # same no-silent-skip discipline as the Go check: this job pins cbor2<6 so
+    # the third-party COSE cross-check actually runs on every push.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with cbor2<6 (pycose-compatible)
+        run: pip install -e ".[dev]" "cbor2<6"
+      - name: pycose oracle must RUN (not skip)
+        run: python -m pytest tests/test_thirdparty_cose.py -q -rs 2>&1 | tee out.txt && ! grep -q "skipped" out.txt
+
   go-verifier:
     runs-on: ubuntu-latest
     steps:
