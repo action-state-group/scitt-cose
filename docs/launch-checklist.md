@@ -52,13 +52,12 @@ nothing publishes after it without re-running it.
 - [ ] `LICENSE` — Apache-2.0, canonical text. ✔ in-tree
 - [ ] `NOTICE` — Action State Group copyright line. ✔ in-tree
 - [ ] `CONTRIBUTING.md` — scope rules + DCO sign-off requirement. ✔ in-tree
-- [ ] **DCO enforcement ON** — enable the DCO check (GitHub DCO app or
+- [x] **DCO enforcement ON** — enable the DCO check (GitHub DCO app or
       equivalent required status check) + branch protection on `main`.
-      **Deferred to the public flip:** branch protection on private repos
-      needs a paid plan (GitHub returns 403 on the free org); it is free the
-      moment the repo goes public. On flip day: install the DCO app
-      (github.com/apps/dco) and require `DCO`, `test (3.9)`, `test (3.12)`,
-      `go-verifier`, `neutrality-gate` on `main`.
+      **Done at the public flip (2026-06-11):** DCO app installed; branch
+      protection on `main` requires `DCO`, `test (3.9)`, `test (3.12)`,
+      `go-verifier`, `neutrality-gate`, `third-party-oracle` (strict
+      up-to-date); force-pushes and branch deletion blocked.
 - [ ] CI green on the extracted repo: pytest with `SCITT_REQUIRE_GO=1`
       (cross-language check may never silently skip), ruff, Go vet/build,
       neutrality gate (`.github/workflows/ci.yml`).
