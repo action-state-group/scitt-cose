@@ -157,30 +157,40 @@ def _plain(v):
     return v
 
 
-def _read_definite_map_count(raw: bytes) -> int | None:
-    """If ``raw`` begins a *definite-length* CBOR map, return its declared pair
-    count; if it begins an *indefinite-length* map, return ``-1``; otherwise
-    ``None``. Reads only the map's header byte(s) — this is not a value parser.
+def _strict_decode_item(raw: bytes, what: str):
+    """Decode one self-contained CBOR item under deterministic-encoding rules,
+    returning the decoded value. Rejects (CoseError): malformed CBOR, trailing
+    bytes, and any non-deterministic encoding — indefinite length, non-minimal
+    integers/lengths, or duplicate map keys (at any depth) — by requiring the
+    input length to equal its own canonical re-encoding.
+
+    Crucially this is **order-tolerant**: re-ordering the keys of a unique-key
+    map does not change the encoded length, so a validly-signed message whose
+    header maps are not canonically *ordered* is accepted (COSE does not require
+    deterministic ordering of the unprotected header). Only genuinely ambiguous
+    or non-minimal encodings — which always change the length — are rejected.
     """
-    if not raw:
-        return None
-    ib = raw[0]
-    if ib >> 5 != 5:  # major type 5 == map
-        return None
-    ai = ib & 0x1F
-    if ai < 24:
-        return ai
-    if ai == 24:
-        return raw[1] if len(raw) > 1 else 0
-    if ai == 25:
-        return int.from_bytes(raw[1:3], "big")
-    if ai == 26:
-        return int.from_bytes(raw[1:5], "big")
-    if ai == 27:
-        return int.from_bytes(raw[1:9], "big")
-    if ai == 31:
-        return -1  # indefinite-length map
-    return None
+    stream = io.BytesIO(raw)
+    try:
+        value = cbor2.CBORDecoder(stream).decode()
+    except Exception as exc:  # noqa: BLE001 - any parser error -> typed CoseError
+        raise CoseError(f"{what} is not valid CBOR ({type(exc).__name__})") from exc
+    extra = len(raw) - stream.tell()
+    if extra:
+        raise CoseError(f"trailing bytes after {what} ({extra} extra) — rejected as malleable")
+    try:
+        recanonical = cbor2.dumps(value, canonical=True)
+    except Exception as exc:  # noqa: BLE001
+        raise CoseError(f"{what} could not be re-encoded ({type(exc).__name__})") from exc
+    # Length, not bytes: a key re-ordering preserves length (and is benign for a
+    # unique-key map); indefinite-length, non-minimal, and duplicate-key (which
+    # collapses to fewer pairs) all change it.
+    if len(recanonical) != len(raw):
+        raise CoseError(
+            f"non-deterministic {what} (indefinite-length, non-minimal, or "
+            "duplicate keys) — rejected as malleable"
+        )
+    return value
 
 
 def strict_decode(data: bytes) -> cbor2.CBORTag:
@@ -189,23 +199,17 @@ def strict_decode(data: bytes) -> cbor2.CBORTag:
 
     Plain ``cbor2.loads`` is too lenient for a verifier trust boundary: it
     silently ignores trailing bytes and accepts indefinite-length / non-minimal
-    encodings, so two distinct byte strings can decode to "the same" message and
-    one signature can be presented in many encodings. This rejects, with a typed
-    :class:`CoseError`:
+    encodings and duplicate map keys, so two distinct byte strings can decode to
+    "the same" message and one signature can be presented in many encodings.
+    This rejects all of those with a typed :class:`CoseError`, at the outer
+    structure **and** inside the (otherwise opaque) protected-header bstr — so a
+    duplicate key or indefinite encoding inside the signed header is caught too.
 
-    * **trailing bytes** after the top-level item (explicit consumed-all check);
-    * **non-deterministic encoding** of the COSE_Sign1 *structure* — indefinite
-      length (e.g. an indefinite payload bstr), non-minimal integers, or a
-      non-canonical unprotected map — caught by requiring the outer structure to
-      equal its own canonical re-encoding;
-    * **duplicate keys in the protected header** (ambiguous algorithm/claims;
-      last-wins is a cross-implementation split).
-
-    The protected header is preserved as opaque bytes by the outer check, so its
-    inner key *ordering* is deliberately **not** constrained — a validly-signed
-    third-party statement whose protected map is not canonically ordered is still
-    accepted (verified against the RFC 9052 reference vector). Only duplicate
-    keys and indefinite encoding inside it are rejected.
+    Deterministic *ordering* of header maps is **not** required: a validly-signed
+    third-party message whose unprotected (or protected) map keys are not in
+    canonical order is accepted (verified against the RFC 9052 reference vector
+    and multi-key unprotected headers). The check keys on encoded *length*, which
+    a re-ordering of a unique-key map leaves unchanged.
     """
     if not isinstance(data, (bytes, bytearray)):
         raise CoseError("COSE message must be bytes")
@@ -213,50 +217,19 @@ def strict_decode(data: bytes) -> cbor2.CBORTag:
     if len(data) > MAX_MESSAGE_BYTES:
         raise CoseError(f"COSE message too large ({len(data)} > {MAX_MESSAGE_BYTES} bytes)")
 
-    stream = io.BytesIO(data)
-    try:
-        value = cbor2.CBORDecoder(stream).decode()
-    except Exception as exc:  # noqa: BLE001
-        raise CoseError(f"not valid CBOR: {exc}") from exc
-    extra = len(data) - stream.tell()
-    if extra:
-        raise CoseError(f"trailing bytes after the COSE_Sign1 item ({extra} extra) — rejected as malleable")
-
-    # Deterministic-encoding check on the OUTER structure. The protected header
-    # rides along as an opaque bstr here, so this does NOT constrain its inner
-    # key ordering; it rejects indefinite-length, non-minimal ints, and a
-    # non-canonical unprotected map — the malleability surface.
-    try:
-        recanonical = cbor2.dumps(value, canonical=True)
-    except Exception as exc:  # noqa: BLE001
-        raise CoseError(f"COSE message could not be re-encoded: {exc}") from exc
-    if recanonical != data:
-        raise CoseError(
-            "non-deterministic COSE encoding (indefinite-length, non-minimal, "
-            "or non-canonical) — rejected as malleable"
-        )
-
+    value = _strict_decode_item(data, "the COSE_Sign1 message")
     if not isinstance(value, cbor2.CBORTag):
         raise CoseError("top-level value is not a CBOR tag; expected COSE_Sign1 (tag 18)")
 
-    # Duplicate-key / indefinite check on the protected header, which the outer
-    # canonical check cannot see inside (it is an opaque bstr there).
+    # The protected header is an opaque bstr at the outer level, so re-validate
+    # its inner CBOR under the same strict rules (catches a duplicate key or
+    # indefinite/non-minimal encoding inside the signed header, and rejects a
+    # pathologically nested protected header before any downstream decode can
+    # raise on it).
     if isinstance(value.value, (list, tuple)) and len(value.value) == 4:
         prot = value.value[0]
         if isinstance(prot, (bytes, bytearray)) and prot:
-            count = _read_definite_map_count(bytes(prot))
-            if count == -1:
-                raise CoseError("protected header uses indefinite-length encoding — rejected")
-            if count is not None:
-                try:
-                    decoded = cbor2.loads(bytes(prot))
-                except Exception as exc:  # noqa: BLE001
-                    raise CoseError(f"protected header is not valid CBOR: {exc}") from exc
-                if isinstance(decoded, dict) and len(decoded) != count:
-                    raise CoseError(
-                        "duplicate keys in the protected header — rejected "
-                        "(ambiguous algorithm/claims; last-wins is a cross-impl split)"
-                    )
+            _strict_decode_item(bytes(prot), "the protected header")
     return value
 
 
@@ -326,7 +299,13 @@ def verify_sign1(
         raise CoseError("protected header must be a bstr-wrapped map")
     protected_bstr = bytes(protected_bstr)
     if protected_bstr:
-        protected = _plain(cbor2.loads(protected_bstr))
+        # strict_decode (called via _decode_envelope) has already validated the
+        # protected bstr's inner CBOR; this decode is wrapped anyway so no parser
+        # exception can escape the documented contract on any path.
+        try:
+            protected = _plain(cbor2.loads(protected_bstr))
+        except Exception as exc:  # noqa: BLE001
+            raise CoseError(f"protected header is not valid CBOR ({type(exc).__name__})") from exc
         if not isinstance(protected, dict):
             raise CoseError("decoded protected header is not a map")
     else:

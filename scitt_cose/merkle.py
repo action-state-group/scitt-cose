@@ -24,12 +24,14 @@ _LEAF_PREFIX = b"\x00"
 _NODE_PREFIX = b"\x01"
 
 #: Largest tree size a verifier will entertain from an attacker-supplied proof.
-#: 2**63 keeps the inclusion-proof depth (and therefore the fold's recursion
-#: depth) at most 63, well under any interpreter/stack limit, and matches the
-#: int64 ceiling of the cross-language Go verifier so the two agree on rejection.
-#: No real transparency log approaches this; it exists purely to bound the cost
-#: of a hostile proof before any hashing/recursion happens.
-MAX_TREE_SIZE = 1 << 63
+#: 2**62 is the largest power of two that is representable as a positive int64
+#: (max 2**63 - 1), so the Python and the cross-language Go verifier share the
+#: EXACT same ceiling and agree on accept/reject for every tree_size — there is
+#: no band one accepts and the other cannot represent. It keeps the inclusion-
+#: proof depth (and the fold's recursion depth) at most 62, well under any stack
+#: limit. No real transparency log approaches this; it exists purely to bound the
+#: cost of a hostile proof before any hashing/recursion happens.
+MAX_TREE_SIZE = 1 << 62
 
 
 def _leaf_hash_bytes(entry: bytes) -> bytes:

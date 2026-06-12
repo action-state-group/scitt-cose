@@ -295,10 +295,12 @@ func nodeHash(left, right []byte) []byte {
 	return h[:]
 }
 
-// maxTreeSize bounds an attacker-supplied tree_size. 2^62 keeps every interim
-// value (k, k*2) within int64 with no overflow, matches the Python verifier's
-// rejection ceiling, and is astronomically larger than any real log. A proof
-// claiming more is rejected before the Merkle fold runs.
+// maxTreeSize bounds an attacker-supplied tree_size. 2^62 is the largest power
+// of two representable as a positive int64, so it is the EXACT same ceiling the
+// Python verifier uses (MAX_TREE_SIZE) — the two agree on accept/reject for
+// every tree_size, with no band one accepts and the other cannot represent. It
+// also keeps every interim value (k, k*2) within int64. A proof claiming more is
+// rejected before the Merkle fold runs.
 const maxTreeSize int64 = 1 << 62
 
 func largestPow2Below(n int64) int64 {

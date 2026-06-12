@@ -271,3 +271,44 @@ The hosted reference server (`scitt-cose-serve`) remains a demo: deployments
 should sit behind an edge with TLS, a hard request timeout, and rate limiting
 (see `docs/hosted-verifier-design.md`). The library enforces the message-size
 cap and bounded per-request cost that make that edge sufficient.
+
+# Review round 2 (post-fix re-review)
+
+A second multi-angle review of the fix branch surfaced four issues, all now
+fixed; the differential fuzzer gained a mutator that would catch the cross-impl
+one if it ever regresses.
+
+- **R1 (false reject, high) — `strict_decode` rejected validly-signed messages
+  with a non-canonically *ordered* unprotected header.** The first cut compared
+  the outer encoding byte-for-byte against its canonical form, which also
+  enforced map-key *ordering* — but COSE does not require deterministic ordering
+  of the unsigned unprotected header, so a legitimate multi-key unprotected map
+  (e.g. `{394: receipts, 4: kid}` emitted in that order) was wrongly rejected.
+  Fix: the strict check now keys on encoded **length**, which a re-ordering of a
+  unique-key map leaves unchanged, while indefinite-length, non-minimal, and
+  duplicate-key encodings (which always change the length) are still rejected.
+  The same strict check is applied to the protected bstr's inner CBOR, so
+  duplicate keys at *any* depth (incl. inside the CWT claims map) and trailing
+  bytes inside the signed header are caught too.
+- **R2 (contract leak, high) — `parse_signed_statement` could still raise.** A
+  pathologically nested protected header reached an unwrapped `cbor2.loads` in
+  `verify_sign1` and raised `CBORDecodeError`. `strict_decode` now decodes the
+  protected bstr (rejecting the nesting cleanly), and the downstream decode is
+  wrapped regardless — no public verifier leaks a non-`CoseError` on any path.
+- **R3 (cross-impl divergence, med) — the Python and Go tree-size ceilings
+  differed (2^63 vs 2^62).** A `tree_size` in `(2^62, 2^63]` with a correctly
+  sized path was accepted by Python and rejected by Go (un-representable as a
+  positive int64). Both ceilings are now `2^62` — the largest power of two an
+  int64 can hold — so the two runtimes agree for every input. A new fuzzer
+  mutator (`_struct_oversize_tree`) builds a correctly-sized path at an oversize
+  tree to exercise the ceiling, so future drift between the two is caught by the
+  `fuzz` job, not just a unit test.
+- **L1 follow-up (low) — one receipt error still interpolated a raw `cbor2`
+  exception string** into the response; it now uses `type(exc).__name__` like
+  the rest of the path. The conformance runner also regained its
+  verified-payload-vs-`payload.bin` check (lost in the contract refactor).
+
+After these, the Security Considerations above are unchanged: nested duplicate
+keys and non-minimal encodings inside the protected header are now **rejected**
+(not accepted), so they are no longer caveats — only the ES256 high-`s` item
+and the header-driven-alg note remain consciously accepted.

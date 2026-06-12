@@ -205,8 +205,8 @@ def verify_receipt(
     unprotected = _plain(unprotected)
     try:
         protected = _plain(cbor2.loads(protected_bstr)) if protected_bstr else {}
-    except Exception as exc:  # noqa: BLE001
-        result.errors.append(f"protected header is not valid CBOR: {exc}")
+    except Exception as exc:  # noqa: BLE001 - name only, never echo input bytes
+        result.errors.append(f"protected header is not valid CBOR ({type(exc).__name__})")
         return result
     if not isinstance(protected, dict):
         result.errors.append("protected header is not a map")

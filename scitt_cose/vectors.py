@@ -66,17 +66,25 @@ def check_vector(vector_dir: Path, expected: dict) -> list[str]:
             f"{parsed.get('signature_verified')} != expected "
             f"{expected['statement_signature_valid']}{detail}"
         )
-    if parse_error is None:
-        # Decoded protected-header fields are part of the published contract and
-        # are present whether or not the signature verified. They are surfaced as
-        # authenticated values only when the signature is good; otherwise the
-        # library fences them under `unverified` so a caller cannot mistake an
-        # unverified claim for a signed one. Read from whichever applies.
-        src = parsed if parsed.get("signature_verified") is True else (parsed.get("unverified") or {})
+    # Decoded protected-header fields are part of the published contract and are
+    # present whether or not the signature verified. They are surfaced as
+    # authenticated values only when the signature is good; otherwise the library
+    # fences them under `unverified` so a caller cannot mistake an unverified
+    # claim for a signed one. Read from whichever applies — but only when the
+    # envelope actually decoded (verified, or `unverified` populated). A vector
+    # whose statement is structurally malformed has neither, and its header
+    # fields are simply not comparable.
+    verified = parsed.get("signature_verified") is True
+    src = parsed if verified else parsed.get("unverified")
+    if src is not None:
         for field, key in (("alg", "alg"), ("issuer", "issuer"),
                            ("subject", "subject"), ("content_type", "content_type")):
             if src.get(field) != exp_stmt[key]:
                 mismatches.append(f"statement {field}={src.get(field)!r} != {exp_stmt[key]!r}")
+        # For a verified statement the authenticated payload must match the
+        # committed payload.bin (the signature covers these exact bytes).
+        if verified and parsed.get("payload") is not None and parsed["payload"] != payload:
+            mismatches.append("verified statement payload differs from payload.bin")
 
     # 4. Receipt: verdict, and for valid receipts the reconstructed root must
     #    equal the published one (clean-room agreement on the Merkle fold).

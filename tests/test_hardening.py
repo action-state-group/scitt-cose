@@ -27,7 +27,11 @@ from scitt_cose.cose_sign1 import (
     CoseError,
     strict_decode,
 )
-from scitt_cose.merkle import MAX_TREE_SIZE, root_from_inclusion_proof
+from scitt_cose.merkle import (
+    MAX_TREE_SIZE,
+    _expected_inclusion_path_len,
+    root_from_inclusion_proof,
+)
 from scitt_cose.receipt import HDR_VDP, HDR_VDS, VDP_INCLUSION_PROOFS
 
 
@@ -209,3 +213,69 @@ def test_m3_identity_authenticated_when_verified(signed_statement):
 def test_message_size_cap():
     with pytest.raises(CoseError, match="too large"):
         strict_decode(b"\x00" * (MAX_MESSAGE_BYTES + 1))
+
+
+# --- review round 2: strict_decode must be order-tolerant (no false reject) ---
+
+
+def _sign(priv, protected_bstr, payload):
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    key = load_pem_private_key(priv, password=None)
+    assert isinstance(key, ed25519.Ed25519PrivateKey)
+    from scitt_cose.cose_sign1 import _sig_structure
+    return key.sign(_sig_structure(protected_bstr, payload))
+
+
+def test_multikey_unprotected_noncanonical_order_accepted(eddsa_keys):
+    """R1: a validly-signed statement whose unprotected header has multiple keys
+    in non-canonical ORDER must still verify — COSE does not require deterministic
+    ordering of the (unsigned) unprotected header. Only dup/indefinite/non-minimal
+    are malleable, and those change the encoded length; reordering does not."""
+    priv, pub = eddsa_keys
+    prot = cbor2.dumps({HDR_ALG: -8, 3: "application/json", 15: {1: "iss", 2: "sub"}})
+    sig = _sign(priv, prot, b"payload")
+    # unprotected map emitted with keys 394 BEFORE 4 (not canonical order)
+    msg = b"\xd2\x84" + cbor2.dumps(prot) + cbor2.dumps({394: [b"r"], 4: b"kid"}) \
+        + cbor2.dumps(b"payload") + cbor2.dumps(sig)
+    strict_decode(msg)  # must not raise
+    assert parse_signed_statement(msg, public_key_pem=pub)["signature_verified"] is True
+
+
+def test_duplicate_unprotected_key_rejected(eddsa_keys):
+    priv, _pub = eddsa_keys
+    prot = cbor2.dumps({HDR_ALG: -8})
+    sig = _sign(priv, prot, b"p")
+    dup = b"\xd2\x84" + cbor2.dumps(prot) + b"\xa2\x04\x41a\x04\x41b" + cbor2.dumps(b"p") + cbor2.dumps(sig)
+    with pytest.raises(CoseError):
+        strict_decode(dup)
+
+
+def test_nested_duplicate_key_in_protected_rejected():
+    """R6: duplicate keys inside a nested map in the protected header (e.g. two
+    'iss' in the CWT claims map) are rejected, not silently last-wins."""
+    nested_dup_protected = b"\xa1\x0f\xa2\x01aa\x01ab"  # {15: {1:"a", 1:"b"}}
+    msg = b"\xd2\x84" + cbor2.dumps(nested_dup_protected) + cbor2.dumps({}) \
+        + cbor2.dumps(b"p") + cbor2.dumps(b"s")
+    with pytest.raises(CoseError):
+        strict_decode(msg)
+
+
+def test_deeply_nested_protected_no_raise(eddsa_keys):
+    """R2: a pathologically nested protected header must be a clean reject
+    (signature_verified=False), never a leaked CBORDecodeError/RecursionError."""
+    _priv, pub = eddsa_keys
+    deep = cbor2.dumps(cbor2.CBORTag(18, [b"\x81" * 450 + b"\x00", {}, b"p", b"s"]))
+    assert parse_signed_statement(deep, public_key_pem=pub)["signature_verified"] is False
+    assert parse_signed_statement(deep)["signature_verified"] is None
+
+
+def test_r3_tree_size_ceiling_band_rejected():
+    """R3: tree_size in (2^62, 2^63] is rejected — the Python ceiling matches the
+    int64-representable Go ceiling exactly, so the two runtimes never disagree on
+    a tree_size one accepts and the other cannot represent."""
+    assert MAX_TREE_SIZE == 1 << 62
+    n = _expected_inclusion_path_len(1 << 62, 0)  # bounded depth
+    # A correctly-sized path for 2^63-1 (above the ceiling) must still be rejected.
+    assert root_from_inclusion_proof("de" * 32, 0, 2**63 - 1, ["00" * 32] * n) is None
+    assert root_from_inclusion_proof("de" * 32, 0, (1 << 62) + 1, ["00" * 32] * n) is None
