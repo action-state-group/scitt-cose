@@ -43,8 +43,8 @@ from scitt_cose import (  # noqa: E402
     merkle_root,
 )
 from scitt_cose.cose_sign1 import sign_sign1  # noqa: E402
-from scitt_cose.receipt import HDR_VDP, HDR_VDS, VDP_INCLUSION_PROOFS, verify_receipt  # noqa: E402
-from scitt_cose.statement import parse_signed_statement  # noqa: E402
+from scitt_cose.receipt import HDR_VDP, HDR_VDS, VDP_INCLUSION_PROOFS  # noqa: E402
+from scitt_cose.vectors import check_vector  # noqa: E402
 
 VERSION = "v1"
 TREE_SIZE = 8
@@ -88,8 +88,13 @@ def _flip_byte(data: bytes, offset: int = 0) -> bytes:
     return bytes(b)
 
 
-def _mint(vector_id: str, alg: str) -> dict:
-    """Mint one self-contained set of artifacts (keys, statement, log, receipt)."""
+def _mint(vector_id: str, alg: str, transform_statement=None) -> dict:
+    """Mint one self-contained set of artifacts (keys, statement, log, receipt).
+
+    ``transform_statement`` (bytes -> bytes), when given, is applied to the
+    statement BEFORE the tree is built — so the log registers exactly the bytes
+    that ship (e.g. a tampered statement for a negative vector).
+    """
     issuer_priv, issuer_pub = _keys(alg)
     log_priv, log_pub = _keys(alg)
     payload = json.dumps(
@@ -107,6 +112,8 @@ def _mint(vector_id: str, alg: str) -> dict:
         subject=f"urn:scitt-cose:test-vectors:v1:{vector_id}",
         content_type="application/json",
     )
+    if transform_statement is not None:
+        statement = transform_statement(statement)
     entries = _tree_entries(vector_id, statement)
     leaf = entries[LEAF_INDEX]
     receipt = build_receipt(
@@ -203,7 +210,10 @@ def _expected(vector_id: str, description: str, minted: dict, *, result: str,
         "leaf_index": LEAF_INDEX,
         "tree_size": TREE_SIZE,
         "inclusion_path": inclusion_path if inclusion_path is not None else minted["path"],
-        "reconstructed_root": minted["root"] if result == "VALID" else None,
+        # The root is reconstructable exactly when the receipt verifies — a
+        # statement-side failure does not stop a correct implementation from
+        # reconstructing and agreeing on the root.
+        "reconstructed_root": minted["root"] if receipt_valid else None,
         "statement_signature_valid": statement_sig_valid,
         "receipt_valid": receipt_valid,
         "result": result,
@@ -287,71 +297,54 @@ def main() -> int:
     desc = ("Signed Statement whose signature byte was flipped. The receipt is "
             "minted over the digest of the TAMPERED bytes and verifies — isolating "
             "the failure to the statement signature alone.")
-    alg = "EdDSA"
-    issuer_priv, issuer_pub = _keys(alg)
-    log_priv, log_pub = _keys(alg)
-    payload = json.dumps({"vector": vid, "note": "opaque payload"}, sort_keys=True).encode()
-    good = build_signed_statement(
-        payload, alg=alg, private_key_pem=issuer_priv,
-        issuer="https://test-vectors.scitt-cose.invalid",
-        subject=f"urn:scitt-cose:test-vectors:v1:{vid}",
-        content_type="application/json",
-    )
-    tampered_stmt = _tamper_signature(good)
-    entries = _tree_entries(vid, tampered_stmt)  # log registered the tampered bytes
-    m = {
-        "alg": alg, "issuer_priv": issuer_priv, "issuer_pub": issuer_pub,
-        "log_priv": log_priv, "log_pub": log_pub, "payload": payload,
-        "entries": entries, "leaf": entries[LEAF_INDEX],
-        "path": inclusion_proof(entries, LEAF_INDEX), "root": merkle_root(entries),
-    }
-    receipt = build_receipt(
-        leaf_entry_hex=m["leaf"], leaf_index=LEAF_INDEX, tree_entries_hex=entries,
-        alg=alg, log_private_key_pem=log_priv,
-    )
+    # The log registered the TAMPERED bytes (transform applied before the tree).
+    m = _mint(vid, "EdDSA", transform_statement=_tamper_signature)
     exp = _expected(vid, desc, m, result="INVALID", failure_code="BAD_STATEMENT_SIGNATURE",
                     statement_sig_valid=False, receipt_valid=True)
-    # receipt_valid is true here, so the root IS reconstructable — document it.
-    exp["reconstructed_root"] = m["root"]
-    _write_vector(vid, m, tampered_stmt, receipt, exp)
+    _write_vector(vid, m, m["statement"], m["receipt"], exp)
     register(vid, desc, exp)
 
-    # --- manifest ------------------------------------------------------------
-    manifest = {
-        "version": VERSION,
-        "stability": "append-only",
-        "leaf_entry_definition": (
-            "SHA-256 digest of the complete Signed Statement (COSE_Sign1) bytes, hex-encoded"
-        ),
-        "tree_construction": (
-            f"tree_size={TREE_SIZE}; statement digest at leaf_index={LEAF_INDEX}; "
-            "filler leaf i = SHA-256('scitt-cose test vectors v1 :: <vector-id> :: "
-            "filler leaf <i>'); leaves in index order; RFC 9162 SHA-256 tree"
-        ),
-        "vectors": manifest_vectors,
-    }
-    (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    # --- manifest: MERGE into the existing index (append-only, never replace) -
+    manifest_path = OUT / "manifest.json"
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text())
+        existing_ids = {v["id"] for v in manifest["vectors"]}
+        dupes = existing_ids & {v["id"] for v in manifest_vectors}
+        if dupes:
+            print(f"refusing to overwrite existing manifest entries: {sorted(dupes)}")
+            return 1
+        manifest["vectors"].extend(manifest_vectors)
+    else:
+        manifest = {
+            "version": VERSION,
+            "stability": "append-only",
+            "leaf_entry_definition": (
+                "SHA-256 digest of the complete Signed Statement (COSE_Sign1) bytes, hex-encoded"
+            ),
+            "tree_construction": (
+                f"tree_size={TREE_SIZE}; statement digest at leaf_index={LEAF_INDEX}; "
+                "filler leaf i = SHA-256('scitt-cose test vectors v1 :: <vector-id> :: "
+                "filler leaf <i>'); leaves in index order; RFC 9162 SHA-256 tree"
+            ),
+            "vectors": manifest_vectors,
+        }
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
-    # --- sanity: every vector must behave as expected before we commit ------
+    # --- SHA256SUMS: append digests of the new frozen bytes (CI enforces) ----
+    sums_path = OUT / "SHA256SUMS"
+    lines = sums_path.read_text().splitlines() if sums_path.is_file() else []
+    for v in manifest_vectors:
+        for f in sorted((OUT / v["dir"]).iterdir()):
+            digest = hashlib.sha256(f.read_bytes()).hexdigest()
+            lines.append(f"{digest}  {f.relative_to(OUT)}")
+    sums_path.write_text("\n".join(lines) + "\n")
+
+    # --- self-check: the REAL runner must pass every freshly minted vector ---
     failures = []
     for v in manifest_vectors:
         d = OUT / v["dir"]
         exp = json.loads((d / "expected.json").read_text())
-        parsed = parse_signed_statement(
-            (d / "statement.cose").read_bytes(),
-            public_key_pem=(d / "issuer-key.pub").read_bytes(),
-        )
-        if parsed["signature_verified"] is not exp["statement_signature_valid"]:
-            failures.append(f"{v['id']}: statement sig mismatch")
-        res = verify_receipt(
-            (d / "receipt.cose").read_bytes(),
-            leaf_entry_hex=exp["leaf_entry"],
-            log_public_key_pem=(d / "log-key.pub").read_bytes(),
-        )
-        if res.ok is not exp["receipt_valid"]:
-            failures.append(f"{v['id']}: receipt mismatch ({res.errors})")
-        if exp["receipt_valid"] and res.root != exp["reconstructed_root"]:
-            failures.append(f"{v['id']}: root mismatch")
+        failures.extend(f"{v['id']}: {m}" for m in check_vector(d, exp))
     if failures:
         print("GENERATION FAILED SELF-CHECK:", *failures, sep="\n  ")
         return 1

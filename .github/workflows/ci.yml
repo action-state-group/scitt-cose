@@ -76,10 +76,17 @@ jobs:
         with:
           go-version: stable
           cache: false
+      - name: Published vector bytes are immutable (append-only promise, enforced)
+        working-directory: test-vectors
+        run: sha256sum -c SHA256SUMS
       - name: Install (runtime deps only — the vector path needs nothing else)
         run: pip install .
       - name: Python runner — full manifest, exit nonzero on any mismatch
-        run: python -m scitt_cose.vectors
+        # Run from outside the checkout so the INSTALLED package is what runs
+        # (from the repo root, the source tree would shadow site-packages and
+        # a packaging regression could never be caught here).
+        working-directory: ${{ runner.temp }}
+        run: python -m scitt_cose.vectors "$GITHUB_WORKSPACE/test-vectors"
       - name: Go clean-room runner — same manifest, same files
         working-directory: scitt-cose-go-verify
         run: go test ./... -run TestVectors -v

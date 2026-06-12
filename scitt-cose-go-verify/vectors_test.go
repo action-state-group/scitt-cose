@@ -12,6 +12,9 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -48,6 +51,7 @@ type expected struct {
 	StatementSigValid bool   `json:"statement_signature_valid"`
 	ReceiptValid      bool   `json:"receipt_valid"`
 	Result            string `json:"result"`
+	FailureCode       string `json:"failure_code"`
 }
 
 var binaryPath string
@@ -57,26 +61,43 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(dir)
 	binaryPath = filepath.Join(dir, "scitt-cose-go-verify")
 	build := exec.Command("go", "build", "-o", binaryPath, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
+		os.RemoveAll(dir)
 		panic("go build failed: " + err.Error())
 	}
-	os.Exit(m.Run())
+	// os.Exit skips deferred calls, so clean up explicitly before exiting.
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // runBinary executes the verifier CLI; the verdict is in the JSON on stdout
 // (non-zero exit is EXPECTED for invalid artifacts, so it is not an error).
 func runBinary(t *testing.T, args ...string) result {
 	t.Helper()
-	out, _ := exec.Command(binaryPath, args...).Output()
+	cmd := exec.Command(binaryPath, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, _ := cmd.Output()
 	var r result
 	if err := json.Unmarshal(out, &r); err != nil {
-		t.Fatalf("binary did not print JSON (args %v): %v\noutput: %s", args, err, out)
+		t.Fatalf("binary did not print JSON (args %v): %v\nstdout: %s\nstderr: %s",
+			args, err, out, stderr.String())
 	}
 	return r
+}
+
+func sha256Hex(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func TestVectors(t *testing.T) {
@@ -105,6 +126,27 @@ func TestVectors(t *testing.T) {
 				t.Fatalf("parse expected.json: %v", err)
 			}
 
+			// The manifest is the advertised machine-readable index — it must
+			// never drift from the expected.json it points at.
+			if v.ExpectedResult != exp.Result {
+				t.Errorf("manifest expected_result=%q != expected.json result=%q",
+					v.ExpectedResult, exp.Result)
+			}
+			if v.FailureCode != exp.FailureCode {
+				t.Errorf("manifest failure_code=%q != expected.json failure_code=%q",
+					v.FailureCode, exp.FailureCode)
+			}
+
+			// Committed bytes pinned by digest, and the statement<->tree
+			// binding (leaf = SHA-256 of the full statement bytes) checked
+			// here too — same coverage as the Python runner.
+			if got := sha256Hex(t, filepath.Join(dir, "payload.bin")); got != exp.PayloadSHA256 {
+				t.Errorf("payload sha256 %s != expected %s", got, exp.PayloadSHA256)
+			}
+			if got := sha256Hex(t, filepath.Join(dir, "statement.cose")); got != exp.LeafEntry {
+				t.Errorf("leaf_entry %s is not SHA-256(statement.cose) (%s)", exp.LeafEntry, got)
+			}
+
 			// --- Statement-only run -----------------------------------------
 			stmt := runBinary(t,
 				"--statement", filepath.Join(dir, "statement.cose"),
@@ -112,19 +154,26 @@ func TestVectors(t *testing.T) {
 				"--alg", exp.ProtectedHeader.Statement.Alg,
 			)
 			if stmt.Valid != exp.StatementSigValid {
-				t.Errorf("statement valid=%v, expected %v (a negative vector that verifies is a FAIL)",
-					stmt.Valid, exp.StatementSigValid)
+				t.Errorf("statement valid=%v (%s), expected %v (a negative vector that verifies is a FAIL)",
+					stmt.Valid, stmt.Error, exp.StatementSigValid)
 			}
-			// Decoded protected-header agreement (only meaningful when parsed).
-			if stmt.Iss != exp.ProtectedHeader.Statement.Issuer {
-				t.Errorf("iss=%q, expected %q", stmt.Iss, exp.ProtectedHeader.Statement.Issuer)
-			}
-			if stmt.Sub != exp.ProtectedHeader.Statement.Subject {
-				t.Errorf("sub=%q, expected %q", stmt.Sub, exp.ProtectedHeader.Statement.Subject)
-			}
-			if stmt.ContentType != exp.ProtectedHeader.Statement.ContentType {
-				t.Errorf("content_type=%q, expected %q",
-					stmt.ContentType, exp.ProtectedHeader.Statement.ContentType)
+			// Decoded protected-header agreement — only when the envelope
+			// decoded (Iss set). On a structural parse failure the binary
+			// emits empty fields and the verdict check above carries the
+			// error; comparing empties would bury the root cause.
+			if stmt.Iss != "" || stmt.Valid {
+				if stmt.Iss != exp.ProtectedHeader.Statement.Issuer {
+					t.Errorf("iss=%q, expected %q", stmt.Iss, exp.ProtectedHeader.Statement.Issuer)
+				}
+				if stmt.Sub != exp.ProtectedHeader.Statement.Subject {
+					t.Errorf("sub=%q, expected %q", stmt.Sub, exp.ProtectedHeader.Statement.Subject)
+				}
+				if stmt.ContentType != exp.ProtectedHeader.Statement.ContentType {
+					t.Errorf("content_type=%q, expected %q",
+						stmt.ContentType, exp.ProtectedHeader.Statement.ContentType)
+				}
+			} else if stmt.Error != "" {
+				t.Logf("statement did not decode: %s", stmt.Error)
 			}
 
 			// --- Receipt-only run -------------------------------------------

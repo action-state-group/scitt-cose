@@ -43,26 +43,41 @@ def check_vector(vector_dir: Path, expected: dict) -> list[str]:
     if digest != expected["payload_sha256"]:
         mismatches.append(f"payload sha256 {digest} != expected {expected['payload_sha256']}")
 
-    # 2. Statement: signature verdict + every decoded protected-header field.
+    # 2. The statement<->tree binding is part of the contract, not just prose:
+    #    the log's leaf entry must be the SHA-256 of the full statement bytes.
+    leaf = hashlib.sha256(statement).hexdigest()
+    if leaf != expected["leaf_entry"]:
+        mismatches.append(
+            f"leaf_entry {expected['leaf_entry']} is not SHA-256(statement.cose) ({leaf})"
+        )
+
+    # 3. Statement: signature verdict + every decoded protected-header field.
     exp_stmt = expected["protected_header"]["statement"]
+    parse_error: str | None = None
     try:
         parsed = parse_signed_statement(statement, public_key_pem=issuer_pub)
     except Exception as exc:  # noqa: BLE001 - a vector must never crash the runner
-        parsed = {"signature_verified": False, "_error": str(exc)}
+        parsed = {"signature_verified": False}
+        parse_error = f"{type(exc).__name__}: {exc}"
     if parsed.get("signature_verified") is not expected["statement_signature_valid"]:
+        detail = f" (parse error: {parse_error})" if parse_error else ""
         mismatches.append(
             "statement signature_verified="
             f"{parsed.get('signature_verified')} != expected "
-            f"{expected['statement_signature_valid']}"
+            f"{expected['statement_signature_valid']}{detail}"
         )
-    for field, key in (("alg", "alg"), ("issuer", "issuer"),
-                       ("subject", "subject"), ("content_type", "content_type")):
-        if parsed.get(field) != exp_stmt[key]:
-            mismatches.append(f"statement {field}={parsed.get(field)!r} != {exp_stmt[key]!r}")
-    if statement != payload and parsed.get("payload") not in (None, payload):
-        mismatches.append("statement embedded payload differs from payload.bin")
+    if parse_error is None:
+        # Header fields are only comparable when the envelope decoded; on a
+        # parse failure the verdict check above already carries the error.
+        for field, key in (("alg", "alg"), ("issuer", "issuer"),
+                           ("subject", "subject"), ("content_type", "content_type")):
+            if parsed.get(field) != exp_stmt[key]:
+                mismatches.append(f"statement {field}={parsed.get(field)!r} != {exp_stmt[key]!r}")
+        embedded = parsed.get("payload")
+        if embedded is not None and embedded != payload:
+            mismatches.append("statement embedded payload differs from payload.bin")
 
-    # 3. Receipt: verdict, and for valid receipts the reconstructed root must
+    # 4. Receipt: verdict, and for valid receipts the reconstructed root must
     #    equal the published one (clean-room agreement on the Merkle fold).
     res = verify_receipt(receipt, leaf_entry_hex=expected["leaf_entry"],
                          log_public_key_pem=log_pub)
@@ -83,7 +98,7 @@ def check_vector(vector_dir: Path, expected: dict) -> list[str]:
                 f"{expected['tree_size']}/{expected['leaf_index']}"
             )
 
-    # 4. Overall result must agree (a negative vector that verifies is a FAIL).
+    # 5. Overall result must agree (a negative vector that verifies is a FAIL).
     overall_valid = (
         parsed.get("signature_verified") is True and res.ok
     )
@@ -105,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
         "vectors_dir", nargs="?", default="test-vectors",
         help="path to the test-vectors directory (default: ./test-vectors)",
     )
+    parser.add_argument(
+        "--json", action="store_true",
+        help="emit a machine-readable JSON report instead of the table",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.vectors_dir)
@@ -114,21 +133,50 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     manifest = json.loads(manifest_path.read_text())
 
-    width = max(len(v["id"]) for v in manifest["vectors"]) + 2
-    print(f"scitt-cose test vectors {manifest['version']} "
-          f"(stability: {manifest['stability']}) — {len(manifest['vectors'])} vectors\n")
-    failed = 0
+    report = []
     for v in manifest["vectors"]:
         vector_dir = root / v["dir"]
         expected = json.loads((vector_dir / "expected.json").read_text())
         mismatches = check_vector(vector_dir, expected)
-        status = "PASS" if not mismatches else "FAIL"
-        code = expected.get("failure_code", "")
-        label = f"[{expected['result']}{' / ' + code if code else ''}]"
-        print(f"  {status}  {v['id']:<{width}} {label}")
-        for m in mismatches:
+        # The manifest is the advertised machine-readable index — it must never
+        # drift from the per-vector expected.json it points at.
+        if v["expected_result"] != expected["result"]:
+            mismatches.append(
+                f"manifest expected_result={v['expected_result']} != "
+                f"expected.json result={expected['result']}"
+            )
+        if v.get("failure_code") != expected.get("failure_code"):
+            mismatches.append(
+                f"manifest failure_code={v.get('failure_code')} != "
+                f"expected.json failure_code={expected.get('failure_code')}"
+            )
+        report.append({
+            "id": v["id"],
+            "status": "PASS" if not mismatches else "FAIL",
+            "expected_result": expected["result"],
+            "failure_code": expected.get("failure_code"),
+            "mismatches": mismatches,
+        })
+
+    failed = sum(len(r["mismatches"]) for r in report)
+
+    if args.json:
+        print(json.dumps({
+            "version": manifest["version"],
+            "pass": failed == 0,
+            "vectors": report,
+        }, indent=2))
+        return 1 if failed else 0
+
+    width = max(len(r["id"]) for r in report) + 2
+    print(f"scitt-cose test vectors {manifest['version']} "
+          f"(stability: {manifest['stability']}) — {len(report)} vectors\n")
+    for r in report:
+        code = r["failure_code"]
+        label = f"[{r['expected_result']}{' / ' + code if code else ''}]"
+        print(f"  {r['status']}  {r['id']:<{width}} {label}")
+        for m in r["mismatches"]:
             print(f"        - {m}")
-            failed += 1
 
     print()
     if failed:

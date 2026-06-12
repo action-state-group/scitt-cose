@@ -35,6 +35,31 @@ def test_manifest_is_append_only_and_complete():
             assert v.get("failure_code"), f"{v['id']}: INVALID vector needs failure_code"
 
 
+def test_published_bytes_match_sha256sums():
+    """The append-only promise, enforced: every published file's digest matches
+    SHA256SUMS, and every file under a published version directory is listed
+    (so additions must extend SHA256SUMS and mutations fail loudly)."""
+    import hashlib
+
+    sums_path = VECTORS / "SHA256SUMS"
+    listed = {}
+    for line in sums_path.read_text().splitlines():
+        digest, _, rel = line.partition("  ")
+        listed[rel] = digest
+    assert listed, "SHA256SUMS is empty"
+
+    for rel, digest in listed.items():
+        actual = hashlib.sha256((VECTORS / rel).read_bytes()).hexdigest()
+        assert actual == digest, f"published bytes mutated: {rel}"
+
+    on_disk = {
+        str(p.relative_to(VECTORS))
+        for p in VECTORS.glob("v*/**/*") if p.is_file()
+    }
+    unlisted = on_disk - set(listed)
+    assert not unlisted, f"published files missing from SHA256SUMS: {sorted(unlisted)}"
+
+
 def test_every_vector_passes():
     manifest = json.loads((VECTORS / "manifest.json").read_text())
     for v in manifest["vectors"]:

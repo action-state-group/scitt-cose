@@ -378,12 +378,15 @@ git clone https://github.com/action-state-group/scitt-cose
 cd scitt-cose && pip install -e . && python -m scitt_cose.vectors
 ```
 
-or from the published package: `pip install scitt-cose`, download
-`test-vectors/`, then `python -m scitt_cose.vectors path/to/test-vectors`. The
-Go clean-room implementation runs the same manifest (`go test ./...` in
-`scitt-cose-go-verify/`). A mismatch against your implementation is exactly
-the report we want — please open an issue. Details and the stability promise:
-[`test-vectors/README.md`](test-vectors/README.md).
+or from the published package (the runner ships in **scitt-cose ≥ 0.1.0**):
+`pip install "scitt-cose>=0.1.0"`, download `test-vectors/`, then
+`python -m scitt_cose.vectors path/to/test-vectors` (add `--json` for a
+machine-readable report). The Go clean-room implementation runs the same
+manifest (`go test ./...` in `scitt-cose-go-verify/`). The append-only promise
+is enforced, not just stated: `test-vectors/SHA256SUMS` pins every published
+byte and CI fails on any mutation. A mismatch against your implementation is
+exactly the report we want — please open an issue. Details and the stability
+promise: [`test-vectors/README.md`](test-vectors/README.md).
 
 ## Tests
 

@@ -17,6 +17,12 @@ values are never mutated. Corrections or additions ship as *new* vectors (or a
 new version directory) plus a note in `manifest.json` — never as edits to
 existing files. You can pin this directory and your pin will stay valid.
 
+The promise is **enforced, not just stated**: [`SHA256SUMS`](SHA256SUMS) pins
+the digest of every published file, CI verifies it (`sha256sum -c SHA256SUMS`)
+on every push, and the test suite additionally checks that every file under a
+published version is listed. New vectors append new lines; existing lines
+never change.
+
 ## One-command verify (clean checkout)
 
 From source:
@@ -26,11 +32,12 @@ git clone https://github.com/action-state-group/scitt-cose
 cd scitt-cose && pip install -e . && python -m scitt_cose.vectors
 ```
 
-From the published package (download this `test-vectors/` directory, then):
+From the published package (the runner ships in **scitt-cose ≥ 0.1.0**;
+download this `test-vectors/` directory, then):
 
 ```bash
-pip install scitt-cose
-python -m scitt_cose.vectors path/to/test-vectors
+pip install "scitt-cose>=0.1.0"
+python -m scitt_cose.vectors path/to/test-vectors          # add --json for machines
 ```
 
 The Go clean-room implementation runs the same manifest:
@@ -46,6 +53,7 @@ unexpectedly verifies. No network access is needed anywhere in the vector path.
 
 ```
 manifest.json          machine-readable index (version, stability, vectors[])
+SHA256SUMS             digest of every published file (CI-enforced immutability)
 v1/<vector-id>/
   statement.cose       COSE_Sign1 Signed Statement bytes
   payload.bin          the statement's payload bytes (opaque)
@@ -93,7 +101,10 @@ rejected).
 * **Leaf entry definition:** the transparency log's leaf entry for a registered
   Signed Statement is the **SHA-256 digest of the complete COSE_Sign1 statement
   bytes** (for `fail-bad-statement-sig`, the digest of the tampered bytes as
-  committed — the log registered what it was given).
+  committed — the log registered what it was given). This is not just prose:
+  both runners recompute the digest from `statement.cose` and assert it equals
+  `expected.json`'s `leaf_entry`, so an implementation that derives the leaf
+  differently fails the suite.
 * **Tree:** RFC 9162 SHA-256 Merkle tree, `tree_size = 8`, leaves in index
   order. The statement's digest sits at `leaf_index = 2`; every other leaf `i`
   is `SHA-256("scitt-cose test vectors v1 :: <vector-id> :: filler leaf <i>")`
