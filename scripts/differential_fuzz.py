@@ -62,6 +62,10 @@ def _load_seeds() -> list[dict]:
             "kind": "statement",
             "bytes": (d / "statement.cose").read_bytes(),
             "pubkey": d / "issuer-key.pub",
+            # Go's statement path selects the verifier from the --alg flag, so it
+            # must match the seed's algorithm (EdDSA vs ES256) — not be hardcoded,
+            # or every ES256 mutant looks like a divergence.
+            "alg": exp["protected_header"]["statement"]["alg"],
         })
         seeds.append({
             "id": d.name,
@@ -227,7 +231,7 @@ def _py_verdict(mutant: Path, seed: dict) -> str:
 def _go_verdict(go_binary: str, mutant: Path, seed: dict) -> str:
     if seed["kind"] == "statement":
         cmd = [go_binary, "--statement", str(mutant),
-               "--pubkey", str(seed["pubkey"]), "--alg", "EdDSA"]
+               "--pubkey", str(seed["pubkey"]), "--alg", seed["alg"]]
     else:
         cmd = [go_binary, "--receipt", str(mutant),
                "--log-pubkey", str(seed["pubkey"]), "--leaf-entry-hex", seed["leaf_entry"]]

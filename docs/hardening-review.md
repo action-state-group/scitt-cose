@@ -211,3 +211,63 @@ Grouped so each can be ruled on independently:
 Each fix should add or flip a regression: removing a `tests/fuzz/baseline.json`
 entry (so a re-introduction fails CI) and/or a targeted negative test under
 `tests/test_negative_conformance.py`.
+
+---
+
+# Resolution (hardening fixes)
+
+All findings above are **fixed** (not merely documented), except the two
+consciously-accepted items in *Security Considerations* below. The standing
+proof is the differential fuzzer's baseline: `tests/fuzz/baseline.json` is now
+**empty** — differential fuzzing across the Python and Go runtimes finds **zero
+known divergences**. Every entry that was once in that baseline was removed by a
+fix; a regression that reintroduces any class fails the `fuzz` CI job.
+
+| id | fix | where | regression |
+|----|-----|-------|------------|
+| H1 | Never coerce an unvalidated decoded value to `bytes`; require bstr inclusion-proof elements; cap the proofs array | `receipt.py` | `test_hardening.py::test_h1_*` |
+| H2 | Overflow-safe `largestPow2Below` + `tree_size` ceiling + explicit expected-depth check | `main.go`, `merkle.py` | `hardening_test.go::TestH2_*` |
+| H3 | Bound `tree_size`/path length before the fold; wrap reconstruct so `verify_receipt` never raises | `merkle.py`, `receipt.py` | `test_hardening.py::test_h3_*` |
+| H4 | `strict_decode`: reject trailing bytes + indefinite/non-deterministic encoding | `cose_sign1.py` | `test_hardening.py::test_h4_*` |
+| M1 | Hosted `valid` is fail-closed: every present component must affirmatively verify | `hosted.py` | `test_hosted_parity.py` |
+| M2 | Reject duplicate protected-header keys in `strict_decode` | `cose_sign1.py` | `test_hardening.py::test_m2_*` |
+| M3 | Identity fields authenticated-only; claimed values fenced under `unverified` | `statement.py` | `test_hardening.py::test_m3_*` |
+| M5 | Explicit `len(path) == expected_depth` check (Python + Go) | `merkle.py`, `main.go` | `test_hardening.py::test_m5_*` |
+| M6 | All decode paths wrapped — no public verifier leaks a non-`CoseError` exception | `statement.py`, `receipt.py` | `test_hardening.py::test_m6_*` |
+| L1 | Receipt errors no longer echo the attacker-supplied `vds` value | `receipt.py` | covered by no-reflection review |
+| L3 | Receipt path advertises `vds` (395) to crit enforcement | `receipt.py` | `_RECEIPT_UNDERSTOOD` |
+
+The error-model contract (the M3/H3/M6 cluster, called out as the explicit
+ruling) is now uniform and documented in the README **Failure contract**
+section and in each public function's docstring: the public verifier entry
+points (`parse_signed_statement`, `verify_receipt`) return a structured result
+and never raise on input; the low-level `verify_sign1` primitive raises
+`CoseError`; no public function ever leaks a parser/`Recursion`/`Memory`/library
+exception.
+
+# Security Considerations (accepted, with rationale)
+
+These are conscious decisions, not oversights. They are documented rather than
+"fixed" because the alternative would reject well-formed, validly-signed input.
+
+- **L2 — ES256 `s`-malleability is accepted.** COSE / RFC 9053 impose no low-`s`
+  requirement, and many conforming ES256 signers emit high-`s` signatures.
+  Enforcing low-`s` would reject a large fraction of legitimate third-party
+  signatures (a verdict change on well-formed input), so we do **not** enforce
+  it. The verifier still rejects `r`/`s` that are zero or out of range (via
+  `cryptography`). Consequence: a COSE_Sign1's 64-byte signature is not
+  byte-unique. Anyone keying idempotency/dedup on the *signature bytes* (rather
+  than on the signed content or the statement's leaf digest) must account for
+  this. The leaf digest — what the transparency log commits to — is over the
+  full statement bytes and is unaffected in practice for the canonical signer.
+
+- **Statement `alg` is taken from the protected header.** `verify_sign1` selects
+  the verification primitive from the integrity-protected `alg`, then requires
+  the supplied key's type to match (EdDSA↔Ed25519, ES256↔EC). An attacker cannot
+  force a primitive the key does not support. Callers who must additionally pin
+  an *expected* algorithm should check `parsed["alg"]` against their policy.
+
+The hosted reference server (`scitt-cose-serve`) remains a demo: deployments
+should sit behind an edge with TLS, a hard request timeout, and rate limiting
+(see `docs/hosted-verifier-design.md`). The library enforces the message-size
+cap and bounded per-request cost that make that edge sufficient.
