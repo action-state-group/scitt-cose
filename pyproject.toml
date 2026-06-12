@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scitt-cose"
-version = "0.1.0"
+version = "0.1.1"
 description = "Generic, payload-agnostic IETF SCITT + COSE Receipts substrate for Python (receipts strictly RFC9162_SHA256)."
 readme = "README.md"
 requires-python = ">=3.9"
