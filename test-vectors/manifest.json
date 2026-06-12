@@ -1,0 +1,41 @@
+{
+  "version": "v1",
+  "stability": "append-only",
+  "leaf_entry_definition": "SHA-256 digest of the complete Signed Statement (COSE_Sign1) bytes, hex-encoded",
+  "tree_construction": "tree_size=8; statement digest at leaf_index=2; filler leaf i = SHA-256('scitt-cose test vectors v1 :: <vector-id> :: filler leaf <i>'); leaves in index order; RFC 9162 SHA-256 tree",
+  "vectors": [
+    {
+      "id": "valid-eddsa",
+      "dir": "v1/valid-eddsa",
+      "description": "Happy path: EdDSA Signed Statement + RFC9162_SHA256 receipt; everything verifies.",
+      "expected_result": "VALID"
+    },
+    {
+      "id": "valid-es256",
+      "dir": "v1/valid-es256",
+      "description": "Happy path: ES256 Signed Statement + RFC9162_SHA256 receipt; everything verifies.",
+      "expected_result": "VALID"
+    },
+    {
+      "id": "fail-tampered-path",
+      "dir": "v1/fail-tampered-path",
+      "description": "Inclusion path with one flipped byte (first audit-path node). The reconstructed root no longer matches what the log signed; a verifier MUST reject. Statement is honest \u2014 the failure is receipt-only.",
+      "expected_result": "INVALID",
+      "failure_code": "TAMPERED_INCLUSION_PATH"
+    },
+    {
+      "id": "fail-unsupported-vds",
+      "dir": "v1/fail-unsupported-vds",
+      "description": "Receipt whose protected vds (label 395) is 2, not 1 (RFC9162_SHA256). Proof and signature are otherwise honest, so the ONLY conformant rejection reason is the unsupported verifiable data structure \u2014 read from the protected header, never the unprotected one.",
+      "expected_result": "INVALID",
+      "failure_code": "UNSUPPORTED_VDS"
+    },
+    {
+      "id": "fail-bad-statement-sig",
+      "dir": "v1/fail-bad-statement-sig",
+      "description": "Signed Statement whose signature byte was flipped. The receipt is minted over the digest of the TAMPERED bytes and verifies \u2014 isolating the failure to the statement signature alone.",
+      "expected_result": "INVALID",
+      "failure_code": "BAD_STATEMENT_SIGNATURE"
+    }
+  ]
+}

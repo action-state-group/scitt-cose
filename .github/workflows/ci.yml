@@ -60,6 +60,30 @@ jobs:
           go vet ./...
           go build ./...
 
+  vectors:
+    # The cross-implementation test-vector set, verified from a FRESH
+    # environment by BOTH runtimes. Deliberately shares no caches with the
+    # unit-test job: "reproducible from a clean checkout" is the claim under
+    # test, so nothing here may reuse another job's state.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # no pip cache — fresh-environment reproducibility is the point
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Install (runtime deps only — the vector path needs nothing else)
+        run: pip install .
+      - name: Python runner — full manifest, exit nonzero on any mismatch
+        run: python -m scitt_cose.vectors
+      - name: Go clean-room runner — same manifest, same files
+        working-directory: scitt-cose-go-verify
+        run: go test ./... -run TestVectors -v
+
   neutrality-gate:
     # The shipped tree must contain no downstream/reserved code references.
     # (The pytest suite enforces this for scitt_cose/; this job covers the

@@ -1,0 +1,32 @@
+{
+  "description": "Happy path: EdDSA Signed Statement + RFC9162_SHA256 receipt; everything verifies.",
+  "payload_sha256": "08b6e9ec3bd002da4e21976b6dc1411567d30acb30d671161583b3d8351e7692",
+  "protected_header": {
+    "statement": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "content_type": "application/json",
+      "cwt_claims_label": 15,
+      "issuer": "https://test-vectors.scitt-cose.invalid",
+      "subject": "urn:scitt-cose:test-vectors:v1:valid-eddsa"
+    },
+    "receipt": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "vds_label": 395,
+      "vds": 1
+    }
+  },
+  "leaf_entry": "a6dd4523ffdda1754c234acf209bdde758db7d30438468700a7bf6c01e800e3a",
+  "leaf_index": 2,
+  "tree_size": 8,
+  "inclusion_path": [
+    "d5790c062bb617c193f8dbedf90469ccf49525739238b6d1102df4d3424fbd44",
+    "fb85d1461099612b0a34168f8f207bc9a761a91cd1173f39c5dd7ca4d1d92a6c",
+    "b8e2ffb9ad6e45622e44393e6f58a747c4c5b3900d9676e3ecf50aab2ba266e4"
+  ],
+  "reconstructed_root": "5c834b80c0b40ca993f0b4a3ef9d2e77a8a3e8113358e4f318866c02cd448362",
+  "statement_signature_valid": true,
+  "receipt_valid": true,
+  "result": "VALID"
+}

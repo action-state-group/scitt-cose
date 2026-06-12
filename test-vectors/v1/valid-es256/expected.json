@@ -1,0 +1,32 @@
+{
+  "description": "Happy path: ES256 Signed Statement + RFC9162_SHA256 receipt; everything verifies.",
+  "payload_sha256": "a55649d4e0674a1f2d043bc83945381dfd29d60e9ce63e4d86e945357451ff76",
+  "protected_header": {
+    "statement": {
+      "alg": "ES256",
+      "alg_code": -7,
+      "content_type": "application/json",
+      "cwt_claims_label": 15,
+      "issuer": "https://test-vectors.scitt-cose.invalid",
+      "subject": "urn:scitt-cose:test-vectors:v1:valid-es256"
+    },
+    "receipt": {
+      "alg": "ES256",
+      "alg_code": -7,
+      "vds_label": 395,
+      "vds": 1
+    }
+  },
+  "leaf_entry": "3ffa392b06d19b1532464da32e36aa7e2c8b555e0dda3e18154a481bfa2679c7",
+  "leaf_index": 2,
+  "tree_size": 8,
+  "inclusion_path": [
+    "ab76fae876146e6972f525923510e61f1b5f419061da443f3fc47da71d44997e",
+    "d8c99f69cd3e0d89d584dc860de6fd226fda244899ad1a9ca12ded9c6e62855b",
+    "7c0f09411a02969993feaad44b1e7414f8a30cee1a9583e6a31a2eea1122d11b"
+  ],
+  "reconstructed_root": "e1dba63622c67f39bc40bbbcfd62c22a4f3355aa72dff1044d6c5dba52448e61",
+  "statement_signature_valid": true,
+  "receipt_valid": true,
+  "result": "VALID"
+}

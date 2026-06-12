@@ -10,3 +10,6 @@ dist/
 # never commit keys or demo artifacts
 *.pem
 *.cose
+
+# test vectors are FROZEN committed bytes — exempt from the key/artifact ignore
+!test-vectors/**/*.cose
