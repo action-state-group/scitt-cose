@@ -1,0 +1,11 @@
+# Frozen test-vector bytes must never be EOL-normalized. Every file under
+# test-vectors/ is pinned by test-vectors/SHA256SUMS, so any autocrlf newline
+# conversion on checkout (e.g. a Windows contributor with autocrlf=true) would
+# silently corrupt the frozen set — `sha256sum -c` would then fail against bytes
+# the contributor never chose. Prevention belongs here: in-repo attributes
+# override every contributor's local git config, so the published bytes are the
+# bytes everyone gets. This covers the PEM keys, expected.json, and SHA256SUMS
+# itself (all LF-bearing and all checksummed), not only the .cose/.bin payloads.
+test-vectors/** -text
+test-vectors/**/*.cose binary
+test-vectors/**/*.bin  binary
