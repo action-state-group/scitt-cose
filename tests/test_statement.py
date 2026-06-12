@@ -74,7 +74,10 @@ def test_parse_without_key_skips_signature(eddsa_keys):
     )
     parsed = parse_signed_statement(msg)
     assert parsed["signature_verified"] is None
-    assert parsed["issuer"] == "i"
+    # No key -> nothing is authenticated: identity fields must NOT be surfaced as
+    # if signed. The structurally-decoded values are fenced under `unverified`.
+    assert parsed["issuer"] is None
+    assert parsed["unverified"]["issuer"] == "i"
 
 
 def test_parse_wrong_key_reports_false(eddsa_keys, other_eddsa_keys):
@@ -86,8 +89,11 @@ def test_parse_wrong_key_reports_false(eddsa_keys, other_eddsa_keys):
     )
     parsed = parse_signed_statement(msg, public_key_pem=opub)
     assert parsed["signature_verified"] is False
-    # structural fields still populated
-    assert parsed["issuer"] == "i"
+    # The signature did NOT verify, so the issuer must not be presented as an
+    # authenticated value (M3): top-level identity is None; the claimed value is
+    # available only under the explicitly-unverified key.
+    assert parsed["issuer"] is None
+    assert parsed["unverified"]["issuer"] == "i"
 
 
 def test_attach_extract_round_trip(eddsa_keys):

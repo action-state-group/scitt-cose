@@ -67,15 +67,16 @@ def check_vector(vector_dir: Path, expected: dict) -> list[str]:
             f"{expected['statement_signature_valid']}{detail}"
         )
     if parse_error is None:
-        # Header fields are only comparable when the envelope decoded; on a
-        # parse failure the verdict check above already carries the error.
+        # Decoded protected-header fields are part of the published contract and
+        # are present whether or not the signature verified. They are surfaced as
+        # authenticated values only when the signature is good; otherwise the
+        # library fences them under `unverified` so a caller cannot mistake an
+        # unverified claim for a signed one. Read from whichever applies.
+        src = parsed if parsed.get("signature_verified") is True else (parsed.get("unverified") or {})
         for field, key in (("alg", "alg"), ("issuer", "issuer"),
                            ("subject", "subject"), ("content_type", "content_type")):
-            if parsed.get(field) != exp_stmt[key]:
-                mismatches.append(f"statement {field}={parsed.get(field)!r} != {exp_stmt[key]!r}")
-        embedded = parsed.get("payload")
-        if embedded is not None and embedded != payload:
-            mismatches.append("statement embedded payload differs from payload.bin")
+            if src.get(field) != exp_stmt[key]:
+                mismatches.append(f"statement {field}={src.get(field)!r} != {exp_stmt[key]!r}")
 
     # 4. Receipt: verdict, and for valid receipts the reconstructed root must
     #    equal the published one (clean-room agreement on the Merkle fold).

@@ -34,7 +34,15 @@ from typing import Union
 import cbor2
 
 from . import merkle
-from .cose_sign1 import HDR_ALG, CoseError, sign_sign1, verify_sign1
+from .cose_sign1 import (
+    COSE_SIGN1_TAG,
+    HDR_ALG,
+    HDR_CRIT,
+    CoseError,
+    sign_sign1,
+    strict_decode,
+    verify_sign1,
+)
 
 #: Protected header label carrying the verifiable-data-structure identifier.
 HDR_VDS = 395
@@ -44,6 +52,17 @@ HDR_VDP = 396
 VDS_RFC9162_SHA256 = 1
 #: vdp map key for the inclusion-proofs array.
 VDP_INCLUSION_PROOFS = -1
+
+#: A receipt carries one inclusion proof per leaf; an array longer than this is
+#: hostile padding, capped before any per-element work (paired with the bstr
+#: type-check that prevents bytes(int) over-allocation).
+_MAX_INCLUSION_PROOFS = 16
+
+#: Protected-header labels the receipt layer understands, for RFC 9052 §3.1
+#: crit enforcement: alg (1), crit (2) itself, and vds (395) which this layer
+#: actively reads. A receipt marking any of these critical is accepted; an
+#: unknown critical label is still rejected.
+_RECEIPT_UNDERSTOOD = frozenset({HDR_ALG, HDR_CRIT, HDR_VDS})
 
 PemLike = Union[bytes, str]
 
@@ -84,16 +103,34 @@ def _plain(v):
     return v
 
 
+#: An inclusion path longer than this cannot belong to any tree we accept
+#: (MAX_TREE_SIZE = 2**63 → depth <= 63). Reject early, before building the path.
+_MAX_AUDIT_PATH = 64
+
+
 def _decode_inclusion_proof(blob: bytes):
-    arr = _plain(cbor2.loads(blob))
+    try:
+        arr = _plain(cbor2.loads(blob))
+    except Exception as exc:  # noqa: BLE001 - map any parser error to CoseError
+        raise CoseError(f"inclusion proof is not valid CBOR: {type(exc).__name__}") from exc
     if not isinstance(arr, (list, tuple)) or len(arr) != 3:
         raise CoseError("inclusion proof must be [tree_size, leaf_index, [path]]")
     tree_size, leaf_index, path = arr
-    if not isinstance(tree_size, int) or not isinstance(leaf_index, int):
-        raise CoseError("inclusion proof tree_size/leaf_index must be ints")
+    # bool is an int subclass; exclude it explicitly so True/False can't pose as
+    # a size/index.
+    if not isinstance(tree_size, int) or isinstance(tree_size, bool):
+        raise CoseError("inclusion proof tree_size must be an int")
+    if not isinstance(leaf_index, int) or isinstance(leaf_index, bool):
+        raise CoseError("inclusion proof leaf_index must be an int")
     if not isinstance(path, (list, tuple)):
         raise CoseError("inclusion proof path must be an array")
-    audit_path_hex = [bytes(p).hex() for p in path]
+    if len(path) > _MAX_AUDIT_PATH:
+        raise CoseError(f"inclusion proof path too long ({len(path)} > {_MAX_AUDIT_PATH})")
+    audit_path_hex = []
+    for node in path:
+        if not isinstance(node, (bytes, bytearray)):
+            raise CoseError("inclusion proof path element is not a byte string")
+        audit_path_hex.append(bytes(node).hex())
     return tree_size, leaf_index, audit_path_hex
 
 
@@ -151,12 +188,16 @@ def verify_receipt(
     """
     result = ReceiptResult()
 
+    # Strict decode at the trust boundary: rejects trailing bytes, indefinite-
+    # length / non-canonical encodings, and duplicate protected-header keys
+    # (the same gate the statement path uses). verify_receipt never raises, so
+    # the structural CoseError is captured into errors rather than propagated.
     try:
-        outer = cbor2.loads(receipt)
-    except Exception as exc:  # noqa: BLE001
-        result.errors.append(f"receipt is not valid CBOR: {exc}")
+        outer = strict_decode(receipt)
+    except CoseError as exc:
+        result.errors.append(f"receipt rejected: {exc}")
         return result
-    if not isinstance(outer, cbor2.CBORTag) or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
+    if outer.tag != COSE_SIGN1_TAG or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
         result.errors.append("receipt is not a COSE_Sign1 message")
         return result
 
@@ -171,11 +212,13 @@ def verify_receipt(
         result.errors.append("protected header is not a map")
         return result
 
-    # vds MUST come from the protected (integrity-protected) header.
-    vds = protected.get(HDR_VDS)
-    if vds != VDS_RFC9162_SHA256:
+    # vds MUST come from the protected (integrity-protected) header. The error
+    # does NOT echo the attacker-supplied vds value back (no input reflection in
+    # responses); it names only the expected structure.
+    if protected.get(HDR_VDS) != VDS_RFC9162_SHA256:
         result.errors.append(
-            f"protected vds (label 395) is {vds!r}; expected {VDS_RFC9162_SHA256} (RFC9162_SHA256)"
+            "unsupported verifiable data structure (protected label 395); "
+            "expected RFC9162_SHA256 (vds = 1)"
         )
         return result
     if HDR_ALG not in protected:
@@ -193,9 +236,21 @@ def verify_receipt(
     if not isinstance(inclusion_proofs, (list, tuple)) or not inclusion_proofs:
         result.errors.append("vdp has no inclusion proofs (key -1)")
         return result
+    if len(inclusion_proofs) > _MAX_INCLUSION_PROOFS:
+        result.errors.append(
+            f"too many inclusion proofs ({len(inclusion_proofs)} > {_MAX_INCLUSION_PROOFS})"
+        )
+        return result
+    # Never coerce an unvalidated decoded value to bytes: a CBOR integer here
+    # would make bytes(int) allocate a multi-gigabyte zero buffer from a tiny
+    # receipt. Require an actual byte string first.
+    first_proof = inclusion_proofs[0]
+    if not isinstance(first_proof, (bytes, bytearray)):
+        result.errors.append("inclusion proof entry is not a byte string")
+        return result
 
     try:
-        tree_size, leaf_index, audit_path_hex = _decode_inclusion_proof(bytes(inclusion_proofs[0]))
+        tree_size, leaf_index, audit_path_hex = _decode_inclusion_proof(bytes(first_proof))
     except CoseError as exc:
         result.errors.append(str(exc))
         return result
@@ -203,21 +258,31 @@ def verify_receipt(
     result.tree_size = tree_size
     result.leaf_index = leaf_index
 
-    # Reconstruct the root by folding the leaf up the audit path. We do not yet
-    # know the claimed root, so derive it and then check the signature over it.
-    reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
+    # Reconstruct the root by folding the leaf up the audit path. The Merkle
+    # layer bounds tree_size and checks the path length before any hashing, so
+    # this cannot recurse without bound; the guard here is belt-and-suspenders so
+    # verify_receipt's "never raises" contract holds even if that changes.
+    try:
+        reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
+    except Exception as exc:  # noqa: BLE001 - contract: never raise, map to errors
+        result.errors.append(f"inclusion proof could not be evaluated: {type(exc).__name__}")
+        return result
     if reconstructed is None:
         result.errors.append("inclusion proof does not reconstruct a root for this leaf")
         return result
     result.root = reconstructed
 
     # Verify the COSE_Sign1 over the reconstructed root. This proves the log
-    # signed *this* root, binding the leaf+proof to the log's signature.
+    # signed *this* root, binding the leaf+proof to the log's signature. The
+    # receipt layer actively processes vds (395), so it is advertised as
+    # understood — a receipt that legitimately marks vds critical is accepted,
+    # while any *other* unknown critical header is still rejected (RFC 9052 §3.1).
     try:
         verify_sign1(
             receipt,
             public_key_pem=log_public_key_pem,
             detached_payload=bytes.fromhex(reconstructed),
+            understood_labels=_RECEIPT_UNDERSTOOD,
         )
     except CoseError as exc:
         result.errors.append(f"receipt signature did not verify: {exc}")
