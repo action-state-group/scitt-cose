@@ -95,9 +95,15 @@ def _requests(fx):
 
 
 def _local_verdict(req, fx) -> dict:
-    """Compute the verdict by calling the library DIRECTLY (the parity oracle)."""
+    """Compute the verdict by calling the library DIRECTLY (the parity oracle).
+
+    Mirrors the hosted FAIL-CLOSED rule: a request is valid only when every
+    component it carried affirmatively verified (statement signature is True, or
+    receipt ok is True), and at least one component was present. A statement with
+    no key (signature_verified is None) is NOT a success.
+    """
     out = {"statement": None, "receipt": None}
-    valid = True
+    components = []
     if req.get("statement_b64"):
         try:
             raw = base64.b64decode(req["statement_b64"] + "===")
@@ -106,15 +112,14 @@ def _local_verdict(req, fx) -> dict:
                 raw, public_key_pem=pub.encode() if pub else None
             )
             out["statement"] = parsed.get("signature_verified")
-            if parsed.get("signature_verified") is False:
-                valid = False
+            components.append(parsed.get("signature_verified") is True)
         except Exception:  # noqa: BLE001
             out["statement"] = False
-            valid = False
+            components.append(False)
     if req.get("receipt_b64"):
         if not req.get("log_pubkey_pem") or not req.get("leaf_entry_hex"):
             out["receipt"] = False
-            valid = False
+            components.append(False)
         else:
             res = verify_receipt(
                 base64.b64decode(req["receipt_b64"] + "==="),
@@ -122,11 +127,8 @@ def _local_verdict(req, fx) -> dict:
                 log_public_key_pem=req["log_pubkey_pem"].encode(),
             )
             out["receipt"] = res.ok
-            if not res.ok:
-                valid = False
-    if not req.get("statement_b64") and not req.get("receipt_b64"):
-        valid = False
-    out["valid"] = valid
+            components.append(res.ok is True)
+    out["valid"] = bool(components) and all(components)
     return out
 
 

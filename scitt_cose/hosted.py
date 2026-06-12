@@ -379,11 +379,18 @@ def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
                 receipt_report = {"ok": False}
                 reasons.append(f"receipt: malformed input ({type(exc).__name__})")
 
-    valid = True
-    if statement_report is not None and statement_report.get("signature_verified") is False:
-        valid = False
-    if receipt_report is not None and not receipt_report.get("ok"):
-        valid = False
+    # Fail closed: `valid` is true only when EVERY component the request carried
+    # was affirmatively verified, and at least one real check ran. A statement
+    # with no key (signature_verified is None) was NOT checked, so it does not
+    # count as success — it makes the request invalid, with a reason. This is the
+    # M1 fix: the old default-true logic returned valid for an unverified
+    # statement that merely happened not to be an explicit False.
+    components: list[bool] = []
+    if statement_report is not None:
+        components.append(statement_report.get("signature_verified") is True)
+    if receipt_report is not None:
+        components.append(receipt_report.get("ok") is True)
+    valid = bool(components) and all(components)
 
     return {
         "valid": valid,
