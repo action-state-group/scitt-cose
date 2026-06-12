@@ -23,6 +23,14 @@ import hashlib
 _LEAF_PREFIX = b"\x00"
 _NODE_PREFIX = b"\x01"
 
+#: Largest tree size a verifier will entertain from an attacker-supplied proof.
+#: 2**63 keeps the inclusion-proof depth (and therefore the fold's recursion
+#: depth) at most 63, well under any interpreter/stack limit, and matches the
+#: int64 ceiling of the cross-language Go verifier so the two agree on rejection.
+#: No real transparency log approaches this; it exists purely to bound the cost
+#: of a hostile proof before any hashing/recursion happens.
+MAX_TREE_SIZE = 1 << 63
+
 
 def _leaf_hash_bytes(entry: bytes) -> bytes:
     return hashlib.sha256(_LEAF_PREFIX + entry).digest()
@@ -88,6 +96,21 @@ def inclusion_proof(entries_hex: list[str], index: int) -> list[str]:
     return [node.hex() for node in path(leaves, index)]
 
 
+def _expected_inclusion_path_len(tree_size: int, index: int) -> int:
+    """Exact number of audit-path siblings for ``index`` in an RFC 6962 tree of
+    ``tree_size`` entries — i.e. the leaf's depth under the recursive split."""
+    n = 0
+    size, m = tree_size, index
+    while size > 1:
+        k = _largest_pow2_below(size)
+        if m < k:
+            size = k
+        else:
+            size, m = size - k, m - k
+        n += 1
+    return n
+
+
 def root_from_inclusion_proof(
     leaf_entry_hex: str,
     index: int,
@@ -98,9 +121,18 @@ def root_from_inclusion_proof(
 
     Returns the reconstructed root hex if the leaf at ``index`` (in a tree of
     ``tree_size`` entries) combined with ``audit_path_hex`` yields a single root;
-    ``None`` if the path length / structure is inconsistent.
+    ``None`` if the index, ``tree_size``, or path length is inconsistent.
+
+    Resource safety: ``tree_size`` is rejected above :data:`MAX_TREE_SIZE`, and
+    the audit path **must** be exactly the expected length for ``(tree_size,
+    index)`` before any hashing. This makes the proof length an explicit checked
+    invariant (not an emergent property of the recursion) and bounds the fold's
+    recursion depth to at most 63 — so a hostile ``tree_size`` / over-long path
+    can neither forge an inclusion nor exhaust the stack.
     """
-    if not 0 <= index < tree_size:
+    if not 0 <= index < tree_size or tree_size > MAX_TREE_SIZE:
+        return None
+    if len(audit_path_hex) != _expected_inclusion_path_len(tree_size, index):
         return None
     target = _leaf_hash_bytes(bytes.fromhex(leaf_entry_hex))
     siblings = list(audit_path_hex)
@@ -250,4 +282,5 @@ __all__ = [
     "root_from_inclusion_proof",
     "consistency_proof",
     "verify_consistency",
+    "MAX_TREE_SIZE",
 ]
