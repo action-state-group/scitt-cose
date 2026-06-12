@@ -144,6 +144,15 @@ def parse_signed_statement(
 ) -> dict:
     """Parse a generic Signed Statement, optionally verifying its signature.
 
+    .. warning::
+       **This only verifies when you pass ``public_key_pem``.** Called without a
+       key it *parses but does not verify* — ``signature_verified`` is ``None``
+       and the decoded fields are returned under ``unverified``. Do not treat a
+       key-less call as a verification. Always pass the key, then gate on
+       ``signature_verified is True`` before trusting any field. (For the
+       low-level signature primitive that always verifies and raises on failure,
+       see :func:`scitt_cose.verify_sign1`.)
+
     **Failure contract (see the README "Failure contract" section):** this is a
     public verifier entry point — it **never raises** on malformed or
     unverifiable input. Every outcome is reported in the returned dict.
