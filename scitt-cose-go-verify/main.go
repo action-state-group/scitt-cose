@@ -295,19 +295,58 @@ func nodeHash(left, right []byte) []byte {
 	return h[:]
 }
 
+// maxTreeSize bounds an attacker-supplied tree_size. 2^62 is the largest power
+// of two representable as a positive int64, so it is the EXACT same ceiling the
+// Python verifier uses (MAX_TREE_SIZE) — the two agree on accept/reject for
+// every tree_size, with no band one accepts and the other cannot represent. It
+// also keeps every interim value (k, k*2) within int64. A proof claiming more is
+// rejected before the Merkle fold runs.
+const maxTreeSize int64 = 1 << 62
+
 func largestPow2Below(n int64) int64 {
+	// Overflow-safe for any int64: the loop guard `k <= (n-1)/2` is equivalent to
+	// `k*2 < n` but never overflows (k stays <= 2^62 so the multiply below is in
+	// range). Callers also bound tree_size to maxTreeSize, but this primitive is
+	// self-protecting so no caller can spin it into the old int64-overflow hang.
+	if n <= 1 {
+		return 1
+	}
 	k := int64(1)
-	for k*2 < n {
+	for k <= (n-1)/2 {
 		k *= 2
 	}
 	return k
+}
+
+// expectedInclusionPathLen is the exact number of audit-path siblings for index
+// in an RFC 6962 tree of treeSize entries (the leaf's depth under the split).
+func expectedInclusionPathLen(treeSize, index int64) int64 {
+	var n int64
+	size, m := treeSize, index
+	for size > 1 {
+		k := largestPow2Below(size)
+		if m < k {
+			size = k
+		} else {
+			size, m = size-k, m-k
+		}
+		n++
+	}
+	return n
 }
 
 // rootFromInclusionProof folds a leaf up its audit path to the root (RFC 6962
 // §2.1.1). The audit path is consumed outermost-first, mirroring the Python
 // reference (siblings.pop()).
 func rootFromInclusionProof(leafEntry []byte, index, treeSize int64, auditPath [][]byte) ([]byte, bool) {
-	if index < 0 || index >= treeSize {
+	// Bound tree_size and require the path to be exactly the expected length
+	// BEFORE any hashing: a hostile tree_size near 2^63 otherwise overflows
+	// largestPow2Below into an infinite loop, and an over-long path drives
+	// unbounded recursion. Same checks (and ceiling) as the Python verifier.
+	if index < 0 || index >= treeSize || treeSize > maxTreeSize {
+		return nil, false
+	}
+	if int64(len(auditPath)) != expectedInclusionPathLen(treeSize, index) {
 		return nil, false
 	}
 	target := leafHash(leafEntry)

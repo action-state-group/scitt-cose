@@ -62,6 +62,10 @@ def _load_seeds() -> list[dict]:
             "kind": "statement",
             "bytes": (d / "statement.cose").read_bytes(),
             "pubkey": d / "issuer-key.pub",
+            # Go's statement path selects the verifier from the --alg flag, so it
+            # must match the seed's algorithm (EdDSA vs ES256) — not be hardcoded,
+            # or every ES256 mutant looks like a divergence.
+            "alg": exp["protected_header"]["statement"]["alg"],
         })
         seeds.append({
             "id": d.name,
@@ -176,10 +180,38 @@ def _struct_indefinite_payload(rng: random.Random, data: bytes) -> bytes:
         return _bitflip(rng, data)
 
 
+def _struct_oversize_tree(rng: random.Random, data: bytes) -> bytes:
+    """Build a receipt inclusion proof at a tree_size just above the 2^62 ceiling
+    with a CORRECTLY-SIZED audit path. Unlike _struct_giant_length (which leaves a
+    wrong-length path, so both verifiers reject on length regardless of the
+    ceiling), this exercises the ceiling itself — the two runtimes must agree on
+    rejecting it, so a future change that lets one ceiling drift from the other is
+    caught here, not just in a unit test."""
+    try:
+        tag = cbor2.loads(data)
+        if tag.tag != 18:
+            return _bitflip(rng, data)
+        val = list(tag.value)
+        unprot = dict(val[1]) if isinstance(val[1], dict) else {}
+        if 396 not in unprot:  # receipts only
+            return _bitflip(rng, data)
+        oversize = (1 << 62) + rng.randint(1, 1 << 20)
+        # Path length = depth of index 0 in a 2^62 tree (62); enough that the
+        # rejection must come from the ceiling check, not the length check.
+        path = [bytes(rng.randrange(256) for _ in range(32)) for _ in range(62)]
+        proof = cbor2.dumps([oversize, 0, path])
+        unprot[396] = {-1: [proof]}
+        val[1] = unprot
+        return cbor2.dumps(cbor2.CBORTag(tag.tag, val))
+    except Exception:  # noqa: BLE001
+        return _bitflip(rng, data)
+
+
 MUTATORS = [
     _bitflip, _bitflip, _bitflip,  # weight byte-level higher
     _truncate, _splice,
     _struct_giant_length, _struct_dup_key, _struct_indefinite_payload,
+    _struct_oversize_tree,
 ]
 
 
@@ -227,7 +259,7 @@ def _py_verdict(mutant: Path, seed: dict) -> str:
 def _go_verdict(go_binary: str, mutant: Path, seed: dict) -> str:
     if seed["kind"] == "statement":
         cmd = [go_binary, "--statement", str(mutant),
-               "--pubkey", str(seed["pubkey"]), "--alg", "EdDSA"]
+               "--pubkey", str(seed["pubkey"]), "--alg", seed["alg"]]
     else:
         cmd = [go_binary, "--receipt", str(mutant),
                "--log-pubkey", str(seed["pubkey"]), "--leaf-entry-hex", seed["leaf_entry"]]

@@ -187,6 +187,39 @@ scitt-cose --statement stmt.cose --receipt receipt.cose \
 | Receipts | `build_receipt`, `verify_receipt`, `ReceiptResult` |
 | Status | `DRAFT_TRACKING_NOTICE`, `DRAFT_SCITT_ARCHITECTURE`, `DRAFT_COSE_MERKLE_TREE_PROOFS`, `SUBSTRATE_RFCS` |
 
+### Failure contract
+
+A verifier's behaviour on hostile and malformed input is part of its API, so it
+is spelled out here and enforced by tests (`tests/test_hardening.py`) and by
+continuous differential fuzzing (see below).
+
+- **`parse_signed_statement` and `verify_receipt` never raise on input.** Every
+  outcome — bad signature, malformed CBOR, truncation, a hostile length or tree
+  size — is reported in the returned value (`signature_verified` /
+  `ReceiptResult.ok`), never as a leaked `cbor2` / `RecursionError` / other
+  exception. A `CoseError` is reserved for the **low-level** primitive
+  `verify_sign1` (a building block), which raises on failure by design.
+- **Identity is authenticated-only.** `parse_signed_statement` populates
+  `issuer` / `subject` / `content_type` / `alg` / `claims` **only when
+  `signature_verified is True`**. When the signature did not verify (wrong key,
+  bad signature) or no key was supplied, those top-level fields are `None`, and
+  the structurally-decoded values are fenced under an explicit `unverified`
+  sub-dict — so an integrator can never mistake an attacker-chosen issuer for a
+  signed one. `verified ⇒ trust the fields; not verified ⇒ they are under
+  `unverified`, clearly labelled.
+- **Strict, non-malleable decoding.** Both verify paths reject trailing bytes
+  after the COSE_Sign1, indefinite-length / non-deterministic encodings, and
+  duplicate protected-header keys — so one signature cannot be presented in many
+  byte encodings, and the Python and Go verifiers agree on accept *and* reject.
+- **Bounded cost.** Messages are size-capped; tree sizes and inclusion-proof
+  lengths are bounded and length-checked before any hashing or allocation, and
+  no decoded integer is ever coerced to `bytes` before validation. A tiny
+  hostile receipt cannot trigger a multi-gigabyte allocation or an unbounded
+  loop on either runtime.
+
+See [`docs/hardening-review.md`](docs/hardening-review.md) for the review, the
+finding-by-finding resolutions, and the consciously-accepted items.
+
 ### Algorithms
 
 `sign_sign1` / statements support `"EdDSA"` (code point −8) and `"ES256"`
@@ -194,6 +227,11 @@ scitt-cose --statement stmt.cose --receipt receipt.cose \
 DER; the conversion happens at the `cryptography` boundary. ML-DSA code points
 (RFC 9964) are *recognized* in the status notice but signing is **not**
 implemented here.
+
+ES256 signatures are accepted in their canonical form as verified by
+`cryptography`; **`s`-value malleability (high-`s`) is not rejected** — see the
+Security Considerations in [`docs/hardening-review.md`](docs/hardening-review.md)
+for why that is a documented, accepted property rather than a bug.
 
 ### Why CWT Claims at label 15 (not 13)
 

@@ -60,7 +60,7 @@ def _verify_statement(args) -> dict | None:
     msg = _read(args.statement)
     pub = _read(args.statement_pubkey) if args.statement_pubkey else None
     parsed = parse_signed_statement(msg, public_key_pem=pub)
-    # Don't dump raw payload bytes into JSON; report length + hex preview.
+    # Don't dump raw payload bytes into JSON; report length only.
     payload = parsed.get("payload")
     parsed = dict(parsed)
     parsed["payload_len"] = len(payload) if payload is not None else None
@@ -133,15 +133,19 @@ def _print_human(report) -> None:
     print("-" * 72)
     s = report["statement"]
     if s is not None:
-        print("  Signed Statement")
-        print(f"    issuer (iss)   : {s.get('issuer')}")
-        print(f"    subject (sub)  : {s.get('subject')}")
-        print(f"    content_type   : {s.get('content_type')}")
-        print(f"    alg            : {s.get('alg')}")
         sv = s.get("signature_verified")
         sv_text = "SKIPPED (no pubkey)" if sv is None else ("PASS" if sv else "FAIL")
+        # Identity is authenticated only when the signature verified; otherwise
+        # the library fences the claimed values under `unverified`. Show them, but
+        # labelled, so they are never mistaken for signed values.
+        fields = s if sv is True else (s.get("unverified") or {})
+        tag = "" if sv is True else "  [UNVERIFIED]"
+        print("  Signed Statement")
+        print(f"    issuer (iss)   : {fields.get('issuer')}{tag}")
+        print(f"    subject (sub)  : {fields.get('subject')}{tag}")
+        print(f"    content_type   : {fields.get('content_type')}{tag}")
+        print(f"    alg            : {fields.get('alg')}{tag}")
         print(f"    signature      : {sv_text}")
-        print(f"    payload_len    : {s.get('payload_len')}")
     r = report["receipt"]
     if r is not None:
         print("  Receipt")

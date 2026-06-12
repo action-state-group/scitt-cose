@@ -23,11 +23,13 @@ import cbor2
 
 from .cose_sign1 import (
     ALG_CODE_TO_NAME,
+    COSE_SIGN1_TAG,
     HDR_ALG,
     HDR_CRIT,
     CoseError,
     _plain,
     sign_sign1,
+    strict_decode,
     verify_sign1,
 )
 
@@ -110,54 +112,21 @@ def _decode_text(value) -> str | None:
     return None
 
 
-def parse_signed_statement(
-    msg: bytes,
-    *,
-    public_key_pem: PemLike | None = None,
-) -> dict:
-    """Parse a generic Signed Statement, optionally verifying its signature.
+# Labels the statement layer actively processes — so a header legitimately
+# marked critical among these is accepted, while anything else critical is
+# rejected by the RFC 9052 §3.1 check inside verify_sign1.
+_STMT_UNDERSTOOD = frozenset(
+    {HDR_ALG, HDR_CRIT, HDR_CONTENT_TYPE, HDR_KID, HDR_CWT_CLAIMS}
+)
 
-    Returns a dict with: ``issuer``, ``subject``, ``content_type``, ``alg`` (name
-    if recognized, else the raw code point), ``claims`` (the full CWT Claims map),
-    ``payload`` (bytes), and ``signature_verified`` (``True``/``False`` when
-    ``public_key_pem`` is supplied, else ``None``).
 
-    Parsing the structure does not require a key; signature verification is only
-    attempted when ``public_key_pem`` is provided.
-    """
-    signature_verified: bool | None = None
-    payload: bytes | None = None
-
-    # Labels the statement layer actively processes — so a header legitimately
-    # marked critical among these is accepted, while anything else critical is
-    # rejected by the RFC 9052 §3.1 check inside verify_sign1.
-    _STMT_UNDERSTOOD = frozenset(
-        {HDR_ALG, HDR_CRIT, HDR_CONTENT_TYPE, HDR_KID, HDR_CWT_CLAIMS}
-    )
-
-    if public_key_pem is not None:
-        try:
-            sign1 = verify_sign1(
-                msg,
-                public_key_pem=public_key_pem,
-                understood_labels=_STMT_UNDERSTOOD,
-            )
-            signature_verified = True
-            protected = sign1.protected
-            payload = sign1.payload
-        except CoseError:
-            signature_verified = False
-            protected, payload = _structural_parse(msg)
-    else:
-        protected, payload = _structural_parse(msg)
-
+def _extract_fields(protected: dict, payload: bytes | None) -> dict:
+    """Pull the generic statement fields out of a (decoded) protected header."""
     claims = protected.get(HDR_CWT_CLAIMS)
     if not isinstance(claims, dict):
         claims = {}
-
     alg_code = protected.get(HDR_ALG)
     alg = ALG_CODE_TO_NAME.get(alg_code, alg_code) if isinstance(alg_code, int) else alg_code
-
     return {
         "issuer": _decode_text(claims.get(CWT_ISS)),
         "subject": _decode_text(claims.get(CWT_SUB)),
@@ -165,17 +134,107 @@ def parse_signed_statement(
         "alg": alg,
         "claims": claims,
         "payload": payload,
-        "signature_verified": signature_verified,
     }
 
 
+def parse_signed_statement(
+    msg: bytes,
+    *,
+    public_key_pem: PemLike | None = None,
+) -> dict:
+    """Parse a generic Signed Statement, optionally verifying its signature.
+
+    .. warning::
+       **This only verifies when you pass ``public_key_pem``.** Called without a
+       key it *parses but does not verify* — ``signature_verified`` is ``None``
+       and the decoded fields are returned under ``unverified``. Do not treat a
+       key-less call as a verification. Always pass the key, then gate on
+       ``signature_verified is True`` before trusting any field. (For the
+       low-level signature primitive that always verifies and raises on failure,
+       see :func:`scitt_cose.verify_sign1`.)
+
+    **Failure contract (see the README "Failure contract" section):** this is a
+    public verifier entry point — it **never raises** on malformed or
+    unverifiable input. Every outcome is reported in the returned dict.
+
+    Keys:
+
+    * ``signature_verified`` — ``True`` (key supplied and signature checked out),
+      ``False`` (key supplied and it did not verify, *or* the input was
+      malformed), or ``None`` (no key supplied, so nothing was checked).
+    * ``issuer`` / ``subject`` / ``content_type`` / ``alg`` / ``claims`` /
+      ``payload`` — the **authenticated** values. They are populated **only when
+      ``signature_verified is True``**; otherwise they are ``None`` / ``{}``. An
+      integrator can therefore trust a non-``None`` ``issuer`` to be signed.
+    * ``unverified`` — when the structure parsed but was *not* authenticated
+      (no key, wrong key, or bad signature over a well-formed envelope), the
+      structurally-decoded fields are surfaced here, explicitly fenced off so
+      they cannot be mistaken for authenticated values. ``None`` when the input
+      did not parse at all.
+
+    This closes the soft-fail identity-surfacing hazard: ``parsed["issuer"]`` is
+    never an attacker-chosen value, because it is set only after a good signature.
+    """
+    authed = {
+        "issuer": None, "subject": None, "content_type": None,
+        "alg": None, "claims": {}, "payload": None,
+    }
+
+    if public_key_pem is not None:
+        try:
+            sign1 = verify_sign1(
+                msg, public_key_pem=public_key_pem, understood_labels=_STMT_UNDERSTOOD,
+            )
+        except CoseError:
+            # Well-formed-but-unverified, OR malformed: try a structural parse so
+            # the caller can see (fenced) what was claimed, but authenticated
+            # fields stay empty. A structural failure is itself a soft failure.
+            unverified = _safe_structural_fields(msg)
+            return {"signature_verified": False, **authed, "unverified": unverified}
+        # Verified: the decoded fields are authenticated.
+        return {
+            "signature_verified": True,
+            **_extract_fields(sign1.protected, sign1.payload),
+            "unverified": None,
+        }
+
+    # No key: nothing is checked. Surface fields only under `unverified`.
+    unverified = _safe_structural_fields(msg)
+    return {"signature_verified": None, **authed, "unverified": unverified}
+
+
+def _safe_structural_fields(msg: bytes) -> dict | None:
+    """Structurally parse ``msg`` into the generic fields, or ``None`` if it does
+    not parse. Never raises — the no-authentication paths use this."""
+    try:
+        protected, payload = _structural_parse(msg)
+    except CoseError:
+        return None
+    fields = _extract_fields(protected, None)
+    # Don't hand back attacker payload bytes as if meaningful; report length only.
+    fields["payload_len"] = len(payload) if payload is not None else None
+    return fields
+
+
 def _structural_parse(msg: bytes):
-    """Decode protected header + payload without verifying the signature."""
-    outer = cbor2.loads(msg)
-    if not isinstance(outer, cbor2.CBORTag) or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
+    """Decode protected header + payload without verifying the signature.
+
+    Uses the strict decoder so that even the no-key / verification-failed path
+    rejects malleable encodings (trailing bytes, indefinite-length, duplicate
+    protected keys) the same way the verifying path does — there is no lenient
+    back door into the parser.
+    """
+    outer = strict_decode(msg)
+    if outer.tag != COSE_SIGN1_TAG or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
         raise CoseError("not a COSE_Sign1 message")
     protected_bstr, _unprotected, payload_slot, _signature = outer.value
-    protected = _plain(cbor2.loads(protected_bstr)) if protected_bstr else {}
+    if protected_bstr:
+        try:
+            protected = _plain(cbor2.loads(protected_bstr))
+        except Exception as exc:  # noqa: BLE001
+            raise CoseError(f"protected header is not valid CBOR: {exc}") from exc
+    else:
+        protected = {}
     if not isinstance(protected, dict):
         protected = {}
     payload = bytes(payload_slot) if isinstance(payload_slot, (bytes, bytearray)) else None
@@ -194,8 +253,8 @@ def attach_receipts(statement: bytes, receipts: list[bytes]) -> bytes:
     array of bstrs. If receipts are already present they are extended. The
     protected header (and thus the signature) is untouched.
     """
-    outer = cbor2.loads(statement)
-    if not isinstance(outer, cbor2.CBORTag) or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
+    outer = strict_decode(statement)
+    if outer.tag != COSE_SIGN1_TAG or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
         raise CoseError("not a COSE_Sign1 message")
     protected_bstr, unprotected, payload_slot, signature = outer.value
     unprotected = _plain(unprotected)
@@ -216,8 +275,8 @@ def extract_receipts(transparent: bytes) -> list[bytes]:
 
     An empty list is returned when no receipts are present.
     """
-    outer = cbor2.loads(transparent)
-    if not isinstance(outer, cbor2.CBORTag) or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
+    outer = strict_decode(transparent)
+    if outer.tag != COSE_SIGN1_TAG or not isinstance(outer.value, (list, tuple)) or len(outer.value) != 4:
         raise CoseError("not a COSE_Sign1 message")
     _protected_bstr, unprotected, _payload, _signature = outer.value
     unprotected = _plain(unprotected)
@@ -226,7 +285,14 @@ def extract_receipts(transparent: bytes) -> list[bytes]:
     receipts = unprotected.get(HDR_RECEIPTS)
     if not isinstance(receipts, (list, tuple)):
         return []
-    return [bytes(r) for r in receipts]
+    # Receipt elements must be byte strings; reject anything else (an int here
+    # would coerce to a giant zero buffer — see the receipt allocation guard).
+    out = []
+    for r in receipts:
+        if not isinstance(r, (bytes, bytearray)):
+            raise CoseError("attached receipt element is not a byte string")
+        out.append(bytes(r))
+    return out
 
 
 __all__ = [
