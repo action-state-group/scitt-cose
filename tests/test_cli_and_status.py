@@ -64,7 +64,7 @@ def test_no_unassigned_rfc_claim_anywhere_in_package():
     # The ONLY RFC numbers this library may positively cite — every one is a
     # genuinely published RFC it implements or relies on. Anything else (notably
     # the fictional "RFC 9942") is a fabricated-conformance claim.
-    allowed = {"6962", "8392", "9052", "9053", "9162", "9528", "9597", "9964"}
+    allowed = {"6962", "8032", "8392", "9052", "9053", "9162", "9528", "9597", "9964"}
     rfc_ref = re.compile(r"\bRFC\s?(\d{3,5})\b")
     offenders = []
     # Scan the shipped package + docs/README — NOT the tests, which reference the

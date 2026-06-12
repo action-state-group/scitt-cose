@@ -60,6 +60,39 @@ jobs:
           go vet ./...
           go build ./...
 
+  fuzz:
+    # Bounded differential fuzz: seed from the v1 vectors, mutate, run every
+    # mutant through BOTH verifiers (isolated subprocesses, timeout + mem cap)
+    # and fail on any Python<->Go divergence NOT in tests/fuzz/baseline.json.
+    # Minutes, not hours — a fixed seed + iteration budget keeps it deterministic.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install (runtime deps)
+        run: pip install .
+      - name: Build the Go verifier
+        working-directory: scitt-cose-go-verify
+        run: go build -o "$RUNNER_TEMP/gv" .
+      - name: Differential fuzz (no divergence outside the known baseline)
+        run: |
+          python scripts/differential_fuzz.py \
+            --go-binary "$RUNNER_TEMP/gv" \
+            --iterations 600 --seed 20250612 \
+            --write-findings "$RUNNER_TEMP/fuzz-findings"
+      - name: Upload reproducing mutants (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: ${{ runner.temp }}/fuzz-findings
+          if-no-files-found: ignore
+
   vectors:
     # The cross-implementation test-vector set, verified from a FRESH
     # environment by BOTH runtimes. Deliberately shares no caches with the
