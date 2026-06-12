@@ -3,11 +3,15 @@
   "known": [
     "conformance:statement:py=VALID:go=INVALID",
     "conformance:receipt:py=VALID:go=INVALID",
-    "robustness:receipt:py=INVALID:go=TIMEOUT"
+    "robustness:receipt:py=INVALID:go=TIMEOUT",
+    "robustness:statement:py=CRASH:go=INVALID",
+    "robustness:receipt:py=CRASH:go=INVALID"
   ],
   "_descriptions": {
     "conformance:statement:py=VALID:go=INVALID": "Python accepts a statement Go rejects: (a) payload re-encoded as an indefinite-length bstr (non-canonical CBOR malleability), and (b) trailing bytes appended after the COSE_Sign1 (cbor2.loads ignores trailing data). go-cose/fxamacker reject both. Fix: enforce definite-length + no-trailing-bytes canonical decode in cose_sign1.",
     "conformance:receipt:py=VALID:go=INVALID": "Python accepts a receipt Go rejects, same root cause: trailing bytes after the receipt COSE_Sign1 and/or non-canonical inner encodings tolerated by cbor2.loads. Fix: strict canonical decode on the receipt path.",
-    "robustness:receipt:py=INVALID:go=TIMEOUT": "A receipt with an attacker-supplied tree_size near 2**63 hangs the Go verifier: largestPow2Below's `for k*2 < n` overflows int64 and loops forever. Python rejects/raises instead. Fix: bound tree_size and/or make largestPow2Below overflow-safe; add an explicit expected-depth check."
+    "robustness:receipt:py=INVALID:go=TIMEOUT": "A receipt with an attacker-supplied tree_size near 2**63 hangs the Go verifier: largestPow2Below's `for k*2 < n` overflows int64 and loops forever. Python rejects/raises instead. Fix: bound tree_size and/or make largestPow2Below overflow-safe; add an explicit expected-depth check.",
+    "robustness:statement:py=CRASH:go=INVALID": "A truncated/malformed statement makes the Python CLI exit with an uncaught _cbor2.CBORDecodeEOF (or TypeError) traceback instead of a clean reject — non-CoseError exceptions escape the documented contract (finding M6). Go rejects cleanly. Fix: wrap all decode paths so only CoseError escapes / signature_verified=False is returned.",
+    "robustness:receipt:py=CRASH:go=INVALID": "A spliced/malformed receipt makes the Python CLI exit with an uncaught non-CoseError traceback instead of a clean reject (finding M6 / H3 family). Go rejects cleanly. Fix: ensure verify_receipt and the parse layer only ever surface CoseError / ReceiptResult."
   }
 }

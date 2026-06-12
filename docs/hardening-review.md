@@ -110,6 +110,17 @@ missed.
     "fix": "Document one explicit contract (recommend: structural/alg errors raise CoseError; only a genuine signature mismatch returns False), and clearly mark returned header fields as unverified unless signature_verified is True."
   },
   {
+    "id": "M6",
+    "severity": "medium",
+    "category": "error-model / robustness",
+    "file": "scitt_cose/statement.py",
+    "line": 174,
+    "status": "CONFIRMED (fuzz: robustness:statement & robustness:receipt py=CRASH)",
+    "summary": "Truncated/malformed input makes parse_signed_statement and verify_receipt exit with an uncaught non-CoseError exception (e.g. _cbor2.CBORDecodeEOF, TypeError) instead of a clean reject — breaking the CoseError-only contract.",
+    "failure_scenario": "A truncated statement.cose makes the CLI/library raise _cbor2.CBORDecodeEOF: premature end of stream (confirmed: exit 1 with a traceback), and a spliced receipt raises similarly. A caller catching only CoseError crashes; a service treating any exception as 'skip' silently drops verification. The differential fuzzer catches both (Python CRASH vs Go clean reject) — found after the stderr-aware classifier landed.",
+    "fix": "Wrap every decode entry point (_structural_parse, the receipt pre-parse, extract_receipts) so only CoseError escapes (or signature_verified=False / ReceiptResult is returned); pairs with H3."
+  },
+  {
     "id": "M4",
     "severity": "medium",
     "category": "hosted / DoS",

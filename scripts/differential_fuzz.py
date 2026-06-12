@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import resource
 import subprocess
 import sys
 import tempfile
@@ -43,11 +42,12 @@ REPO = Path(__file__).resolve().parents[1]
 VECTORS = REPO / "test-vectors" / "v1"
 BASELINE = REPO / "tests" / "fuzz" / "baseline.json"
 
-# Per-subprocess limits: a verifier must answer fast and small. A hang -> TIMEOUT
-# finding; an over-allocation (e.g. bytes(giant_int)) -> MemoryError CRASH. The
-# memory cap keeps a pathological allocation from disturbing the host/runner.
+# A verifier must answer fast: a hang -> TIMEOUT finding. (We deliberately do
+# NOT impose an RLIMIT_AS memory cap on the children — it breaks the Go
+# runtime's virtual-address reservation and produces platform-dependent spurious
+# crashes. Pathological allocations raise MemoryError on their own, and the
+# classifier below treats a tracebacked/aborted exit as CRASH.)
 SUBPROC_TIMEOUT_S = 3
-SUBPROC_MEM_BYTES = 512 * 1024 * 1024
 
 
 def _load_seeds() -> list[dict]:
@@ -186,36 +186,29 @@ MUTATORS = [
 # --- running a verdict ------------------------------------------------------
 
 
-def _limit_mem():  # pragma: no cover - child process
-    # Best-effort: RLIMIT_AS is honored on Linux (CI) but unsupported on some
-    # platforms (macOS). A failure here must not abort the spawn — the giant
-    # allocations we care about (bytes(2**40+)) fail fast with MemoryError
-    # regardless of the cap.
-    try:
-        resource.setrlimit(resource.RLIMIT_AS, (SUBPROC_MEM_BYTES, SUBPROC_MEM_BYTES))
-    except (ValueError, OSError):
-        pass
-
-
-_PREEXEC = _limit_mem if sys.platform.startswith("linux") else None
+# Stderr markers that mean the verifier *crashed* rather than cleanly rejected
+# (both can exit 1). A Python uncaught exception prints "Traceback"; a Go panic
+# or runtime abort prints "panic:" / "fatal error:".
+_CRASH_MARKERS = (b"Traceback", b"panic:", b"fatal error:", b"runtime:")
 
 
 def _classify(proc: subprocess.CompletedProcess | None) -> str:
     if proc is None:
         return "TIMEOUT"
+    if proc.returncode < 0:
+        return "CRASH"  # killed by signal (segfault, abort, OOM-kill)
+    if any(m in (proc.stderr or b"") for m in _CRASH_MARKERS):
+        return "CRASH"  # exited but with a traceback/panic -> not a clean verdict
     if proc.returncode == 0:
         return "VALID"
     if proc.returncode == 1:
         return "INVALID"
-    return "CRASH"  # 2 (CoseError/OSError from CLI) or traceback/OOM/signal
+    return "CRASH"  # any other non-zero (CLI usage error, unexpected abort)
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess | None:
     try:
-        return subprocess.run(
-            cmd, capture_output=True, timeout=SUBPROC_TIMEOUT_S,
-            preexec_fn=_PREEXEC,
-        )
+        return subprocess.run(cmd, capture_output=True, timeout=SUBPROC_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return None
 
