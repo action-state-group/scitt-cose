@@ -1,0 +1,33 @@
+{
+  "description": "Inclusion path with one flipped byte (first audit-path node). The reconstructed root no longer matches what the log signed; a verifier MUST reject. Statement is honest \u2014 the failure is receipt-only.",
+  "payload_sha256": "374497661bfe6024e8acdbaead642cda20a60b5fd50586a6d5654a6a2c9aa5cd",
+  "protected_header": {
+    "statement": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "content_type": "application/json",
+      "cwt_claims_label": 15,
+      "issuer": "https://test-vectors.scitt-cose.invalid",
+      "subject": "urn:scitt-cose:test-vectors:v1:fail-tampered-path"
+    },
+    "receipt": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "vds_label": 395,
+      "vds": 1
+    }
+  },
+  "leaf_entry": "341df0ce74c5d59c84a122a646008caa1a27c709e350c817e98c16237145003a",
+  "leaf_index": 2,
+  "tree_size": 8,
+  "inclusion_path": [
+    "b6167b48a8130f79fbb8709f332945d387cdc7ad25713953f4cf3e08f5993e39",
+    "64d89f54777d5c2acd4ee10ed11e8759f2e5fc77eb8c02b356051dd9bff2c613",
+    "4ccdae78b9b9af9803ac82b2b442c9990c01d28b1af924a7de4368881169367d"
+  ],
+  "reconstructed_root": null,
+  "statement_signature_valid": true,
+  "receipt_valid": false,
+  "result": "INVALID",
+  "failure_code": "TAMPERED_INCLUSION_PATH"
+}

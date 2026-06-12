@@ -364,6 +364,30 @@ instance is live at <https://verify.actionstate.ai> — this package unchanged
 verifier-vs-Transparency-Service boundary table and states the privacy posture.
 You don't need it: the verifier runs anywhere.
 
+## Test vectors (cross-implementation, stable)
+
+[`test-vectors/`](test-vectors/) is a frozen, **append-only** vector set for
+other SCITT/COSE implementations to check themselves against: two happy-path
+vectors (EdDSA, ES256) and three negative vectors (tampered inclusion path,
+unsupported vds, bad statement signature), each with committed bytes, TEST-ONLY
+keys, and an `expected.json` documenting every protected-header field a
+verifier needs. Verify from a clean checkout:
+
+```bash
+git clone https://github.com/action-state-group/scitt-cose
+cd scitt-cose && pip install -e . && python -m scitt_cose.vectors
+```
+
+or from the published package (the runner ships in **scitt-cose ≥ 0.1.0**):
+`pip install "scitt-cose>=0.1.0"`, download `test-vectors/`, then
+`python -m scitt_cose.vectors path/to/test-vectors` (add `--json` for a
+machine-readable report). The Go clean-room implementation runs the same
+manifest (`go test ./...` in `scitt-cose-go-verify/`). The append-only promise
+is enforced, not just stated: `test-vectors/SHA256SUMS` pins every published
+byte and CI fails on any mutation. A mismatch against your implementation is
+exactly the report we want — please open an issue. Details and the stability
+promise: [`test-vectors/README.md`](test-vectors/README.md).
+
 ## Tests
 
 ```bash

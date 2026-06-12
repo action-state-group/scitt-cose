@@ -1,0 +1,33 @@
+{
+  "description": "Signed Statement whose signature byte was flipped. The receipt is minted over the digest of the TAMPERED bytes and verifies \u2014 isolating the failure to the statement signature alone.",
+  "payload_sha256": "17591d8abea5cad14242167727aee7130d104b211b6779b2ce6c1196aac5460b",
+  "protected_header": {
+    "statement": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "content_type": "application/json",
+      "cwt_claims_label": 15,
+      "issuer": "https://test-vectors.scitt-cose.invalid",
+      "subject": "urn:scitt-cose:test-vectors:v1:fail-bad-statement-sig"
+    },
+    "receipt": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "vds_label": 395,
+      "vds": 1
+    }
+  },
+  "leaf_entry": "0dea38958b8f83f3fb0a4e7626ca0919e6814fdb3c34ec1c1a301622aa1c99d6",
+  "leaf_index": 2,
+  "tree_size": 8,
+  "inclusion_path": [
+    "26446cb4dead0680b3394c81bbe42e7afedbc1b064c015a5d6cb2a33e55d2a61",
+    "e2d5b5aa93e16ee2721cbd06758f04925d251e143f013f651313957492ffa2b5",
+    "776d67c33424280e99e16a7213cdcc6f0281a4f098e46f1d24a0f78769d516d3"
+  ],
+  "reconstructed_root": "e5b5647171f5b9b35072b62e8243fbb13e43845d9374ca08c7272cc27ac41f88",
+  "statement_signature_valid": false,
+  "receipt_valid": true,
+  "result": "INVALID",
+  "failure_code": "BAD_STATEMENT_SIGNATURE"
+}

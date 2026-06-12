@@ -1,0 +1,33 @@
+{
+  "description": "Receipt whose protected vds (label 395) is 2, not 1 (RFC9162_SHA256). Proof and signature are otherwise honest, so the ONLY conformant rejection reason is the unsupported verifiable data structure \u2014 read from the protected header, never the unprotected one.",
+  "payload_sha256": "b5b997112c8aff9ede41fc9f3074276d7ebe7c9dc35c2af2b4127f0ec7c186ee",
+  "protected_header": {
+    "statement": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "content_type": "application/json",
+      "cwt_claims_label": 15,
+      "issuer": "https://test-vectors.scitt-cose.invalid",
+      "subject": "urn:scitt-cose:test-vectors:v1:fail-unsupported-vds"
+    },
+    "receipt": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "vds_label": 395,
+      "vds": 2
+    }
+  },
+  "leaf_entry": "ee728ba89fc45b23888702bb61e43d753eca60f6c38c145ad32f3b45d7930ad2",
+  "leaf_index": 2,
+  "tree_size": 8,
+  "inclusion_path": [
+    "0c294b4f6b48c04d904362bec9a7ce4e35b81dfe5ad374a312970fc9a760b8ac",
+    "af1b8a36645aaa3d9c0c8cf6e2a55538006a74d0ff7d8b691e6ee7a620da72fa",
+    "0e0ce47ce7debfadf8380c055109ce0991919a7135b05f973c6bf9e5afd07af1"
+  ],
+  "reconstructed_root": null,
+  "statement_signature_valid": true,
+  "receipt_valid": false,
+  "result": "INVALID",
+  "failure_code": "UNSUPPORTED_VDS"
+}
