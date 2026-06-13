@@ -146,10 +146,10 @@ def test_build_leaf_mismatch_raises(eddsa_keys):
 
 
 def test_verify_receipt_survives_cbor2_6_immutable_output(monkeypatch, eddsa_keys):
-    """Regression (surfaced by the leon<->manny bilateral test): cbor2>=6 returns
-    CBOR maps as ``frozendict`` (not a dict subclass) and arrays as ``tuple``.
-    verify_receipt must still parse such output. We build with normal cbor2 then
-    verify under simulated cbor2>=6 decoding."""
+    """Regression (surfaced by a cross-instance verification test): cbor2>=6
+    returns CBOR maps as ``frozendict`` (not a dict subclass) and arrays as
+    ``tuple``. verify_receipt must still parse such output. We build with normal
+    cbor2 then verify under simulated cbor2>=6 decoding."""
     import hashlib
     from collections.abc import Mapping
 
