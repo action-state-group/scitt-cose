@@ -171,10 +171,10 @@ a Signed Statement and a digest-only Receipt; the capabilities declare it is
 | Verb | verify (read-only) | register + **issue receipts** + anchor |
 | State | none | durable append-only log |
 | Trust obligation | none (verify it yourself) | uptime, integrity, non-equivocation |
-| Code | `scitt_cose` (this package) | the hosted Authority (separate) |
+| Code | `scitt_cose` (this package) | a separate Transparency Service |
 
-The SCITT-only verifier may *verify receipts the Transparency Service issued*
-(see the Authority cross-verification test), but it never becomes one.
+The SCITT-only verifier may *verify receipts a Transparency Service issued*, but
+it never becomes one.
 
 ## Deployment shape (proposed; for the public endpoint — not executed)
 
