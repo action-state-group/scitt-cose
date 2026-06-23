@@ -43,6 +43,11 @@ scitt-cose-serve = "scitt_cose.hosted:serve"
 [tool.setuptools]
 packages = ["scitt_cose"]
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: live-network tests that require external services (deselect with -m 'not integration')",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py39"
