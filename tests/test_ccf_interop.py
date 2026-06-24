@@ -44,7 +44,8 @@ Wording note
 
 Draft tracking
     RFC9162_SHA256 (vds=1) per draft-ietf-cose-merkle-tree-proofs.
-    CCF REST API per scitt-ccf-ledger main (2026-06).
+    CCF REST API per scitt-ccf-ledger main (2026-06): SCRAPI v09
+    (POST /entries → 303 → poll GET /entries/{txid}), with legacy 202+operationId fallback.
 """
 from __future__ import annotations
 
@@ -265,15 +266,29 @@ def test_leaf_hash_determinism() -> None:
 class CcfSandboxClient:
     """Minimal HTTP client for the CCF SCITT REST API.
 
-    CCF SCITT API (scitt-ccf-ledger main, 2026-06)::
+    Supports both the current SCRAPI v09 flow and the legacy CCF flow:
 
-        POST   /app/entries           → 202 {"operationId": "..."}
-        GET    /app/operations/{id}   → {"status": "running"|"succeeded", "entryId": "..."}
-        GET    /app/entries/{id}/receipt  → COSE Receipt bytes
+    **SCRAPI v09 (current scitt-ccf-ledger main):**
+
+        POST   /entries               → 303 See Other, Location: /entries/{txid}
+        GET    /entries/{txid}        → 302 while pending; 200 + COSE Receipt when committed
         GET    /.well-known/did.json  → DID document with the TS's public key
 
+    **Legacy CCF (pre-v09 / older deployments, fallback):**
+
+        POST   /app/entries           → 202 + JSON {"operationId": "..."}
+        GET    /app/operations/{id}   → {"status": "running"|"succeeded", "entryId": "..."}
+        GET    /app/entries/{id}/receipt  → COSE Receipt bytes
+
     Pass ``verify_tls=False`` for ephemeral CCF dev sandboxes that use a
-    self-signed certificate.
+    self-signed certificate.  Set ``SCITT_CCF_TLS_VERIFY=0`` in the environment
+    when pointing at a locally built instance (``./docker/run-dev.sh``).
+
+    Spin up a local instance::
+
+        git clone https://github.com/microsoft/scitt-ccf-ledger
+        cd scitt-ccf-ledger && ./docker/build.sh && ./docker/run-dev.sh
+        # then: SCITT_CCF_URL=https://localhost:8000 SCITT_CCF_TLS_VERIFY=0 pytest -m integration
     """
 
     def __init__(
@@ -282,7 +297,7 @@ class CcfSandboxClient:
         *,
         verify_tls: bool = True,
         poll_interval: float = 1.0,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
     ) -> None:
         import requests  # noqa: PLC0415 — optional dep
 
@@ -295,27 +310,82 @@ class CcfSandboxClient:
     def submit(self, signed_statement: bytes) -> bytes:
         """Submit a Signed Statement and return the COSE Receipt bytes.
 
-        Blocks (with polling) until the CCF operation completes.
-        Raises ``RuntimeError`` on CCF API errors.
+        Tries SCRAPI v09 (POST /entries → 303) first; falls back to the legacy
+        202+operationId path if the server returns 202.  Blocks until committed.
         """
         r = self._s.post(
-            f"{self._base}/app/entries",
+            f"{self._base}/entries",
             data=signed_statement,
             headers={"Content-Type": "application/cose"},
             timeout=self._timeout,
+            allow_redirects=False,  # we inspect 303 ourselves
         )
-        if r.status_code not in (200, 201, 202):
-            raise RuntimeError(f"CCF submit failed {r.status_code}: {r.text[:200]}")
-        body = r.json()
-        if "entryId" in body:
-            entry_id = body["entryId"]
-        elif "operationId" in body:
-            entry_id = self._poll_operation(body["operationId"])
-        else:
-            raise RuntimeError(f"CCF submit: unexpected body: {body}")
-        return self._fetch_receipt(entry_id)
 
-    def _poll_operation(self, op_id: str) -> str:
+        if r.status_code == 303:
+            # SCRAPI v09: follow Location to /entries/{txid}, poll until 200.
+            location = r.headers.get("location", "")
+            if not location:
+                raise RuntimeError("CCF v09: 303 without Location header")
+            entry_url = (
+                location if location.startswith("http")
+                else f"{self._base}{location}"
+            )
+            return self._poll_entry_v09(entry_url)
+
+        if r.status_code in (200, 201):
+            # Immediate commit (rare) — body may be the receipt directly.
+            return r.content
+
+        if r.status_code == 202:
+            # Legacy: JSON body with operationId, then poll /app/operations/.
+            try:
+                body = r.json()
+            except Exception:
+                raise RuntimeError(f"CCF legacy 202: non-JSON body: {r.content[:100]!r}")
+            if "operationId" in body:
+                entry_id = self._poll_operation_legacy(body["operationId"])
+                return self._fetch_receipt_legacy(entry_id)
+            if "entryId" in body:
+                return self._fetch_receipt_legacy(body["entryId"])
+            raise RuntimeError(f"CCF legacy 202: unexpected body: {body}")
+
+        raise RuntimeError(f"CCF submit failed {r.status_code}: {r.text[:200]}")
+
+    # ------------------------------------------------------------------
+    # SCRAPI v09 polling
+    # ------------------------------------------------------------------
+
+    def _poll_entry_v09(self, entry_url: str) -> bytes:
+        """Poll GET /entries/{txid} (SCRAPI v09) until 200 OK → receipt bytes.
+
+        CCF returns 302 while the transaction is still pending (the Location
+        header typically points back to the same URL).  We do not follow
+        redirects here; instead we sleep and retry until 200 or timeout.
+        """
+        deadline = time.monotonic() + self._timeout
+        while time.monotonic() < deadline:
+            r = self._s.get(
+                entry_url,
+                timeout=self._timeout,
+                allow_redirects=False,
+            )
+            if r.status_code == 200:
+                return r.content
+            if r.status_code in (302, 307):
+                # Still pending — sleep and retry.
+                time.sleep(self._poll)
+                continue
+            if r.status_code == 429 or r.status_code == 503:
+                time.sleep(self._poll * 2)
+                continue
+            r.raise_for_status()
+        raise TimeoutError(f"CCF v09 entry {entry_url} did not commit in {self._timeout}s")
+
+    # ------------------------------------------------------------------
+    # Legacy (pre-v09) polling
+    # ------------------------------------------------------------------
+
+    def _poll_operation_legacy(self, op_id: str) -> str:
         deadline = time.monotonic() + self._timeout
         while time.monotonic() < deadline:
             r = self._s.get(
@@ -328,11 +398,11 @@ class CcfSandboxClient:
             if status == "succeeded":
                 return body["entryId"]
             if status == "failed":
-                raise RuntimeError(f"CCF operation failed: {body}")
+                raise RuntimeError(f"CCF legacy operation failed: {body}")
             time.sleep(self._poll)
-        raise TimeoutError(f"CCF operation {op_id} timed out after {self._timeout}s")
+        raise TimeoutError(f"CCF legacy operation {op_id} timed out after {self._timeout}s")
 
-    def _fetch_receipt(self, entry_id: str) -> bytes:
+    def _fetch_receipt_legacy(self, entry_id: str) -> bytes:
         r = self._s.get(
             f"{self._base}/app/entries/{entry_id}/receipt",
             timeout=self._timeout,
@@ -395,11 +465,20 @@ class CcfSandboxClient:
         raise RuntimeError("no usable assertionMethod key found in CCF DID doc")
 
     def is_reachable(self) -> bool:
-        try:
-            r = self._s.get(f"{self._base}/.well-known/did.json", timeout=5.0)
-            return r.status_code < 500
-        except Exception:
-            return False
+        """Return True if the CCF endpoint accepts connections.
+
+        Tries ``/.well-known/did.json`` first (published DID document).
+        Falls back to a HEAD on ``/entries`` — a local dev instance may not
+        expose the DID document until a member is registered.
+        """
+        for path in ("/.well-known/did.json", "/entries"):
+            try:
+                r = self._s.get(f"{self._base}{path}", timeout=5.0, allow_redirects=False)
+                if r.status_code < 500:
+                    return True
+            except Exception:
+                pass
+        return False
 
 
 # ---------------------------------------------------------------------------
