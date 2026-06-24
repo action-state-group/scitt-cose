@@ -4,19 +4,20 @@
 verify both receipts.
 
 **Vienna proof (our half):** the same SCITT Signed Statement can be registered
-with two independent Transparency Services — our local RFC9162_SHA256 log and a
-CCF-style log — and both receipts verify via the same ``verify_receipt()`` call.
-The Signed Statement is byte-identical in both logs. Only the TS key and the
-Merkle root differ; the statement is VDS-agnostic.
+with two independent Transparency Services and both receipts verify via the same
+``verify_receipt()`` call.  The Signed Statement is byte-identical in both logs.
+Only the TS key differs; the statement is VDS-agnostic.
 
 Two parts
 ---------
 **Local** (always runs, no network)
-    Two :class:`LocalTestTS` instances, each with its own Ed25519 key pair.  Both
-    mint ``RFC9162_SHA256`` receipts via ``scitt_cose.build_receipt``.  Both verify.
-    Three tests:
+    Two :class:`LocalTestTS` instances (``our-log`` and ``peer-log``), each with its
+    own Ed25519 key pair.  Both are plain ``RFC9162_SHA256`` logs — neither is a
+    real CCF node.  They model *two independent TSes of the same VDS profile* to
+    prove statement portability; only ``test_ccf_sandbox_live`` (integration) hits
+    CCF.  Three tests:
 
-    * ``test_dual_receipt_same_statement`` — the VDS-agnostic proof.
+    * ``test_dual_receipt_same_statement`` — statement portability across same-VDS logs.
     * ``test_cross_receipt_reject`` — sanity: receipts are key-specific.
     * ``test_leaf_hash_determinism`` — ``leaf_hash(entry_hex)`` is a pure function of
       the statement bytes, independent of which TS registered it.
@@ -161,74 +162,78 @@ class LocalTestTS:
 
 
 def test_dual_receipt_same_statement() -> None:
-    """One Signed Statement, two independent TSes, both receipts verify.
+    """Statement portability: one Signed Statement, two RFC9162_SHA256 logs, both receipts verify.
 
-    This is the VDS-agnostic proof: the Signed Statement is fixed; the TS and
-    VDS are pluggable.  ``our-log`` and ``ccf-log`` are two completely
-    independent logs with separate key pairs.  Both use RFC9162_SHA256 (vds=1).
-    Both receipts verify via the same ``verify_receipt`` — and the leaf-entry hex
-    (SHA-256 of the statement bytes) is identical in both logs.
+    This proves the *statement is VDS-agnostic*: ``our-log`` and ``peer-log`` are
+    two completely independent in-memory logs, each with a distinct Ed25519 key pair,
+    both using RFC9162_SHA256 (vds=1).  Neither is a CCF node — they model any two
+    independent TSes of the same profile.  The actual CCF interop proof lives in
+    ``test_ccf_sandbox_live`` (integration, requires network).
+
+    Both receipts verify via the same ``verify_receipt`` call.  The leaf-entry hex
+    (SHA-256 of the statement bytes) is identical in both logs because it depends
+    only on the statement bytes, not on the TS.
     """
     our_ts = LocalTestTS("our-log")
-    ccf_ts = LocalTestTS("ccf-log")
+    peer_ts = LocalTestTS("peer-log")
 
     issuer_priv, _ = _ed25519_pair()
     signed_statement = _build_signed_statement(issuer_priv)
 
     # Both independent logs register the same statement bytes.
     entry_hex = hashlib.sha256(signed_statement).hexdigest()
-    our_receipt = our_ts.register(signed_statement)
-    ccf_receipt = ccf_ts.register(signed_statement)
+    receipt_a = our_ts.register(signed_statement)
+    receipt_b = peer_ts.register(signed_statement)
 
     # Both receipts must verify.
-    our_result = verify_receipt(
-        our_receipt,
+    result_a = verify_receipt(
+        receipt_a,
         leaf_entry_hex=entry_hex,
         log_public_key_pem=our_ts.public_key_pem,
     )
-    assert our_result.ok, f"our-log receipt failed: {our_result.errors}"
+    assert result_a.ok, f"our-log receipt failed: {result_a.errors}"
 
-    ccf_result = verify_receipt(
-        ccf_receipt,
+    result_b = verify_receipt(
+        receipt_b,
         leaf_entry_hex=entry_hex,
-        log_public_key_pem=ccf_ts.public_key_pem,
+        log_public_key_pem=peer_ts.public_key_pem,
     )
-    assert ccf_result.ok, f"ccf-log receipt failed: {ccf_result.errors}"
+    assert result_b.ok, f"peer-log receipt failed: {result_b.errors}"
 
     # With one entry each, both single-entry logs hash to the same RFC6962
     # root (leaf hash is content-only).  The TSes are distinguished by their
     # SIGNING KEYS — confirmed by test_cross_receipt_reject.
-    assert our_result.root == ccf_result.root  # same statement → same leaf → same root
-    assert our_result.root is not None
+    assert result_a.root == result_b.root  # same statement → same leaf → same root
+    assert result_a.root is not None
     # The receipt bytes differ because each is signed by a different TS key.
-    assert our_receipt != ccf_receipt
+    assert receipt_a != receipt_b
 
 
 def test_cross_receipt_reject() -> None:
     """A receipt from one TS must NOT verify against the other TS's public key."""
     our_ts = LocalTestTS("our-log")
-    ccf_ts = LocalTestTS("ccf-log")
+    peer_ts = LocalTestTS("peer-log")
 
     issuer_priv, _ = _ed25519_pair()
     signed_statement = _build_signed_statement(issuer_priv)
     entry_hex = hashlib.sha256(signed_statement).hexdigest()
 
-    our_receipt = our_ts.register(signed_statement)
-    ccf_receipt = ccf_ts.register(signed_statement)
+    receipt_a = our_ts.register(signed_statement)
+    receipt_b = peer_ts.register(signed_statement)
 
     wrong_a = verify_receipt(
-        our_receipt,
+        receipt_a,
         leaf_entry_hex=entry_hex,
-        log_public_key_pem=ccf_ts.public_key_pem,
+        log_public_key_pem=peer_ts.public_key_pem,
     )
-    assert not wrong_a.ok, "our_receipt should NOT verify against ccf_ts key"
+    assert not wrong_a.ok, "our receipt should NOT verify against peer_ts key"
 
     wrong_b = verify_receipt(
-        ccf_receipt,
+        receipt_b,
         leaf_entry_hex=entry_hex,
         log_public_key_pem=our_ts.public_key_pem,
     )
-    assert not wrong_b.ok, "ccf_receipt should NOT verify against our_ts key"
+    assert not wrong_b.ok, "peer receipt should NOT verify against our_ts key"
 
 
 def test_leaf_hash_determinism() -> None:
