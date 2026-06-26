@@ -60,7 +60,6 @@ v1/<vector-id>/
   receipt.cose         COSE Receipt bytes
   issuer-key.pub       PEM public key for the statement signature
   log-key.pub          PEM public key of the (simulated) transparency log
-  *.test-private       the TEST-ONLY private keys used to mint the vector
   expected.json        every value a verifier needs + the expected verdict
 ```
 
@@ -115,9 +114,9 @@ rejected).
 
 ## Keys
 
-All keys were freshly generated for this vector set, are committed here in
-full (including private halves, named `*.test-private`), are **TEST-ONLY**, and
-are never used anywhere else. Do not use them for anything.
+All keys were freshly generated for this vector set and are **TEST-ONLY** — never
+used anywhere else. The public halves (`*.pub`) are included here; the private
+generation keys (`*.test-private`) are kept outside the published tree.
 
 ## Provenance
 

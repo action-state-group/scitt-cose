@@ -19,8 +19,9 @@ Tree construction (documented contract — see test-vectors/README.md):
 * Leaf order is index order (0..7). Anyone can rebuild the exact log state
   from this description and the committed statement bytes.
 
-Keys are freshly generated for this set, committed alongside the vectors, and
-named ``*.test-private`` — TEST-ONLY, never used anywhere else.
+Keys are freshly generated for this set and named ``*.test-private`` — TEST-ONLY,
+never used anywhere else. Private halves are written locally by this script but
+are not committed to the published tree (only ``*.pub`` public keys are kept).
 """
 from __future__ import annotations
 
