@@ -28,6 +28,7 @@ not against a frozen RFC.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Union
 
@@ -50,6 +51,8 @@ HDR_VDS = 395
 HDR_VDP = 396
 #: vds value: RFC 9162 SHA-256 Merkle tree.
 VDS_RFC9162_SHA256 = 1
+#: vds value: CCF ccf.v1 Merkle format (used by scitt-ccf-ledger v7+).
+VDS_CCF_LEDGER_SHA256 = 2
 #: vdp map key for the inclusion-proofs array.
 VDP_INCLUSION_PROOFS = -1
 
@@ -63,6 +66,11 @@ _MAX_INCLUSION_PROOFS = 16
 #: actively reads. A receipt marking any of these critical is accepted; an
 #: unknown critical label is still rejected.
 _RECEIPT_UNDERSTOOD = frozenset({HDR_ALG, HDR_CRIT, HDR_VDS})
+
+#: Extended understood set for CCF receipts: adds kid (4), CWT_Claims (15),
+#: and the ccf.v1 label. CCF does not currently mark these critical, but
+#: declaring them understood future-proofs against that changing.
+_CCF_RECEIPT_UNDERSTOOD = _RECEIPT_UNDERSTOOD | frozenset({4, 15, "ccf.v1"})
 
 PemLike = Union[bytes, str]
 
@@ -134,6 +142,65 @@ def _decode_inclusion_proof(blob: bytes):
     return tree_size, leaf_index, audit_path_hex
 
 
+def _verify_ccf_v1_proof(proof_blob: bytes, claim_digest: bytes) -> bytes:
+    """Decode a CCF ccf.v1 inclusion proof and compute the Merkle root.
+
+    The proof blob is a CBOR map
+    ``{1: [write_set_digest, ce_string, claim_digest], 2: [[left, hash], ...]}``.
+    Returns the root as 32 raw bytes. Raises :class:`CoseError` on any structural
+    problem or if the embedded claim digest does not match the supplied value.
+
+    Algorithm (from ``ccf.cose.verify_receipt``):
+    ``leaf_hash = SHA-256(write_set_digest ‖ SHA-256(ce_string.encode()) ‖ claim_digest)``
+    then for each ``(left, sibling)`` in the path:
+    ``accumulator = SHA-256(sibling ‖ acc)`` if left else ``SHA-256(acc ‖ sibling)``.
+    """
+    try:
+        proof = _plain(cbor2.loads(proof_blob))
+    except Exception as exc:  # noqa: BLE001
+        raise CoseError(f"CCF proof is not valid CBOR: {type(exc).__name__}") from exc
+    if not isinstance(proof, dict):
+        raise CoseError("CCF proof must be a CBOR map (keys 1 and 2)")
+    leaf = proof.get(1)
+    if not isinstance(leaf, (list, tuple)) or len(leaf) != 3:
+        raise CoseError("CCF proof leaf (key 1) must be a 3-element array")
+    write_set_digest, ce_string, proof_claim_digest = leaf[0], leaf[1], leaf[2]
+    if not isinstance(write_set_digest, (bytes, bytearray)) or len(write_set_digest) != 32:
+        raise CoseError("CCF proof write_set_digest must be 32 bytes")
+    if not isinstance(ce_string, str):
+        raise CoseError("CCF proof ce_string must be a text string")
+    if not isinstance(proof_claim_digest, (bytes, bytearray)) or len(proof_claim_digest) != 32:
+        raise CoseError("CCF proof claim_digest must be 32 bytes")
+    if bytes(proof_claim_digest) != claim_digest:
+        raise CoseError("CCF proof claim_digest does not match the supplied leaf_entry_hex")
+
+    accumulator = hashlib.sha256(
+        bytes(write_set_digest)
+        + hashlib.sha256(ce_string.encode()).digest()
+        + bytes(proof_claim_digest)
+    ).digest()
+
+    path = proof.get(2, [])
+    if not isinstance(path, (list, tuple)):
+        raise CoseError("CCF proof path (key 2) must be an array")
+    if len(path) > _MAX_AUDIT_PATH:
+        raise CoseError(f"CCF proof path too long ({len(path)} > {_MAX_AUDIT_PATH})")
+    for step in path:
+        if not isinstance(step, (list, tuple)) or len(step) != 2:
+            raise CoseError("CCF proof path step must be [left: bool, hash: bytes]")
+        left, sibling = step[0], step[1]
+        if not isinstance(left, bool):
+            raise CoseError("CCF proof path step left must be a bool")
+        if not isinstance(sibling, (bytes, bytearray)) or len(sibling) != 32:
+            raise CoseError("CCF proof path sibling must be 32 bytes")
+        if left:
+            accumulator = hashlib.sha256(bytes(sibling) + accumulator).digest()
+        else:
+            accumulator = hashlib.sha256(accumulator + bytes(sibling)).digest()
+
+    return accumulator
+
+
 def build_receipt(
     *,
     leaf_entry_hex: str,
@@ -180,11 +247,17 @@ def verify_receipt(
 ) -> ReceiptResult:
     """Verify a COSE Receipt for ``leaf_entry_hex``.
 
-    Steps: read vds from the protected header (must be ``1`` / RFC9162_SHA256);
-    decode the inclusion proof from the unprotected vdp; reconstruct the Merkle
-    root from ``leaf_entry_hex`` + the proof; then verify the COSE_Sign1 over that
-    reconstructed root with the log key. Never raises — failures land in
-    :attr:`ReceiptResult.errors`.
+    Handles two verifiable data structures:
+
+    * **vds=1 (RFC9162_SHA256)** — the default: inclusion proof carried as
+      ``cbor([tree_size, leaf_index, [audit_path]])``; root reconstructed via
+      the RFC 6962 Merkle fold; COSE_Sign1 verified over that root.
+    * **vds=2 (CCF ccf.v1)** — Microsoft CCF: proof carried as
+      ``cbor({1: [write_set_digest, ce_string, claim_digest], 2: [[left, hash], ...]})``;
+      root computed by SHA-256 over the CCF leaf formula then walked up an
+      RFC 6962–style sibling path; COSE_Sign1 (ES384) verified over that root.
+
+    Never raises — failures land in :attr:`ReceiptResult.errors`.
     """
     result = ReceiptResult()
 
@@ -212,15 +285,8 @@ def verify_receipt(
         result.errors.append("protected header is not a map")
         return result
 
-    # vds MUST come from the protected (integrity-protected) header. The error
-    # does NOT echo the attacker-supplied vds value back (no input reflection in
-    # responses); it names only the expected structure.
-    if protected.get(HDR_VDS) != VDS_RFC9162_SHA256:
-        result.errors.append(
-            "unsupported verifiable data structure (protected label 395); "
-            "expected RFC9162_SHA256 (vds = 1)"
-        )
-        return result
+    # vds MUST come from the protected (integrity-protected) header.
+    vds = protected.get(HDR_VDS)
     if HDR_ALG not in protected:
         result.errors.append("protected header missing alg (label 1)")
         return result
@@ -249,43 +315,78 @@ def verify_receipt(
         result.errors.append("inclusion proof entry is not a byte string")
         return result
 
-    try:
-        tree_size, leaf_index, audit_path_hex = _decode_inclusion_proof(bytes(first_proof))
-    except CoseError as exc:
-        result.errors.append(str(exc))
-        return result
+    if vds == VDS_RFC9162_SHA256:
+        # --- vds=1: RFC9162_SHA256 ---
+        try:
+            tree_size, leaf_index, audit_path_hex = _decode_inclusion_proof(bytes(first_proof))
+        except CoseError as exc:
+            result.errors.append(str(exc))
+            return result
 
-    result.tree_size = tree_size
-    result.leaf_index = leaf_index
+        result.tree_size = tree_size
+        result.leaf_index = leaf_index
 
-    # Reconstruct the root by folding the leaf up the audit path. The Merkle
-    # layer bounds tree_size and checks the path length before any hashing, so
-    # this cannot recurse without bound; the guard here is belt-and-suspenders so
-    # verify_receipt's "never raises" contract holds even if that changes.
-    try:
-        reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
-    except Exception as exc:  # noqa: BLE001 - contract: never raise, map to errors
-        result.errors.append(f"inclusion proof could not be evaluated: {type(exc).__name__}")
-        return result
-    if reconstructed is None:
-        result.errors.append("inclusion proof does not reconstruct a root for this leaf")
-        return result
-    result.root = reconstructed
+        # Reconstruct the root by folding the leaf up the audit path. The Merkle
+        # layer bounds tree_size and checks the path length before any hashing, so
+        # this cannot recurse without bound; the guard here is belt-and-suspenders so
+        # verify_receipt's "never raises" contract holds even if that changes.
+        try:
+            reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
+        except Exception as exc:  # noqa: BLE001 - contract: never raise, map to errors
+            result.errors.append(f"inclusion proof could not be evaluated: {type(exc).__name__}")
+            return result
+        if reconstructed is None:
+            result.errors.append("inclusion proof does not reconstruct a root for this leaf")
+            return result
+        result.root = reconstructed
 
-    # Verify the COSE_Sign1 over the reconstructed root. This proves the log
-    # signed *this* root, binding the leaf+proof to the log's signature. The
-    # receipt layer actively processes vds (395), so it is advertised as
-    # understood — a receipt that legitimately marks vds critical is accepted,
-    # while any *other* unknown critical header is still rejected (RFC 9052 §3.1).
-    try:
-        verify_sign1(
-            receipt,
-            public_key_pem=log_public_key_pem,
-            detached_payload=bytes.fromhex(reconstructed),
-            understood_labels=_RECEIPT_UNDERSTOOD,
+        # Verify the COSE_Sign1 over the reconstructed root. This proves the log
+        # signed *this* root, binding the leaf+proof to the log's signature. The
+        # receipt layer actively processes vds (395), so it is advertised as
+        # understood — a receipt that legitimately marks vds critical is accepted,
+        # while any *other* unknown critical header is still rejected (RFC 9052 §3.1).
+        try:
+            verify_sign1(
+                receipt,
+                public_key_pem=log_public_key_pem,
+                detached_payload=bytes.fromhex(reconstructed),
+                understood_labels=_RECEIPT_UNDERSTOOD,
+            )
+        except CoseError as exc:
+            result.errors.append(f"receipt signature did not verify: {exc}")
+            return result
+
+    elif vds == VDS_CCF_LEDGER_SHA256:
+        # --- vds=2: CCF ccf.v1 ---
+        try:
+            claim_digest = bytes.fromhex(leaf_entry_hex)
+        except ValueError as exc:
+            result.errors.append(f"leaf_entry_hex is not valid hex: {exc}")
+            return result
+        try:
+            root_bytes = _verify_ccf_v1_proof(bytes(first_proof), claim_digest)
+        except CoseError as exc:
+            result.errors.append(str(exc))
+            return result
+        result.root = root_bytes.hex()
+        try:
+            verify_sign1(
+                receipt,
+                public_key_pem=log_public_key_pem,
+                detached_payload=root_bytes,
+                understood_labels=_CCF_RECEIPT_UNDERSTOOD,
+            )
+        except CoseError as exc:
+            result.errors.append(f"receipt signature did not verify: {exc}")
+            return result
+
+    else:
+        # The error does NOT echo the attacker-supplied vds value back (no input
+        # reflection in responses); it names only the supported structures.
+        result.errors.append(
+            "unsupported verifiable data structure (protected label 395); "
+            "expected RFC9162_SHA256 (vds=1) or CCF_LEDGER_SHA256 (vds=2)"
         )
-    except CoseError as exc:
-        result.errors.append(f"receipt signature did not verify: {exc}")
         return result
 
     result.ok = True
@@ -308,5 +409,6 @@ __all__ = [
     "HDR_VDS",
     "HDR_VDP",
     "VDS_RFC9162_SHA256",
+    "VDS_CCF_LEDGER_SHA256",
     "VDP_INCLUSION_PROOFS",
 ]

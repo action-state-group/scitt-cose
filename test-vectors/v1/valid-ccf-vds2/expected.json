@@ -1,0 +1,28 @@
+{
+  "description": "Happy path: pyscitt did:x509 Signed Statement (ES256, P-256) + real CCF ccf.v1 Merkle receipt (vds=2, ES384, P-384) from scitt-ccf-ledger v7.0.6. Both statement and receipt verify independently. Captured 2026-06-26.",
+  "payload_sha256": "04935e9a37f6d7c6e12724a69c9c31599c1d3fe9c08232c15fa37a671f8747b9",
+  "protected_header": {
+    "statement": {
+      "alg": "ES256",
+      "alg_code": -7,
+      "content_type": "application/json",
+      "cwt_claims_label": 15,
+      "issuer": "did:x509:0:sha256:q1zW6MbROTsJvpQD4l9NTXlrhltSoPXyqWff4bInoHg::eku:1.3.6.1.4.1.311.10.3.13",
+      "subject": null
+    },
+    "receipt": {
+      "alg": "ES384",
+      "alg_code": -35,
+      "vds_label": 395,
+      "vds": 2
+    }
+  },
+  "leaf_entry": "cdd87929ead61eca8f5a30a743eca3a625a287b85b9b8c85ae497c68899644f8",
+  "leaf_index": null,
+  "tree_size": null,
+  "inclusion_path": null,
+  "reconstructed_root": "1cb9bf8123a19c1ed2fcb1c2bfb8412e183634d806880ca4cef51ed399a3fb0f",
+  "statement_signature_valid": true,
+  "receipt_valid": true,
+  "result": "VALID"
+}

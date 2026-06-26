@@ -36,6 +36,12 @@
       "description": "Signed Statement whose signature byte was flipped. The receipt is minted over the digest of the TAMPERED bytes and verifies \u2014 isolating the failure to the statement signature alone.",
       "expected_result": "INVALID",
       "failure_code": "BAD_STATEMENT_SIGNATURE"
+    },
+    {
+      "id": "valid-ccf-vds2",
+      "dir": "v1/valid-ccf-vds2",
+      "description": "Happy path: real pyscitt did:x509 Signed Statement (ES256, P-256) + real CCF ccf.v1 Merkle receipt (vds=2, ES384, P-384) from scitt-ccf-ledger v7.0.6. Captured 2026-06-26 against a local VIRTUAL-mode CCF node.",
+      "expected_result": "VALID"
     }
   ]
 }

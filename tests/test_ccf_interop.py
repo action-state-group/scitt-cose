@@ -363,16 +363,29 @@ class CcfSandboxClient:
             return r.content
 
         if r.status_code == 202:
-            # Legacy: JSON body with operationId, then poll /app/operations/.
-            try:
-                body = r.json()
-            except Exception:
-                raise RuntimeError(f"CCF legacy 202: non-JSON body: {r.content[:100]!r}")
-            if "operationId" in body:
-                entry_id = self._poll_operation_legacy(body["operationId"])
+            # Legacy: CBOR or JSON body with operationId, then poll /app/operations/.
+            # CCF 7.0.6 returns CBOR; older or stub servers may return JSON.
+            body = None
+            if r.content:
+                try:
+                    import cbor2 as _cbor2  # noqa: PLC0415
+                    body = dict(_cbor2.loads(r.content))
+                except Exception:
+                    pass
+            if body is None and r.content:
+                try:
+                    body = r.json()
+                except Exception:
+                    pass
+            if body is None:
+                raise RuntimeError(f"CCF legacy 202: unreadable body: {r.content[:100]!r}")
+            op_id = body.get("OperationId") or body.get("operationId")
+            if op_id:
+                entry_id = self._poll_operation_legacy(op_id)
                 return self._fetch_receipt_legacy(entry_id)
-            if "entryId" in body:
-                return self._fetch_receipt_legacy(body["entryId"])
+            entry_id = body.get("EntryId") or body.get("entryId")
+            if entry_id:
+                return self._fetch_receipt_legacy(entry_id)
             raise RuntimeError(f"CCF legacy 202: unexpected body: {body}")
 
         raise RuntimeError(f"CCF submit failed {r.status_code}: {r.text[:200]}")
@@ -412,29 +425,72 @@ class CcfSandboxClient:
     # ------------------------------------------------------------------
 
     def _poll_operation_legacy(self, op_id: str) -> str:
+        import cbor2 as _cbor2  # noqa: PLC0415
         deadline = time.monotonic() + self._timeout
         while time.monotonic() < deadline:
             r = self._s.get(
                 f"{self._base}/app/operations/{op_id}",
                 timeout=self._timeout,
             )
-            r.raise_for_status()
-            body = r.json()
-            status = body.get("status")
+            if r.status_code not in (200, 202):
+                r.raise_for_status()
+            if not r.content:
+                time.sleep(self._poll)
+                continue
+            body = None
+            try:
+                body = dict(_cbor2.loads(r.content))
+            except Exception:
+                pass
+            if body is None:
+                try:
+                    body = r.json()
+                except Exception:
+                    pass
+            if body is None:
+                raise RuntimeError(f"operation poll: unreadable body: {r.content[:100]!r}")
+            # CCF 7.0.6 returns capitalized keys in CBOR; JSON may use lowercase.
+            status = body.get("Status") or body.get("status")
             if status == "succeeded":
-                return body["entryId"]
+                entry_id = body.get("EntryId") or body.get("entryId") or op_id
+                return entry_id
             if status == "failed":
                 raise RuntimeError(f"CCF legacy operation failed: {body}")
             time.sleep(self._poll)
         raise TimeoutError(f"CCF legacy operation {op_id} timed out after {self._timeout}s")
 
     def _fetch_receipt_legacy(self, entry_id: str) -> bytes:
-        r = self._s.get(
-            f"{self._base}/app/entries/{entry_id}/receipt",
-            timeout=self._timeout,
-        )
+        # CCF 7.0.6 serves receipts at /entries/{id}; older paths as fallback.
+        for path in (f"/entries/{entry_id}", f"/app/entries/{entry_id}/receipt"):
+            r = self._s.get(f"{self._base}{path}", timeout=self._timeout)
+            if r.status_code == 503:
+                time.sleep(self._poll * 2)
+                r = self._s.get(f"{self._base}{path}", timeout=self._timeout)
+            if r.status_code == 200 and r.content:
+                return r.content
         r.raise_for_status()
         return r.content
+
+    def fetch_ccf_service_pub_pem(self) -> bytes:
+        """Fetch the CCF service public key from GET /node/network.
+
+        CCF signs receipts with its ES384 service key. The key is embedded in
+        the service certificate published at ``GET /node/network``.  This is the
+        key to pass to ``verify_receipt`` for vds=2 (CCF ccf.v1) receipts.
+        """
+        from cryptography import x509 as cryptox509  # noqa: PLC0415
+        from cryptography.hazmat.backends import default_backend  # noqa: PLC0415
+        from cryptography.hazmat.primitives.serialization import (  # noqa: PLC0415
+            Encoding,
+            PublicFormat,
+        )
+
+        r = self._s.get(f"{self._base}/node/network", timeout=self._timeout)
+        r.raise_for_status()
+        data = r.json()
+        cert_pem = data["service_certificate"]
+        cert = cryptox509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+        return cert.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
 
     def fetch_ts_public_key_pem(self) -> bytes:
         """Fetch the TS's public key from its DID document.
@@ -524,35 +580,35 @@ def test_ccf_sandbox_live() -> None:
 
     *2026-06-26 (localhost:8000, scitt-ccf-ledger v7.0.6 VIRTUAL mode):*
     Real CCF node built and started locally (linux/amd64 via Rosetta on Apple Silicon).
-    **Key findings:**
+    Key findings:
 
-    * CCF 7.0.6 requires a ``did:x509`` issuer — our test uses plain-string
-      ``"acme-co"`` which returns 400 "CWT_Claims issuer is unsupported".
-      This test skips gracefully when it detects that error.
-    * CCF receipts use **vds=2** (CCF's own ``ccf.v1`` Merkle format); our
-      verifier (RFC9162_SHA256, vds=1) returns ok=False for vds=2 receipts.
-    * Using pyscitt's ``ccf.cose.verify_receipt``, a real 508-byte CCF receipt
-      was obtained and **verified OK** for EntryId ``2.14`` (2026-06-26).
-    * The vds=1 / vds=2 gap is the open standards interop issue for IETF 126.
+    * CCF 7.0.6 requires a ``did:x509`` issuer — plain-string issuers → 400.
+    * CCF receipts use **vds=2** (``ccf.v1`` Merkle format, ES384 service key).
+    * ``verify_receipt`` with **vds=2 support** now verifies real CCF receipts.
+      The frozen proof is in ``test-vectors/v1/valid-ccf-vds2/`` and passes in
+      ``test_ccf_vds2_frozen_vector`` (below) and ``test_vectors.py``.
 
-    To run against the local stub server (RFC9162_SHA256 — test passes fully)::
+    For a real CCF node this test uses ``pyscitt`` + ``X5ChainCertificateAuthority``
+    to build a conforming ``did:x509`` Signed Statement.  Skip conditions:
+
+    - ``requests`` not installed
+    - ``SCITT_CCF_URL`` explicitly set to ``""`` (opt-out)
+    - CCF endpoint unreachable (DNS failure, sandbox down, no network)
+    - CCF node requires ``did:x509`` and ``pyscitt`` is not importable
+      (frozen vector in ``test_ccf_vds2_frozen_vector`` still proves the crypto)
+
+    To run against the local stub server (RFC9162_SHA256 vds=1 — always passes)::
 
         python /tmp/scitt_stub_server.py &
         SCITT_CCF_URL=http://localhost:8000 SCITT_CCF_TLS_VERIFY=0 \\
         pytest -m integration tests/test_ccf_interop.py::test_ccf_sandbox_live
 
-    To run against a local CCF dev node (test skips with issuer-format note)::
+    To run against a local CCF dev node (needs pyscitt + scitt-ccf-ledger checkout)::
 
-        SCITT_CCF_URL=https://localhost:8000 \\
-        SCITT_CCF_TLS_VERIFY=0 \\
+        SCITT_CCF_URL=https://localhost:8000 SCITT_CCF_TLS_VERIFY=0 \\
         pytest -m integration tests/test_ccf_interop.py::test_ccf_sandbox_live
-
-    Skip conditions:
-    - ``requests`` not installed
-    - ``SCITT_CCF_URL`` explicitly set to ``""`` (opt-out)
-    - CCF endpoint unreachable (DNS failure, sandbox down, no network)
-    - CCF node requires ``did:x509`` issuer (real CCF 7.0.6 — skips with note)
     """
+    import cbor2 as _cbor2  # noqa: PLC0415
     pytest.importorskip("requests")
 
     ccf_url = os.environ.get("SCITT_CCF_URL", "https://scitt.ccf.dev")
@@ -565,32 +621,123 @@ def test_ccf_sandbox_live() -> None:
     if not client.is_reachable():
         pytest.skip(f"CCF sandbox unreachable at {ccf_url}")
 
+    # --- Try our plain EdDSA statement first (works with stub servers) ---
     issuer_priv, _ = _ed25519_pair()
     signed_statement = _build_signed_statement(issuer_priv)
     entry_hex = hashlib.sha256(signed_statement).hexdigest()
+    ccf_receipt = None
 
     try:
         ccf_receipt = client.submit(signed_statement)
     except RuntimeError as exc:
         msg = str(exc)
-        if "CWT_Claims issuer is unsupported" in msg or "InvalidInput" in msg:
-            pytest.skip(
-                "CCF node requires a did:x509 issuer — our plain-string issuer "
-                "is rejected (CCF 7.0.6 finding, 2026-06-26). "
-                "Use pyscitt + X5ChainCertificateAuthority to submit to a real CCF node. "
-                "Vds gap: CCF uses vds=2; our verifier is RFC9162_SHA256 (vds=1)."
-            )
-        raise
+        if "CWT_Claims issuer is unsupported" not in msg and "InvalidInput" not in msg:
+            raise
 
-    ccf_pub = client.fetch_ts_public_key_pem()
+    if ccf_receipt is None:
+        # Real CCF node requires did:x509 issuer — try pyscitt if available.
+        try:
+            import sys as _sys  # noqa: PLC0415
+
+            for _p in (
+                os.environ.get("SCITT_CCF_PYSCITT_PATH", ""),
+                "/Users/intangible/dev/_work/scitt-ccf-ledger/pyscitt",
+            ):
+                if _p and _p not in _sys.path:
+                    _sys.path.insert(0, _p)
+            for _p in (
+                os.environ.get("SCITT_CCF_TEST_PATH", ""),
+                "/Users/intangible/dev/_work/scitt-ccf-ledger/test",
+            ):
+                if _p and _p not in _sys.path:
+                    _sys.path.insert(0, _p)
+
+            from infra.x5chain_certificate_authority import (  # noqa: PLC0415
+                X5ChainCertificateAuthority,
+            )
+            from pyscitt import crypto as _pyscitt_crypto  # noqa: PLC0415
+
+            ca = X5ChainCertificateAuthority(kty="ec", ec_curve="P-256")
+            identity = ca.create_identity(
+                alg="ES256",
+                kty="ec",
+                ec_curve="P-256",
+                add_eku="1.3.6.1.4.1.311.10.3.13",
+            )
+            claim = _pyscitt_crypto.sign_statement(
+                identity,
+                json.dumps({"note": "ccf-interop live test"}).encode(),
+                content_type="application/json",
+                cwt=True,
+            )
+            signed_statement = claim
+            entry_hex = hashlib.sha256(signed_statement).hexdigest()
+            ccf_receipt = client.submit(signed_statement)
+
+        except ImportError:
+            pytest.skip(
+                "CCF node requires a did:x509 issuer and pyscitt is not importable. "
+                "The frozen vector in test_ccf_vds2_frozen_vector proves vds=2 crypto. "
+                "Set SCITT_CCF_PYSCITT_PATH / SCITT_CCF_TEST_PATH to enable the live test."
+            )
+
+    # --- Detect vds and choose the appropriate public key source ---
+    receipt_tag = _cbor2.loads(ccf_receipt)
+    receipt_phdr = _cbor2.loads(receipt_tag.value[0])
+    vds = receipt_phdr.get(395)  # HDR_VDS
+
+    if vds == 2:
+        # Real CCF node — service key from /node/network, ES384
+        ccf_pub = client.fetch_ccf_service_pub_pem()
+    else:
+        # Stub server or vds=1 log — use DID doc key
+        ccf_pub = client.fetch_ts_public_key_pem()
 
     result = verify_receipt(
         ccf_receipt,
         leaf_entry_hex=entry_hex,
         log_public_key_pem=ccf_pub,
     )
-    assert result.ok, (
-        f"CCF receipt did not verify.\nErrors: {result.errors}"
-    )
+    assert result.ok, f"CCF receipt did not verify.\nErrors: {result.errors}"
     assert result.root is not None
-    assert result.tree_size is not None and result.tree_size >= 1
+    if vds == 1:
+        assert result.tree_size is not None and result.tree_size >= 1
+
+
+# ---------------------------------------------------------------------------
+# Frozen vector — pure crypto, no network, always runs
+# ---------------------------------------------------------------------------
+
+
+def test_ccf_vds2_frozen_vector() -> None:
+    """verify_receipt handles a real CCF vds=2 receipt: ok=True, root matches.
+
+    This is a pure-crypto frozen-vector test: no network, no pyscitt, no CCF
+    node required.  The receipt, statement, and public key were captured from a
+    real ``scitt-ccf-ledger v7.0.6`` instance on 2026-06-26 and committed to
+    ``test-vectors/v1/valid-ccf-vds2/``.
+
+    The test proves that our implementation of the CCF ccf.v1 Merkle proof
+    (vds=2, ES384) is correct: the SHA-256 leaf/path walk matches what
+    ``ccf.cose.verify_receipt`` confirmed on the live node.
+    """
+    from pathlib import Path
+
+    vector_dir = (
+        Path(__file__).resolve().parents[1] / "test-vectors" / "v1" / "valid-ccf-vds2"
+    )
+    statement = (vector_dir / "statement.cose").read_bytes()
+    receipt = (vector_dir / "receipt.cose").read_bytes()
+    log_pub = (vector_dir / "log-key.pub").read_bytes()
+
+    import hashlib as _hashlib
+
+    leaf_hex = _hashlib.sha256(statement).hexdigest()
+
+    result = verify_receipt(receipt, leaf_entry_hex=leaf_hex, log_public_key_pem=log_pub)
+
+    assert result.ok, f"CCF vds=2 frozen receipt did not verify: {result.errors}"
+    assert result.root == "1cb9bf8123a19c1ed2fcb1c2bfb8412e183634d806880ca4cef51ed399a3fb0f"
+    assert result.tree_size is None
+    assert result.leaf_index is None
+    assert result.errors == []
