@@ -51,11 +51,14 @@ MAX_MESSAGE_BYTES = 10 * 1024 * 1024  # 10 MiB
 #: COSE algorithm code points (RFC 9053).
 COSE_ALG_EDDSA = -8
 COSE_ALG_ES256 = -7
+#: ES384: ECDSA with P-384 curve and SHA-384; used by CCF service keys.
+COSE_ALG_ES384 = -35
 
 #: Map of the algorithm names this module can sign/verify to code points.
 ALG_NAME_TO_CODE = {
     "EdDSA": COSE_ALG_EDDSA,
     "ES256": COSE_ALG_ES256,
+    "ES384": COSE_ALG_ES384,
 }
 ALG_CODE_TO_NAME = {v: k for k, v in ALG_NAME_TO_CODE.items()}
 
@@ -360,6 +363,17 @@ def verify_sign1(
             s = int.from_bytes(signature[32:], "big")
             der = encode_dss_signature(r, s)
             pubkey.verify(der, tbs, ec.ECDSA(hashes.SHA256()))
+        elif alg == COSE_ALG_ES384:
+            if not isinstance(pubkey, ec.EllipticCurvePublicKey):
+                raise CoseError("alg is ES384 (-35) but the public key is not EC")
+            if len(signature) != 96:
+                raise CoseError(
+                    f"ES384 COSE signature must be 96 raw bytes (r||s), got {len(signature)}"
+                )
+            r = int.from_bytes(signature[:48], "big")
+            s = int.from_bytes(signature[48:], "big")
+            der = encode_dss_signature(r, s)
+            pubkey.verify(der, tbs, ec.ECDSA(hashes.SHA384()))
         else:
             raise CoseError(f"unsupported alg code point {alg} for verification")
     except InvalidSignature as exc:
@@ -380,6 +394,7 @@ __all__ = [
     "HDR_CRIT",
     "COSE_ALG_EDDSA",
     "COSE_ALG_ES256",
+    "COSE_ALG_ES384",
     "ALG_NAME_TO_CODE",
     "ALG_CODE_TO_NAME",
 ]

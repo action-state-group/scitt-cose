@@ -131,22 +131,263 @@ CAPABILITIES = {
 }
 
 
-#: Security headers on every response, both wrappers. The page is static and
-#: script-free by construction; these make that posture legible to the header
-#: scanners a security audience runs reflexively. CSP allows only the inline
-#: <style> block (the page's single styling mechanism) and forbids everything
-#: else — there is nothing to load, frame, or submit.
+#: Security headers on every response, both wrappers. JS is externalized to
+#: /static/verify.js (script-src 'self'); the interactive form POSTs same-origin
+#: only (connect-src 'self', form-action 'self'). No unsafe-inline scripts,
+#: no external resources, no framing. Inline CSS is the only relaxation.
 SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
     ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
     ("X-Content-Type-Options", "nosniff"),
     ("X-Frame-Options", "DENY"),
     (
         "Content-Security-Policy",
-        "default-src 'none'; style-src 'unsafe-inline'; "
-        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        "default-src 'none'; script-src 'self'; connect-src 'self'; "
+        "style-src 'unsafe-inline'; img-src 'none'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     ),
     ("Referrer-Policy", "no-referrer"),
 )
+
+
+# ---------------------------------------------------------------------------
+# Page assets — separated from the f-string template so CSS braces don't need
+# escaping (Python reads these as plain string values, not format slots).
+# ---------------------------------------------------------------------------
+
+#: Interactive widget CSS — stored as a plain string so the f-string template
+#: can inject it with {_PAGE_CSS} without doubling every CSS brace.
+_PAGE_CSS = """
+  :root{
+    --ink:#0B0E14; --ink-2:#161B25; --paper:#FCFCFA; --paper-2:#F4F4F0;
+    --line:#E3E3DC; --line-2:#2A313F;
+    --muted:#5C6573; --muted-2:#9AA3B2;
+    --accent:#3A5BD9; --accent-soft:#EAEEFC;
+    --pass:#127A52; --pass-soft:#E6F2EC;
+    --fail:#B3261E; --fail-soft:#FBEAE8;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:system-ui,sans-serif;background:var(--paper);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:980px;margin:0 auto;padding:0 32px}
+  .mono{font-family:var(--mono)}
+
+  nav{position:sticky;top:0;z-index:50;background:rgba(252,252,250,0.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav-in{max-width:980px;margin:0 auto;padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;letter-spacing:-0.2px;text-decoration:none;color:var(--ink)}
+  .brand .glyph{width:22px;height:22px;border:1.5px solid var(--ink);border-radius:5px;position:relative;flex-shrink:0}
+  .brand .glyph::after{content:'';position:absolute;inset:4px;border-left:1.5px solid var(--accent);border-bottom:1.5px solid var(--accent);transform:rotate(-45deg) translate(1px,-1px)}
+  .brand .svc{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:1px;text-transform:uppercase;color:var(--muted);border-left:1px solid var(--line);padding-left:10px;margin-left:2px}
+  .nav-links{display:flex;gap:22px;align-items:center}
+  .nav-links a{font-size:13.5px;color:var(--muted);text-decoration:none;transition:color .15s;white-space:nowrap}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a.active{color:var(--ink);font-weight:600}
+  .nav-ghost{font-family:var(--mono);font-size:13px;border:1px solid var(--line);padding:7px 14px;border-radius:7px;color:var(--ink)!important}
+  .nav-ghost:hover{border-color:var(--ink)}
+
+  .hero{padding:46px 0 26px}
+  .pill{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:var(--pass);background:var(--pass-soft);padding:6px 13px;border-radius:100px;margin-bottom:18px}
+  .hero h1{font-size:clamp(26px,3.6vw,38px);letter-spacing:-1px;font-weight:700;line-height:1.12;max-width:22ch;margin-bottom:14px}
+  .hero p{font-size:16.5px;color:var(--muted);max-width:64ch}
+
+  .tool{border:1px solid var(--line);border-radius:16px;background:#fff;overflow:hidden;margin:28px 0 8px;box-shadow:0 2px 18px rgba(11,14,20,.04)}
+  .tool-head{display:flex;border-bottom:1px solid var(--line)}
+  .tab{flex:1;padding:14px 18px;font-size:13.5px;font-weight:500;color:var(--muted);background:var(--paper-2);border:none;cursor:pointer;border-right:1px solid var(--line);font-family:inherit;transition:all .15s}
+  .tab:last-child{border-right:none}
+  .tab.active{background:#fff;color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+  .tool-body{padding:24px}
+  .panel{display:none;flex-direction:column;gap:16px}
+  .panel.active{display:flex}
+  .field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+  .field label .opt{font-weight:400;color:var(--muted-2);font-family:var(--mono);font-size:11px;margin-left:6px}
+  .field .hint{font-size:12px;color:var(--muted);margin-top:5px}
+  textarea{width:100%;min-height:84px;resize:vertical;font-family:var(--mono);font-size:12.5px;line-height:1.5;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:11px 13px;outline:none;transition:border-color .15s}
+  textarea:focus{border-color:var(--accent)}
+  textarea::placeholder{color:var(--muted-2)}
+  .filerow{display:flex;align-items:center;gap:10px;margin-top:7px}
+  .fbtn{font-family:var(--mono);font-size:12px;border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 12px;cursor:pointer;color:var(--ink)}
+  .fbtn:hover{border-color:var(--ink)}
+  .fname{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .actions{display:flex;align-items:center;gap:14px;margin-top:4px}
+  .verify-btn{display:inline-flex;align-items:center;gap:9px;background:var(--ink);color:var(--paper);border:none;font-size:14.5px;font-weight:600;font-family:inherit;padding:13px 26px;border-radius:10px;cursor:pointer;transition:background .15s}
+  .verify-btn:hover{background:var(--accent)}
+  .verify-btn:disabled{opacity:.55;cursor:default}
+  .clear-btn{font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;text-underline-offset:2px}
+
+  .verdict{display:none;margin-top:20px;border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+  .verdict.show{display:block}
+  .vhead{padding:18px 22px;display:flex;align-items:center;gap:14px}
+  .vhead .badge{font-family:var(--mono);font-weight:600;font-size:13px;letter-spacing:.5px;padding:7px 15px;border-radius:8px}
+  .vhead .vtext{font-size:15px;font-weight:600}
+  .verdict.ok .vhead{background:var(--pass-soft)} .verdict.ok .badge{background:var(--pass);color:#fff} .verdict.ok .vtext{color:var(--pass)}
+  .verdict.no .vhead{background:var(--fail-soft)} .verdict.no .badge{background:var(--fail);color:#fff} .verdict.no .vtext{color:var(--fail)}
+  .verdict.err .vhead{background:var(--paper-2)} .verdict.err .badge{background:var(--muted);color:#fff} .verdict.err .vtext{color:var(--muted)}
+  .vbody{padding:8px 22px 20px;background:#fff}
+  .vcard{border-top:1px solid var(--line);padding:16px 0}
+  .vcard:first-child{border-top:none}
+  .vcard h4{font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:13px}
+  .kv dt{color:var(--muted);font-family:var(--mono);font-size:12px}
+  .kv dd{font-family:var(--mono);font-size:12.5px;word-break:break-all}
+  .kv dd.t{color:var(--pass);font-weight:600} .kv dd.f{color:var(--fail);font-weight:600}
+  .reasons{list-style:none;display:flex;flex-direction:column;gap:7px}
+  .reasons li{font-size:13px;color:var(--ink);padding-left:18px;position:relative;font-family:var(--mono)}
+  .reasons li::before{content:'!';position:absolute;left:0;color:var(--fail);font-weight:700}
+  .verdict.ok .reasons li::before{content:'✓';color:var(--pass)}
+
+  section.band{padding:48px 0;border-top:1px solid var(--line)}
+  .sec-eyebrow{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
+  .sec-title{font-size:21px;font-weight:700;letter-spacing:-0.4px;margin-bottom:18px}
+  table.boundary{border-collapse:collapse;width:100%;font-size:13.5px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  table.boundary th,table.boundary td{padding:11px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+  table.boundary thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--paper-2)}
+  table.boundary tbody th{font-weight:600;white-space:nowrap;width:160px}
+  table.boundary tbody td{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+  table.boundary tr:last-child th,table.boundary tr:last-child td{border-bottom:none}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:6px}
+  .lst h5{font-size:13px;font-weight:600;margin-bottom:10px}
+  .lst ul{list-style:none;display:flex;flex-direction:column;gap:8px}
+  .lst li{font-size:13.5px;color:var(--muted);padding-left:18px;position:relative}
+  .lst.does li::before{content:'+';position:absolute;left:0;color:var(--pass);font-weight:700}
+  .lst.dont li::before{content:'–';position:absolute;left:0;color:var(--muted-2);font-weight:700}
+  .note{background:var(--paper-2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:14px 18px;font-size:14px;color:var(--ink);margin-top:6px}
+  .note code{font-family:var(--mono);font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  .privacy-lst{list-style:none;display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .privacy-lst li{font-size:13px;color:var(--muted);padding-left:18px;position:relative;font-family:var(--mono)}
+  .privacy-lst li::before{content:'+';position:absolute;left:0;color:var(--pass);font-weight:700}
+
+  footer{padding:48px 0 56px}
+  .foot-in{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .foot-brand{max-width:38ch}
+  .foot-brand p{font-size:13px;color:var(--muted);margin-top:12px}
+  .foot-cols{display:flex;gap:48px;flex-wrap:wrap}
+  .foot-col h5{font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted-2);margin-bottom:14px}
+  .foot-col a{display:block;font-size:13.5px;color:var(--muted);text-decoration:none;margin-bottom:9px}
+  .foot-col a:hover{color:var(--ink)}
+  .foot-note{margin-top:40px;padding-top:24px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted-2);font-family:var(--mono)}
+
+  @media(max-width:780px){
+    .twocol{grid-template-columns:1fr}
+    .kv{grid-template-columns:1fr}
+    .kv dt{margin-top:6px}
+    .nav-in{gap:12px}
+    .nav-links{gap:16px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .nav-links::-webkit-scrollbar{display:none}
+  }
+"""
+
+#: The interactive widget JavaScript — externalized so script-src 'self' holds
+#: without unsafe-inline. Served at GET /static/verify.js.
+VERIFY_JS = """\
+(function(){
+  "use strict";
+  var ENDPOINT = "/verify";
+
+  function $(id){ return document.getElementById(id); }
+
+  var tabs = document.querySelectorAll(".tab");
+  tabs.forEach(function(t){
+    t.addEventListener("click", function(){
+      tabs.forEach(function(x){ x.classList.remove("active"); });
+      document.querySelectorAll(".panel").forEach(function(p){ p.classList.remove("active"); });
+      t.classList.add("active");
+      $(t.getAttribute("data-panel")).classList.add("active");
+    });
+  });
+
+  document.querySelectorAll(".fbtn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var target = btn.getAttribute("data-target");
+      var input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".cose,.cbor,application/cose,application/octet-stream";
+      input.addEventListener("change", function(){
+        var file = input.files && input.files[0];
+        if(!file) return;
+        var reader = new FileReader();
+        reader.onload = function(){
+          var bytes = new Uint8Array(reader.result);
+          var bin = "";
+          for(var i=0;i<bytes.length;i++){ bin += String.fromCharCode(bytes[i]); }
+          $(target).value = btoa(bin);
+          $("fn-"+target).textContent = file.name + " (" + bytes.length + " bytes)";
+        };
+        reader.readAsArrayBuffer(file);
+      });
+      input.click();
+    });
+  });
+
+  function val(id){ var el=$(id); return el && el.value.trim() ? el.value.trim() : null; }
+
+  function row(dt, dd, cls){
+    var safe = (dd===null||dd===undefined) ? "\\u2014" : String(dd);
+    return "<dt>"+dt+"</dt><dd"+(cls?(' class="'+cls+'"'):"")+">"+
+      safe.replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</dd>";
+  }
+
+  function render(v){
+    var verdict=$("verdict"), badge=$("vbadge"), text=$("vtext"), body=$("vbody");
+    verdict.classList.remove("ok","no","err");
+    var html = "";
+    if(v.__transport){
+      verdict.classList.add("err"); badge.textContent="ERROR"; text.textContent=v.__transport;
+      body.innerHTML="<div class='vcard'><p style='font-size:13px;color:var(--muted)'>The verifier could not be reached. Locally, serve the page from the verifier or run <code class='mono'>scitt-cose</code> directly.</p></div>";
+      verdict.classList.add("show"); return;
+    }
+    if(v.valid){verdict.classList.add("ok");badge.textContent="VALID";text.textContent="Everything submitted verified.";}
+    else{verdict.classList.add("no");badge.textContent="INVALID";text.textContent="Did not verify \\u2014 see reasons below.";}
+    if(v.statement){
+      var s=v.statement, sv=s.signature_verified;
+      html+="<div class='vcard'><h4>Signed statement</h4><dl class='kv'>"
+        +row("issuer",s.issuer)+row("subject",s.subject)
+        +row("content_type",s.content_type)+row("alg",s.alg)
+        +row("signature",sv===true?"verified":(sv===false?"NOT verified":"not checked"),sv===true?"t":(sv===false?"f":""))
+        +row("payload_len",s.payload_len)+"</dl></div>";
+    }
+    if(v.receipt){
+      var r=v.receipt;
+      html+="<div class='vcard'><h4>Receipt \\u00b7 inclusion proof</h4><dl class='kv'>"
+        +row("inclusion",r.ok===true?"verified":"NOT verified",r.ok===true?"t":"f")
+        +row("root",r.root)+row("tree_size",r.tree_size)+row("leaf_index",r.leaf_index)
+        +"</dl></div>";
+    }
+    var reasons=(v.reasons||[]);
+    if(reasons.length){
+      html+="<div class='vcard'><h4>"+(v.valid?"Notes":"Reasons")+"</h4><ul class='reasons'>"
+        +reasons.map(function(x){return "<li>"+String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</li>";}).join("")
+        +"</ul></div>";
+    }
+    body.innerHTML=html||"<div class='vcard'><p style='font-size:13px;color:var(--muted)'>No detail returned.</p></div>";
+    verdict.classList.add("show");
+  }
+
+  $("verifyBtn").addEventListener("click", function(){
+    var payload={};
+    [["statement_b64","statement_b64"],["statement_pubkey_pem","statement_pubkey_pem"],
+     ["receipt_b64","receipt_b64"],["log_pubkey_pem","log_pubkey_pem"],
+     ["leaf_entry_hex","leaf_entry_hex"]].forEach(function(p){
+       var v=val(p[1]); if(v!==null) payload[p[0]]=v;
+     });
+    if(!payload.statement_b64 && !payload.receipt_b64){
+      render({valid:false,reasons:["Supply at least one of: a signed statement, or a receipt."]});
+      return;
+    }
+    var btn=$("verifyBtn"); btn.disabled=true; var old=btn.innerHTML; btn.innerHTML="Verifying\\u2026";
+    fetch(ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      .then(function(res){return res.json();})
+      .then(function(v){render(v);})
+      .catch(function(){render({__transport:"Could not reach the verifier."});})
+      .finally(function(){btn.disabled=false;btn.innerHTML=old;});
+  });
+
+  $("clearBtn").addEventListener("click", function(){
+    ["statement_b64","statement_pubkey_pem","receipt_b64","log_pubkey_pem","leaf_entry_hex"].forEach(function(id){$(id).value="";});
+    document.querySelectorAll(".fname").forEach(function(f){f.textContent="";});
+    $("verdict").classList.remove("show");
+  });
+})();
+"""
 
 
 def _esc(s: str) -> str:
@@ -156,10 +397,12 @@ def _esc(s: str) -> str:
 def render_landing_page() -> str:
     """The human-facing landing page (``GET /`` with ``Accept: text/html``).
 
-    Renders the SAME data the JSON capabilities response carries — including the
-    verifier-vs-Transparency-Service **boundary table**, on the page itself, not
-    buried in docs. Static, no scripts, no external assets, built from the same
-    constants the API serves so the two can never drift apart.
+    Interactive verify widget: tabbed receipt / statement panels, file-to-base64
+    upload, same-origin POST /verify, verdict rendering. JS is served separately
+    at /static/verify.js (script-src 'self'; no unsafe-inline). Sections are
+    data-driven from the same Python constants the JSON capabilities response
+    carries — the page and the API cannot drift apart. Boundary table, privacy
+    posture, and "verify locally" honesty are all on the page, not in docs.
     """
     rows = "\n".join(
         "<tr><th>{d}</th><td>{v}</td><td>{t}</td></tr>".format(
@@ -172,115 +415,180 @@ def render_landing_page() -> str:
     does = "\n".join(f"<li>{_esc(x)}</li>" for x in CAPABILITIES["does"])
     does_not = "\n".join(f"<li>{_esc(x)}</li>" for x in CAPABILITIES["does_not"])
     privacy = "\n".join(f"<li>{_esc(x)}</li>" for x in PRIVACY)
+    draft = _esc(DRAFT_TRACKING_NOTICE)
+    summary = _esc(SUMMARY)
+    repo = _esc(REPO_URL)
+    operated_by = _esc(ATTRIBUTION["operated_by"])
+    license_ = _esc(ATTRIBUTION["license"])
+    foundation = _esc(ATTRIBUTION["foundation_intent"])
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SCITT/COSE verifier — stateless, read-only</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCITT/COSE Verifier — verify a receipt or signed statement, stateless</title>
+<meta name="description" content="A free, stateless verifier for SCITT receipts and signed statements. Paste or upload a receipt or signed statement, get valid/invalid + reasons. Nothing is stored. It verifies; it issues nothing.">
 <style>
-  /* Tokens — "sealed evidence / precision instrument". Paper (light) and warm
-     instrument dark; system fonts only, no scripts, no fetched assets.
-     --pass / --broken are the shared verdict tokens, reserved for verdict
-     surfaces (unused on this static page, kept so the set stays whole). */
-  :root {{
-    color-scheme: light dark;
-    --bg: #FAF9F7; --surface: #FFFFFF; --ink: #1C1917; --muted: #57534E;
-    --hairline: #E7E5E4; --seal: #B45309; --pass: #15803D; --broken: #B91C1C;
-    --serif: "Iowan Old Style", Palatino, Georgia, serif;
-    --sans: system-ui, sans-serif;
-    --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{
-      --bg: #16130F; --surface: #1F1B16; --ink: #E8E3DB; --muted: #A8A29E;
-      --hairline: #332E27; --seal: #FBBF24; --pass: #4ADE80; --broken: #F87171;
-    }}
-  }}
-  body {{ font: 16px/1.55 var(--sans); max-width: 46rem; margin: 2rem auto; padding: 0 1rem;
-         color: var(--ink); background: var(--bg); }}
-  h1, h2 {{ font-family: var(--serif); font-weight: 600; }}
-  h1 {{ font-size: 1.6rem; }} h2 {{ font-size: 1.2rem; margin-top: 2rem; }}
-  a {{ color: var(--seal); text-decoration: underline dotted; text-underline-offset: 2px; }}
-  a:hover {{ text-decoration-style: solid; }}
-  a:focus-visible {{ outline: 2px solid var(--seal); outline-offset: 2px; border-radius: 2px; }}
-  table {{ border-collapse: collapse; width: 100%; margin: 1rem 0;
-          background: var(--surface); border: 1px solid var(--hairline); }}
-  th, td {{ padding: .7rem .85rem; text-align: left; vertical-align: top;
-           border-bottom: 1px solid var(--hairline); }}
-  thead th {{ font-family: var(--serif); font-size: 11px; font-weight: 600;
-             text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }}
-  tbody th {{ font-family: var(--serif); font-weight: 600; white-space: nowrap; }}
-  tbody td {{ font-family: var(--mono); font-size: 13px; }}
-  tbody tr:last-child th, tbody tr:last-child td {{ border-bottom: none; }}
-  code, pre {{ font-family: var(--mono); font-size: 13px;
-              background: var(--surface); border: 1px solid var(--hairline); border-radius: 4px; }}
-  code {{ padding: .1rem .3rem; }} pre {{ padding: .75rem; overflow-x: auto; }}
-  .notice {{ background: var(--surface); border: 1px solid var(--hairline);
-            border-left: 3px solid var(--seal); border-radius: 4px; padding: .75rem 1rem; }}
-  footer {{ margin-top: 2.5rem; border-top: 1px solid var(--hairline); padding-top: 1rem;
-           font-size: .85rem; color: var(--muted); }}
-  footer a {{ color: inherit; }}
+{_PAGE_CSS}
 </style>
 </head>
 <body>
-<h1>SCITT/COSE verifier</h1>
-<p><strong>{_esc(SUMMARY)}</strong></p>
-<p>It verifies a SCITT <code>COSE_Sign1</code> Signed Statement and/or a COSE
-Receipt (RFC&nbsp;9162 SHA-256 inclusion proof + log signature) and returns
-<em>valid / invalid + reasons</em>. Nothing you submit is stored or logged.</p>
 
-<h2>This is a verifier, NOT a Transparency Service</h2>
-<table>
-<thead><tr><th></th><th>This service: SCITT-only verifier</th><th>A Transparency Service (separate concern)</th></tr></thead>
-<tbody>
+<nav>
+  <div class="nav-in">
+    <a class="brand" href="https://agentactioncapsule.org"><span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span></a>
+    <div class="nav-links">
+      <a href="https://agentactioncapsule.org">Standard</a>
+      <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+      <a class="active" href="/">Verifier</a>
+      <a href="https://agentactioncapsule.org/docs/">Docs</a>
+      <a class="nav-ghost" href="https://github.com/action-state-group">Source ↗</a>
+      <a href="https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/">Draft (IETF) ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="pill">Stateless · nothing stored · verifies nothing on faith</div>
+    <h1>Verify a SCITT receipt or signed statement.</h1>
+    <p>{summary} Your bytes are verified in memory and discarded — nothing is stored or logged.</p>
+
+    <div class="tool">
+      <div class="tool-head">
+        <button class="tab active" data-panel="p-receipt">Verify a receipt</button>
+        <button class="tab" data-panel="p-statement">Verify a signed statement</button>
+      </div>
+      <div class="tool-body">
+
+        <div class="panel active" id="p-receipt">
+          <div class="field">
+            <label>COSE Receipt <span class="opt">base64</span></label>
+            <textarea id="receipt_b64" placeholder="base64 of the COSE receipt the log returned…"></textarea>
+            <div class="filerow"><button class="fbtn" data-target="receipt_b64">Upload .cose…</button><span class="fname" id="fn-receipt_b64"></span></div>
+          </div>
+          <div class="field">
+            <label>Log public key <span class="opt">PEM</span></label>
+            <textarea id="log_pubkey_pem" placeholder="-----BEGIN PUBLIC KEY-----&#10;…the transparency log’s public key…&#10;-----END PUBLIC KEY-----"></textarea>
+            <div class="hint">From the log’s <code class="mono">/.well-known/did.json</code>. Required to verify a receipt.</div>
+          </div>
+          <div class="field">
+            <label>Leaf entry <span class="opt">hex</span></label>
+            <textarea id="leaf_entry_hex" style="min-height:48px" placeholder="hex of the leaf digest the receipt proves (SHA-256 of the statement bytes)"></textarea>
+          </div>
+        </div>
+
+        <div class="panel" id="p-statement">
+          <div class="field">
+            <label>Signed Statement <span class="opt">base64</span></label>
+            <textarea id="statement_b64" placeholder="base64 of the COSE_Sign1 signed statement…"></textarea>
+            <div class="filerow"><button class="fbtn" data-target="statement_b64">Upload .cose…</button><span class="fname" id="fn-statement_b64"></span></div>
+          </div>
+          <div class="field">
+            <label>Statement public key <span class="opt">PEM · optional</span></label>
+            <textarea id="statement_pubkey_pem" placeholder="-----BEGIN PUBLIC KEY-----&#10;…issuer’s public key, to check the signature…&#10;-----END PUBLIC KEY-----"></textarea>
+            <div class="hint">Without a key the statement’s fields are reported but the signature is not checked (verdict stays invalid until a key verifies it).</div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="verify-btn" id="verifyBtn">Verify <span class="mono">→</span></button>
+          <button class="clear-btn" id="clearBtn">Clear</button>
+        </div>
+
+        <div class="verdict" id="verdict">
+          <div class="vhead"><span class="badge" id="vbadge">—</span><span class="vtext" id="vtext"></span></div>
+          <div class="vbody" id="vbody"></div>
+        </div>
+
+      </div>
+    </div>
+    <p style="font-size:12.5px;color:var(--muted-2);font-family:var(--mono)">POST /verify · stateless · max 1 MB · the endpoint retains nothing but an anonymous request count.</p>
+  </div>
+</header>
+
+<section class="band" id="how">
+  <div class="wrap">
+    <div class="sec-eyebrow">The boundary</div>
+    <h2 class="sec-title">This is a verifier — NOT a Transparency Service.</h2>
+    <table class="boundary">
+      <thead><tr><th></th><th>This service · verifier</th><th>A Transparency Service · separate concern</th></tr></thead>
+      <tbody>
 {rows}
-</tbody>
-</table>
-<p>A verifier that starts storing submissions, issuing receipts, or anchoring
-has silently become a transparency service with all of its obligations. This
-one has no write path, no persistence, and no key custody — by construction.</p>
+      </tbody>
+    </table>
+    <p style="font-size:14px;color:var(--muted);margin-top:14px">A verifier that starts storing submissions, issuing receipts, or anchoring has silently become a Transparency Service with all of its obligations. This one has no write path, no persistence, and no key custody — by construction. To run a real log, see <a href="https://anchor.agentactioncapsule.org" style="color:var(--accent)">the transparency service ↗</a>.</p>
+  </div>
+</section>
 
-<h2>What it does</h2>
-<ul>
+<section class="band">
+  <div class="wrap">
+    <div class="twocol">
+      <div class="lst does">
+        <h5>What it does</h5>
+        <ul>
 {does}
-</ul>
-
-<h2>What it does not do</h2>
-<ul>
+        </ul>
+      </div>
+      <div class="lst dont">
+        <h5>What it does not do</h5>
+        <ul>
 {does_not}
-</ul>
+        </ul>
+      </div>
+    </div>
+    <div class="note"><strong>You don't need this service.</strong> The verifier is open source — <code>pip install scitt-cose</code> — and runs anywhere. This endpoint runs the identical library; the result is the same. For maximal privacy, verify locally: <a href="{repo}" style="color:var(--accent)">source ↗</a>.</div>
+  </div>
+</section>
 
-<h2>How to use it</h2>
-<pre>curl -s -X POST /verify -H 'Content-Type: application/json' -d '{{
-  "receipt_b64":    "&lt;base64 COSE Receipt&gt;",
-  "log_pubkey_pem": "&lt;PEM public key of the log&gt;",
-  "leaf_entry_hex": "&lt;hex leaf digest the receipt proves&gt;"
-}}'
--&gt; {{"valid": bool, "statement": …, "receipt": …, "reasons": […]}}</pre>
-<p>Statements go in the same request as <code>statement_b64</code> (+
-<code>statement_pubkey_pem</code> to check the signature). The receipt path
-needs only the <em>leaf digest</em> + proof — never your payload.</p>
-<p><strong>You don't need this service.</strong> The verifier is open source
-(<code>pip install scitt-cose</code>,
-<a href="{REPO_URL}">source</a>) and runs anywhere; this endpoint runs the
-identical library and exists for convenience and demos — the result is the
-same, so for maximal privacy verify locally.</p>
-
-<h2>Privacy</h2>
-<ul>
+<section class="band">
+  <div class="wrap">
+    <div class="sec-eyebrow">Privacy posture</div>
+    <h2 class="sec-title">What this endpoint retains — and does not retain.</h2>
+    <ul class="privacy-lst">
 {privacy}
-</ul>
+    </ul>
+  </div>
+</section>
 
-<h2>Standards status</h2>
-<p class="notice">{_esc(DRAFT_TRACKING_NOTICE)}</p>
+<section class="band">
+  <div class="wrap">
+    <div class="sec-eyebrow">Standards status</div>
+    <div class="note">{draft}</div>
+  </div>
+</section>
 
 <footer>
-<p>Operated by {_esc(ATTRIBUTION["operated_by"])} &middot; verifier is open
-source (<a href="{REPO_URL}">{_esc(ATTRIBUTION["license"])}</a>) &middot;
-{_esc(ATTRIBUTION["foundation_intent"])}.</p>
-<p>Part of Action State Group's open verification tooling.</p>
+  <div class="wrap">
+    <div class="foot-in">
+      <div class="foot-brand">
+        <a class="brand" href="https://agentactioncapsule.org"><span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span></a>
+        <p>An open profile on IETF SCITT for verifiable records of agent actions. Neutral substrate for the agent ecosystem, stewarded by Action State Group.</p>
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <h5>Standard</h5>
+          <a href="https://agentactioncapsule.org">Overview</a>
+          <a href="https://agentactioncapsule.org/docs/">Docs</a>
+          <a href="https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/">Internet-Draft ↗</a>
+        </div>
+        <div class="foot-col">
+          <h5>Services</h5>
+          <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+          <a href="/">Verifier</a>
+        </div>
+        <div class="foot-col">
+          <h5>Source</h5>
+          <a href="https://github.com/action-state-group">GitHub ↗</a>
+          <a href="https://github.com/ietf-wg-scitt/examples">Test vectors ↗</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-note">Stateless SCITT/COSE verifier · {license_} · operated by {operated_by} · {foundation}</div>
+  </div>
 </footer>
+
+<script src="/static/verify.js"></script>
 </body>
 </html>
 """
@@ -500,9 +808,22 @@ def make_handler(verify_rpm: int | None = None):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_js(self, code: int, content: str) -> None:
+            body = content.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for name, value in SECURITY_HEADERS:
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):  # noqa: N802
             if self.path.rstrip("/") in ("/health", "/healthz"):
                 self._send_json(200, {"ok": True})
+            elif self.path == "/static/verify.js":
+                self._send_js(200, VERIFY_JS)
             elif self.path.rstrip("/") in ("", "/verify"):
                 # Browsers get the landing page (boundary table on the page
                 # itself); API clients get the same data as JSON.
@@ -597,6 +918,18 @@ def make_asgi_app(verify_rpm: int | None = None):
             })
             await send({"type": "http.response.body", "body": html.encode("utf-8")})
 
+        async def send_js(status: int, content: str) -> None:
+            await send({
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"application/javascript; charset=utf-8"),
+                    (b"cache-control", b"no-store"),
+                    *sec_headers,
+                ],
+            })
+            await send({"type": "http.response.body", "body": content.encode("utf-8")})
+
         def _accepts_html() -> bool:
             for name, value in scope.get("headers", []):
                 if name == b"accept" and b"text/html" in value:
@@ -615,6 +948,9 @@ def make_asgi_app(verify_rpm: int | None = None):
 
         if method == "GET" and path in ("/health", "/healthz"):
             await send_json(200, {"ok": True})
+            return
+        if method == "GET" and path == "/static/verify.js":
+            await send_js(200, VERIFY_JS)
             return
         if method == "GET" and path in ("/", "/verify"):
             # Browsers get the landing page (boundary table on the page itself);
@@ -669,6 +1005,7 @@ __all__ = [
     "PRIVACY",
     "REPO_URL",
     "SUMMARY",
+    "VERIFY_JS",
     "render_landing_page",
     "verify_payload",
     "verify_request_bytes",

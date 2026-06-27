@@ -1,0 +1,38 @@
+{
+  "version": "1",
+  "description": "CCF interop test vector for IETF 126 \u2014 one Signed Statement, two independent TS receipts",
+  "statement": {
+    "content_type": "application/agent-action-capsule+json",
+    "issuer": "https://interop.action-state-group.example",
+    "subject": "urn:asg:scitt:ccf-interop:ietf126:001",
+    "alg": "EdDSA",
+    "bytes_hex": "d2845882a30378256170706c69636174696f6e2f6167656e742d616374696f6e2d63617073756c652b6a736f6e0fa201782a68747470733a2f2f696e7465726f702e616374696f6e2d73746174652d67726f75702e6578616d706c6502782575726e3a6173673a73636974743a6363662d696e7465726f703a696574663132363a3030310127a058bb7b22616374696f6e5f74797065223a2277726974655f6f72646572222c2263617073756c655f6964223a22696574663132362d6363662d696e7465726f702d303031222c226e6f7465223a2243434620696e7465726f70207465737420766563746f72205c7532303134204945544620313236202f205669656e6e6120323032362d3037222c226f70657261746f72223a22616374696f6e2d73746174652d67726f7570222c2276657264696374223a226578656375746564227d5840ad4d6f42ebc7a1d71bce08d5d704f2166f771fe7232618bbed078d48aeb8e848fa7a2f1d7e8d74aedade895bc6949d6f264485942aad84f0d140c430b83e4000",
+    "bytes_base64": "0oRYgqMDeCVhcHBsaWNhdGlvbi9hZ2VudC1hY3Rpb24tY2Fwc3VsZStqc29uD6IBeCpodHRwczovL2ludGVyb3AuYWN0aW9uLXN0YXRlLWdyb3VwLmV4YW1wbGUCeCV1cm46YXNnOnNjaXR0OmNjZi1pbnRlcm9wOmlldGYxMjY6MDAxASegWLt7ImFjdGlvbl90eXBlIjoid3JpdGVfb3JkZXIiLCJjYXBzdWxlX2lkIjoiaWV0ZjEyNi1jY2YtaW50ZXJvcC0wMDEiLCJub3RlIjoiQ0NGIGludGVyb3AgdGVzdCB2ZWN0b3IgXHUyMDE0IElFVEYgMTI2IC8gVmllbm5hIDIwMjYtMDciLCJvcGVyYXRvciI6ImFjdGlvbi1zdGF0ZS1ncm91cCIsInZlcmRpY3QiOiJleGVjdXRlZCJ9WECtTW9C68eh1xvOCNXXBPIWb3cf5yMmGLvtB41IrrjoSPp6Lx1+jXSu2t6JW8aUnW8mRIWUKq2E8NFAxDC4PkAA",
+    "size_bytes": 390,
+    "issuer_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfDu0O2/dcQPf5j83Mp0EJ7+Jfyp+kuKGm3uqMDUEijI=\n-----END PUBLIC KEY-----\n"
+  },
+  "leaf_entry": {
+    "definition": "SHA-256 of the Signed Statement bytes (hex)",
+    "hex": "3a7a4d068161666b576c1df40718915a57c17c0321adabb2ffe460aafdf1c654",
+    "leaf_hash_rfc6962_hex": "470c3e3db28f694f3a3e5c71db11e1e0cf26e16241ce1ecc2819f6edc666c51d"
+  },
+  "our_receipt": {
+    "ts": "action-state-group (RFC9162_SHA256 / vds=1)",
+    "alg": "EdDSA",
+    "bytes_hex": "d28447a219018b010127a119018ca120814483010080f65840b0cd400caaa97001a5831dd8b3ed3cac0d0fac019df5e749fef4691f3479142aaf6c8533afedebbe12d45150a5844de190ac33074c3acced943e9c229f770409",
+    "bytes_base64": "0oRHohkBiwEBJ6EZAYyhIIFEgwEAgPZYQLDNQAyqqXABpYMd2LPtPKwND6wBnfXnSf70aR80eRQqr2yFM6/t674S1FFQpYRN4ZCsMwdMOsztlD6cIp93BAk=",
+    "size_bytes": 89,
+    "ts_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEApYiDKj/bZkuFEntYVsail1IgD015/skayTXkc8z+P8o=\n-----END PUBLIC KEY-----\n",
+    "verify_result": {
+      "ok": true,
+      "root": "470c3e3db28f694f3a3e5c71db11e1e0cf26e16241ce1ecc2819f6edc666c51d",
+      "tree_size": 1,
+      "errors": []
+    }
+  },
+  "ccf_receipt": {
+    "status": "pending \u2014 awaiting Amaury / Microsoft CCF registration",
+    "instructions": "Register statement.bytes_hex (decode hex \u2192 raw bytes) on a CCF SCITT node; return the COSE Receipt bytes and the TS DID/public key.",
+    "verify_command": "SCITT_CCF_TLS_VERIFY=0 pytest -m integration tests/test_ccf_interop.py::test_ccf_sandbox_live"
+  }
+}

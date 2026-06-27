@@ -54,7 +54,8 @@ def test_published_bytes_match_sha256sums():
 
     on_disk = {
         str(p.relative_to(VECTORS))
-        for p in VECTORS.glob("v*/**/*") if p.is_file()
+        for p in VECTORS.glob("v*/**/*")
+        if p.is_file() and p.name not in (".gitignore",)
     }
     unlisted = on_disk - set(listed)
     assert not unlisted, f"published files missing from SHA256SUMS: {sorted(unlisted)}"
