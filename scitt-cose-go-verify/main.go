@@ -25,6 +25,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -52,6 +53,7 @@ const (
 const (
 	algEdDSA = -8
 	algES256 = -7
+	algES384 = -35
 )
 
 // CWT claim labels (RFC 8392 / IANA CWT Claims registry).
@@ -62,10 +64,11 @@ const (
 
 // Receipt (draft-ietf-cose-merkle-tree-proofs) labels.
 const (
-	hdrVDS            = 395 // verifiable-data-structure (protected)
-	hdrVDP            = 396 // verifiable-data-proofs (unprotected)
-	vdsRFC9162SHA256  = 1   // RFC 9162 SHA-256 Merkle tree
-	vdpInclusionProof = -1  // inclusion-proofs array key
+	hdrVDS             = 395 // verifiable-data-structure (protected)
+	hdrVDP             = 396 // verifiable-data-proofs (unprotected)
+	vdsRFC9162SHA256   = 1   // RFC 9162 SHA-256 Merkle tree
+	vdsCCFLedgerSHA256 = 2   // CCF ccf.v1 Merkle receipt
+	vdpInclusionProof  = -1  // inclusion-proofs array key
 )
 
 // receiptOut is the receipt sub-result.
@@ -206,8 +209,8 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 
 	// vds MUST come from the protected (integrity-protected) header.
 	vds, ok := intAt(prot, hdrVDS)
-	if !ok || vds != vdsRFC9162SHA256 {
-		r.Error = fmt.Sprintf("protected vds (label 395) is %v; expected %d (RFC9162_SHA256)", vds, vdsRFC9162SHA256)
+	if !ok {
+		r.Error = "receipt protected header missing vds (label 395)"
 		return r
 	}
 	algCode, ok := intAt(prot, hdrAlg)
@@ -221,7 +224,7 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		return r
 	}
 
-	// Decode the inclusion proof from the unprotected vdp map.
+	// Decode the proof blob from the unprotected vdp map (shared by both vds paths).
 	unprot := rawAnyMap(msg.Headers.RawUnprotected)
 	vdpAny, ok := mapGet(unprot, hdrVDP)
 	if !ok {
@@ -249,24 +252,46 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		return r
 	}
 
-	treeSize, leafIndex, auditPath, err := decodeInclusionProof(proofBlob)
-	if err != nil {
-		r.Error = err.Error()
-		return r
-	}
-	r.TreeSize = treeSize
-	r.LeafIndex = leafIndex
-
 	leafBytes, err := hex.DecodeString(leafEntryHex)
 	if err != nil {
 		r.Error = fmt.Sprintf("leaf-entry-hex is not hex: %v", err)
 		return r
 	}
-	root, ok := rootFromInclusionProof(leafBytes, leafIndex, treeSize, auditPath)
-	if !ok {
-		r.Error = "inclusion proof does not reconstruct a root for this leaf"
+
+	var root []byte
+
+	switch vds {
+	case vdsRFC9162SHA256:
+		// --- vds=1: RFC 9162 SHA-256 Merkle tree ---
+		treeSize, leafIndex, auditPath, decErr := decodeInclusionProof(proofBlob)
+		if decErr != nil {
+			r.Error = decErr.Error()
+			return r
+		}
+		r.TreeSize = treeSize
+		r.LeafIndex = leafIndex
+		var ok bool
+		root, ok = rootFromInclusionProof(leafBytes, leafIndex, treeSize, auditPath)
+		if !ok {
+			r.Error = "inclusion proof does not reconstruct a root for this leaf"
+			return r
+		}
+
+	case vdsCCFLedgerSHA256:
+		// --- vds=2: CCF ccf.v1 Merkle receipt ---
+		var ccfErr error
+		root, ccfErr = verifyCCFV1Proof(proofBlob, leafBytes)
+		if ccfErr != nil {
+			r.Error = ccfErr.Error()
+			return r
+		}
+
+	default:
+		r.Error = fmt.Sprintf("unsupported vds %d (supported: %d RFC9162_SHA256, %d CCF_LEDGER_SHA256)",
+			vds, vdsRFC9162SHA256, vdsCCFLedgerSHA256)
 		return r
 	}
+
 	r.Root = hex.EncodeToString(root)
 
 	// Verify the log's COSE_Sign1 over the reconstructed (detached) root.
@@ -405,6 +430,93 @@ func decodeInclusionProof(blob []byte) (int64, int64, [][]byte, error) {
 	return treeSize, leafIndex, path, nil
 }
 
+// verifyCCFV1Proof decodes a CCF ccf.v1 inclusion proof and returns the
+// reconstructed Merkle root. The proof blob is a CBOR map:
+//
+//	{1: [write_set_digest, ce_string, claim_digest], 2: [[left, sibling], ...]}
+//
+// Algorithm (from ccf.cose.verify_receipt):
+//
+//	leaf_hash = SHA-256(write_set_digest || SHA-256(ce_string.encode()) || claim_digest)
+//	for each [left, sibling] in path:
+//	    if left: acc = SHA-256(sibling || acc)
+//	    else:    acc = SHA-256(acc    || sibling)
+func verifyCCFV1Proof(proofBlob []byte, claimDigest []byte) ([]byte, error) {
+	var proof map[any]any
+	if err := cbor.Unmarshal(proofBlob, &proof); err != nil {
+		return nil, fmt.Errorf("CCF proof is not valid CBOR: %v", err)
+	}
+	leafAny, ok := mapGet(proof, 1)
+	if !ok {
+		return nil, fmt.Errorf("CCF proof missing leaf elements (key 1)")
+	}
+	leaf, ok := leafAny.([]any)
+	if !ok || len(leaf) != 3 {
+		return nil, fmt.Errorf("CCF proof leaf (key 1) must be a 3-element array")
+	}
+	writeSetDigest, ok := leaf[0].([]byte)
+	if !ok || len(writeSetDigest) != 32 {
+		return nil, fmt.Errorf("CCF proof write_set_digest must be 32 bytes")
+	}
+	ceString, ok := leaf[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("CCF proof ce_string must be a text string")
+	}
+	proofClaimDigest, ok := leaf[2].([]byte)
+	if !ok || len(proofClaimDigest) != 32 {
+		return nil, fmt.Errorf("CCF proof claim_digest must be 32 bytes")
+	}
+	if !bytes.Equal(proofClaimDigest, claimDigest) {
+		return nil, fmt.Errorf("CCF proof claim_digest does not match leaf_entry_hex")
+	}
+
+	// leaf_hash = SHA-256(write_set_digest || SHA-256(ce_string) || claim_digest)
+	ceHash := sha256.Sum256([]byte(ceString))
+	leafInput := make([]byte, 0, 96)
+	leafInput = append(leafInput, writeSetDigest...)
+	leafInput = append(leafInput, ceHash[:]...)
+	leafInput = append(leafInput, claimDigest...)
+	accArr := sha256.Sum256(leafInput)
+	acc := accArr[:]
+
+	// Walk the sibling path.
+	pathAny, haspath := mapGet(proof, 2)
+	if haspath {
+		path, ok := pathAny.([]any)
+		if !ok {
+			return nil, fmt.Errorf("CCF proof path (key 2) must be an array")
+		}
+		for _, stepAny := range path {
+			step, ok := stepAny.([]any)
+			if !ok || len(step) != 2 {
+				return nil, fmt.Errorf("CCF proof path step must be [left: bool, hash: bstr]")
+			}
+			left, ok := step[0].(bool)
+			if !ok {
+				return nil, fmt.Errorf("CCF proof path step[0] must be bool")
+			}
+			sibling, ok := step[1].([]byte)
+			if !ok || len(sibling) != 32 {
+				return nil, fmt.Errorf("CCF proof path sibling must be 32 bytes")
+			}
+			var h [32]byte
+			if left {
+				in := make([]byte, 0, 64)
+				in = append(in, sibling...)
+				in = append(in, acc...)
+				h = sha256.Sum256(in)
+			} else {
+				in := make([]byte, 0, 64)
+				in = append(in, acc...)
+				in = append(in, sibling...)
+				h = sha256.Sum256(in)
+			}
+			acc = h[:]
+		}
+	}
+	return acc, nil
+}
+
 // --- Keys, verifiers, header decoding ---------------------------------------
 
 func loadPublicKey(path string) any {
@@ -436,8 +548,13 @@ func newVerifier(algName string, pub any) cose.Verifier {
 		if _, ok := pub.(*ecdsa.PublicKey); !ok {
 			fail("alg ES256 requires an *ecdsa.PublicKey, got %T", pub)
 		}
+	case "ES384":
+		coseAlg = cose.AlgorithmES384
+		if _, ok := pub.(*ecdsa.PublicKey); !ok {
+			fail("alg ES384 requires an *ecdsa.PublicKey, got %T", pub)
+		}
 	default:
-		fail("unknown alg %q (want EdDSA or ES256)", algName)
+		fail("unknown alg %q (want EdDSA, ES256, or ES384)", algName)
 	}
 	verifier, err := cose.NewVerifier(coseAlg, pub)
 	if err != nil {
@@ -452,8 +569,10 @@ func algNameFromCode(code int64) (string, error) {
 		return "EdDSA", nil
 	case algES256:
 		return "ES256", nil
+	case algES384:
+		return "ES384", nil
 	default:
-		return "", fmt.Errorf("unsupported alg code point %d (want -8 EdDSA or -7 ES256)", code)
+		return "", fmt.Errorf("unsupported alg code point %d (want -8 EdDSA, -7 ES256, or -35 ES384)", code)
 	}
 }
 
