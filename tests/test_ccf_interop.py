@@ -532,7 +532,6 @@ class CcfSandboxClient:
                     serialization.PublicFormat.SubjectPublicKeyInfo,
                 )
             if kty == "EC" and jwk.get("crv") == "P-256":
-                from cryptography.hazmat.primitives.asymmetric import ec  # noqa: PLC0415
                 from cryptography.hazmat.primitives.asymmetric.ec import (  # noqa: PLC0415
                     SECP256R1,
                     EllipticCurvePublicNumbers,
