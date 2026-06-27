@@ -1,0 +1,2 @@
+# Private generation keys — not published; generated locally by scripts/generate_test_vectors.py
+*.test-private
