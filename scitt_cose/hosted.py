@@ -172,15 +172,18 @@ _PAGE_CSS = """
   .wrap{max-width:980px;margin:0 auto;padding:0 32px}
   .mono{font-family:var(--mono)}
 
-  nav{border-bottom:1px solid var(--line)}
-  .nav-in{max-width:980px;margin:0 auto;padding:14px 32px;display:flex;align-items:center;justify-content:space-between}
-  .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;letter-spacing:-0.2px}
+  nav{position:sticky;top:0;z-index:50;background:rgba(252,252,250,0.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav-in{max-width:980px;margin:0 auto;padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;letter-spacing:-0.2px;text-decoration:none;color:var(--ink)}
   .brand .glyph{width:22px;height:22px;border:1.5px solid var(--ink);border-radius:5px;position:relative;flex-shrink:0}
   .brand .glyph::after{content:'';position:absolute;inset:4px;border-left:1.5px solid var(--accent);border-bottom:1.5px solid var(--accent);transform:rotate(-45deg) translate(1px,-1px)}
   .brand .svc{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:1px;text-transform:uppercase;color:var(--muted);border-left:1px solid var(--line);padding-left:10px;margin-left:2px}
   .nav-links{display:flex;gap:22px;align-items:center}
-  .nav-links a{font-size:13.5px;color:var(--muted);text-decoration:none}
+  .nav-links a{font-size:13.5px;color:var(--muted);text-decoration:none;transition:color .15s;white-space:nowrap}
   .nav-links a:hover{color:var(--ink)}
+  .nav-links a.active{color:var(--ink);font-weight:600}
+  .nav-ghost{font-family:var(--mono);font-size:13px;border:1px solid var(--line);padding:7px 14px;border-radius:7px;color:var(--ink)!important}
+  .nav-ghost:hover{border-color:var(--ink)}
 
   .hero{padding:46px 0 26px}
   .pill{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:var(--pass);background:var(--pass-soft);padding:6px 13px;border-radius:100px;margin-bottom:18px}
@@ -253,18 +256,23 @@ _PAGE_CSS = """
   .privacy-lst li{font-size:13px;color:var(--muted);padding-left:18px;position:relative;font-family:var(--mono)}
   .privacy-lst li::before{content:'+';position:absolute;left:0;color:var(--pass);font-weight:700}
 
-  footer{padding:36px 0 50px}
-  .foot-in{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
-  .foot-links{display:flex;gap:22px;flex-wrap:wrap}
-  .foot-links a{font-size:13px;color:var(--muted);text-decoration:none;font-family:var(--mono)}
-  .foot-links a:hover{color:var(--ink)}
-  .foot-note{font-family:var(--mono);font-size:12px;color:var(--muted-2);margin-top:16px}
+  footer{padding:48px 0 56px}
+  .foot-in{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .foot-brand{max-width:38ch}
+  .foot-brand p{font-size:13px;color:var(--muted);margin-top:12px}
+  .foot-cols{display:flex;gap:48px;flex-wrap:wrap}
+  .foot-col h5{font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted-2);margin-bottom:14px}
+  .foot-col a{display:block;font-size:13.5px;color:var(--muted);text-decoration:none;margin-bottom:9px}
+  .foot-col a:hover{color:var(--ink)}
+  .foot-note{margin-top:40px;padding-top:24px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted-2);font-family:var(--mono)}
 
   @media(max-width:780px){
     .twocol{grid-template-columns:1fr}
     .kv{grid-template-columns:1fr}
     .kv dt{margin-top:6px}
-    .nav-links a:not(:last-child){display:none}
+    .nav-in{gap:12px}
+    .nav-links{gap:16px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .nav-links::-webkit-scrollbar{display:none}
   }
 """
 
@@ -428,12 +436,14 @@ def render_landing_page() -> str:
 
 <nav>
   <div class="nav-in">
-    <div class="brand"><span class="glyph"></span> SCITT/COSE <span class="svc">Verifier</span></div>
+    <a class="brand" href="https://agentactioncapsule.org"><span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span></a>
     <div class="nav-links">
-      <a href="#how">How it works</a>
-      <a href="https://agentactioncapsule.org">The standard ↗</a>
-      <a href="https://anchor.agentactioncapsule.org">Transparency log ↗</a>
-      <a href="{repo}">Source ↗</a>
+      <a href="https://agentactioncapsule.org">Standard</a>
+      <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+      <a class="active" href="/">Verifier</a>
+      <a href="https://agentactioncapsule.org/docs/">Docs</a>
+      <a class="nav-ghost" href="https://github.com/action-state-group">Source ↗</a>
+      <a href="https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/">Draft (IETF) ↗</a>
     </div>
   </div>
 </nav>
@@ -551,11 +561,27 @@ def render_landing_page() -> str:
 <footer>
   <div class="wrap">
     <div class="foot-in">
-      <div class="brand"><span class="glyph"></span> SCITT/COSE <span class="svc">Verifier</span></div>
-      <div class="foot-links">
-        <a href="https://agentactioncapsule.org">The standard ↗</a>
-        <a href="https://anchor.agentactioncapsule.org">Transparency log ↗</a>
-        <a href="{repo}">scitt-cose ↗</a>
+      <div class="foot-brand">
+        <a class="brand" href="https://agentactioncapsule.org"><span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span></a>
+        <p>An open profile on IETF SCITT for verifiable records of agent actions. Neutral substrate for the agent ecosystem, stewarded by Action State Group.</p>
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <h5>Standard</h5>
+          <a href="https://agentactioncapsule.org">Overview</a>
+          <a href="https://agentactioncapsule.org/docs/">Docs</a>
+          <a href="https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/">Internet-Draft ↗</a>
+        </div>
+        <div class="foot-col">
+          <h5>Services</h5>
+          <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+          <a href="/">Verifier</a>
+        </div>
+        <div class="foot-col">
+          <h5>Source</h5>
+          <a href="https://github.com/action-state-group">GitHub ↗</a>
+          <a href="https://github.com/ietf-wg-scitt/examples">Test vectors ↗</a>
+        </div>
       </div>
     </div>
     <div class="foot-note">Stateless SCITT/COSE verifier · {license_} · operated by {operated_by} · {foundation}</div>

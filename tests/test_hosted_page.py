@@ -96,7 +96,12 @@ def test_landing_page_self_hosted_js_no_inline_scripts():
     allowed = {
         REPO_URL,
         "https://agentactioncapsule.org",
+        "https://agentactioncapsule.org/docs/",
         "https://anchor.agentactioncapsule.org",
+        "https://verify.actionstate.ai",
+        "https://github.com/action-state-group",
+        "https://github.com/ietf-wg-scitt/examples",
+        "https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/",
     }
     unexpected = external - allowed
     assert not unexpected, f"unexpected external hrefs: {unexpected}"
