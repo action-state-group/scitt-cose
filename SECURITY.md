@@ -7,7 +7,7 @@ Please report suspected vulnerabilities **privately**:
 
 - **GitHub:** use *Security → Report a vulnerability* on this repository
   (GitHub private vulnerability reporting), or
-- **Email:** stevenmih88@gmail.com with `[scitt-cose security]` in the subject.
+- **Email:** security@actionstate.ai with `[scitt-cose security]` in the subject.
 
 Please do not open a public issue for a suspected vulnerability. We aim to
 acknowledge reports within 72 hours.
