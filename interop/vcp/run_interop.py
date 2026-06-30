@@ -93,7 +93,7 @@ def main() -> int:
     print("=" * 60)
     print("VeritasChain VCP × scitt-cose interop probe")
     print("=" * 60)
-    print(f"\nSource: draft-kamimura-scitt-vcp-01 Appendix A (synthetic key)")
+    print("\nSource: draft-kamimura-scitt-vcp-01 Appendix A (synthetic key)")
     print(f"Payload ({len(VCP_PAYLOAD)} bytes): VCP SIG_ORD_EXE event (XAU/USD)")
 
     # ── 1. Generate a local test key (substitutes for VCP issuer key) ───────
@@ -108,7 +108,7 @@ def main() -> int:
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     (out_dir / "vcp-issuer-pub.pem").write_bytes(pub_pem)
-    print(f"\n[1] Test key generated (Ed25519 — substitutes for VCP issuer key)")
+    print("\n[1] Test key generated (Ed25519 — substitutes for VCP issuer key)")
 
     # ── 2. Wrap the VCP event in COSE_Sign1 (scitt-cose) ────────────────────
     stmt = build_signed_statement(
@@ -132,7 +132,7 @@ def main() -> int:
     content_type = parsed.get("content_type", "?")
     payload_bytes = parsed.get("payload", b"")
 
-    print(f"\n[3] parse_signed_statement result:")
+    print("\n[3] parse_signed_statement result:")
     print(f"    signature_verified : {sig_ok}")
     print(f"    alg                : {alg}")
     print(f"    issuer             : {issuer}")
@@ -156,7 +156,6 @@ def main() -> int:
     # {"signature_verified": False} rather than raising — check the field.
     tampered_parsed = parse_signed_statement(bytes(tampered), public_key_pem=pub_pem)
     tamper_ok = tampered_parsed["signature_verified"] is False
-    tamper_detail = f"signature_verified={tampered_parsed['signature_verified']}"
 
     print(f"\n[4] Tamper test (flip 1 byte at offset -{len(stmt) - sig_offset}):")
     print(f"    signature_verified={tampered_parsed['signature_verified']}  — {'rejected ✓' if tamper_ok else 'BUG: still verified'}")
