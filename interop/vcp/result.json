@@ -1,0 +1,27 @@
+{
+  "probe": "vcp-scitt-cose-interop",
+  "date": "2026-06-30",
+  "source": {
+    "draft": "draft-kamimura-scitt-vcp-01",
+    "section": "\u00a72.1, \u00a73.1, \u00a77.1, Appendix A",
+    "url": "https://datatracker.ietf.org/doc/html/draft-kamimura-scitt-vcp-01",
+    "note": "No published VCP COSE_Sign1 binary artifacts as of 2026-06-30. Payload sourced from draft Appendix A; outer COSE signed with local test key."
+  },
+  "payload": {
+    "format": "VCP JSON event (draft \u00a72.1 / Appendix A)",
+    "content_type": "application/json",
+    "event_type": "SIG_ORD_EXE",
+    "bytes": 396
+  },
+  "scitt_cose_result": {
+    "signature_verified": true,
+    "payload_round_trip": true,
+    "tamper_rejected": true,
+    "alg": "EdDSA",
+    "issuer": "did:vcp:exchange.example",
+    "subject": "XAU/USD:EVT-2026-XAU-001",
+    "statement_bytes": 547
+  },
+  "finding": "ENVELOPE_COMPATIBLE",
+  "finding_detail": "VCP JSON event payload is opaque to scitt-cose (payload-agnostic per RFC 9052 \u00a74 and SCITT architecture \u00a73). COSE_Sign1 envelope over a VCP event verifies cleanly. Inner VCP Ed25519/JCS signing layer is independent and not inspected by scitt-cose. No published VCP COSE binary test vectors exist yet (2026-06-30); this probe confirms envelope-level compatibility from the published JSON example."
+}

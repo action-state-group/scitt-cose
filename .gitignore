@@ -15,3 +15,7 @@ dist/
 # (negate every ignored extension; vector keys are PEM-encoded TEST-ONLY files)
 !test-vectors/**/*.cose
 !test-vectors/**/*.pem
+
+# interop artifacts are committed reference outputs (test-only keys, not secrets)
+!interop/**/*.cose
+!interop/**/*.pem
