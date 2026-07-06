@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fifth oracle: the COSE standard's OWN reference-signed COSE_Sign1 vector.
 
-The other oracles either (a) verify bytes *we* emitted (Go, pycose, the Authority
-verifier) or (b) check the Merkle layer against published vectors (RFC 6962/9162).
+The other oracles either (a) verify bytes *we* emitted (Go, pycose, an independent
+external verifier implementation) or (b) check the Merkle layer against published vectors (RFC 6962/9162).
 This adds the missing piece for the *signature* layer: a COSE_Sign1 that the COSE
 working group's reference implementation signed and published — verified here with
 *our* clean-room `verify_sign1`. Agreement means our Sig_structure construction

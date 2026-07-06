@@ -44,8 +44,7 @@ SUMMARY = (
 )
 
 #: The open-source home of the verifier this endpoint runs. The ONLY external
-#: link the landing page carries (plain <a href>, no fetched assets) — the
-#: endpoint exists to sell the library, not the other way around. Provisional
+#: link the landing page carries (plain <a href>, no fetched assets). Provisional
 #: name; the launch checklist's name-claim step updates this in the same pass.
 REPO_URL = "https://github.com/action-state-group/scitt-cose"
 

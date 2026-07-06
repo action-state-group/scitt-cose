@@ -34,7 +34,7 @@ pycose = pytest.importorskip("pycose")
 # which returns immutable frozendict/tuple ("Bytes cannot be decoded as COSE
 # message"). The scitt-cose LIBRARY is cbor2>=6-clean (normalized via _plain);
 # this is purely the third-party oracle's limitation, so skip it on cbor2>=6.
-# The Go, RFC-vector, and Authority oracles still run there.
+# The Go, RFC-vector, and independent external verifier oracles still run there.
 from importlib.metadata import version as _pkg_version  # noqa: E402
 
 if tuple(int(p) for p in _pkg_version("cbor2").split(".")[:1]) >= (6,):
