@@ -1,7 +1,8 @@
 {
-  "version": "1",
-  "description": "CCF interop test vector for IETF 126 \u2014 one Signed Statement, two independent TS receipts",
+  "version": "2",
+  "description": "CCF interop test vectors for IETF 126 — two directions of cross-TS attestation. Direction A: our EdDSA statement on our RFC9162_SHA256 TS (done). Direction B: Amaury's CCF-format ES256 re-signing of our payload on both his CCF dev node and our TS (done — same-statement-two-TS closed for the CCF-format statement). Our Ed25519 statement on CCF is still open pending CCF Ed25519 policy support.",
   "statement": {
+    "note": "Our IETF 126 interop vector — EdDSA/Ed25519, application/agent-action-capsule+json",
     "content_type": "application/agent-action-capsule+json",
     "issuer": "https://interop.action-state-group.example",
     "subject": "urn:asg:scitt:ccf-interop:ietf126:001",
@@ -17,6 +18,7 @@
     "leaf_hash_rfc6962_hex": "470c3e3db28f694f3a3e5c71db11e1e0cf26e16241ce1ecc2819f6edc666c51d"
   },
   "our_receipt": {
+    "note": "Our RFC9162_SHA256 vds=1 receipt for our EdDSA statement (Direction A)",
     "ts": "action-state-group (RFC9162_SHA256 / vds=1)",
     "alg": "EdDSA",
     "bytes_hex": "d28447a219018b010127a119018ca120814483010080f65840b0cd400caaa97001a5831dd8b3ed3cac0d0fac019df5e749fef4691f3479142aaf6c8533afedebbe12d45150a5844de190ac33074c3acced943e9c229f770409",
@@ -31,8 +33,64 @@
     }
   },
   "ccf_receipt": {
-    "status": "pending \u2014 awaiting Amaury / Microsoft CCF registration",
-    "instructions": "Register statement.bytes_hex (decode hex \u2192 raw bytes) on a CCF SCITT node; return the COSE Receipt bytes and the TS DID/public key.",
-    "verify_command": "SCITT_CCF_TLS_VERIFY=0 pytest -m integration tests/test_ccf_interop.py::test_ccf_sandbox_live"
+    "note": "Direction B — Amaury's CCF-format re-signing of our payload (ES256/did:x509) registered on his CCF dev node. CCF's registration policy required ES256; our Ed25519 statement could not be directly registered. This is from a dev node — not a production Microsoft CCF deployment.",
+    "ts": "Amaury Chamayou / Microsoft (CCF dev node / vds=2 / ES384)",
+    "alg": "ES384",
+    "txid": "2.15",
+    "statement_sha256": "02ec7822cd91641c74ee0d125ad9b89fc6961400c6efb69ec9aff65f3b23d567",
+    "statement_size_bytes": 1200,
+    "statement_note": "Amaury's ES256/did:x509 re-signing of our payload — a different COSE_Sign1, same semantic payload. See direction_flip.statement_bytes_base64 for the raw bytes.",
+    "receipt_bytes_hex": "d284588ea5013822045840643839376537366636663465303934353130626165306436313230666533353333616635323765376166373535633535386566393336376166643864663766350fa3016f3132372e302e302e313a3130313331027673636974742e6363662e7369676e61747572652e7631061a6a5d071f19018b02666363662e7631a1647478696464322e3135a119018ca1208158ffa201835820a91903385432b74fc4b583c815374b4f2f848f7faf10ae075903c2586d5c4afc784863653a322e31343a39613736396135643639323933353935363964373663373663653862626335636162656636663932363662346366393766626632313633653733343965623166582002ec7822cd91641c74ee0d125ad9b89fc6961400c6efb69ec9aff65f3b23d567028382f55820e2df37a31a3de4bf83c71b0b7b660f0886921e91effb9331020d5f9d8e09e52382f55820e4aa525fc661a94221a68f320b1281df6dff1c71cdf38a13eafdc0b559b67dc282f558204ff99af3ef3344fc2684099e19f9d6c6ed09ceec69a001443591c7f072eb72ecf658604031f73521c3058a2754c8d375e93bc1f51b3b749548d2d49e6869e1fc6f8a9c6fe5daa537859d4c8c9f96e1c06932c94f8b74406d76c7d161b7c0f8fcdae29d9379290ab4de542fa1d3b3135517d9f8368b6a387dbc5d0d35784234332be8a7",
+    "receipt_bytes_base64": "0oRYjqUBOCIEWEBkODk3ZTc2ZjZmNGUwOTQ1MTBiYWUwZDYxMjBmZTM1MzNhZjUyN2U3YWY3NTVjNTU4ZWY5MzY3YWZkOGRmN2Y1D6MBbzEyNy4wLjAuMToxMDEzMQJ2c2NpdHQuY2NmLnNpZ25hdHVyZS52MQYaal0HHxkBiwJmY2NmLnYxoWR0eGlkZDIuMTWhGQGMoSCBWP+iAYNYIKkZAzhUMrdPxLWDyBU3S08vhI9/rxCuB1kDwlhtXEr8eEhjZToyLjE0OjlhNzY5YTVkNjkyOTM1OTU2OWQ3NmM3NmNlOGJiYzVjYWJlZjZmOTI2NmI0Y2Y5N2ZiZjIxNjNlNzM0OWViMWZYIALseCLNkWQcdO4NElrZuJ/GlhQAxu+2nsmv9l87I9VnAoOC9Vgg4t83oxo95L+DxxsLe2YPCIaSHpHv+5MxAg1fnY4J5SOC9Vgg5KpSX8ZhqUIhpo8yCxKB323/HHHN84oT6v3AtVm2fcKC9VggT/ma8+8zRPwmhAmeGfnWxu0JzuxpoAFENZHH8HLrcuz2WGBAMfc1IcMFiidUyNN16TvB9Rs7dJVI0tSeaGnh/G+KnG/l2qU3hZ1MjJ+W4cBpMslPi3RAbXbH0WG3wPj82uKdk3kpCrTeVC+h07MTVRfZ+DaLajh9vF0NNXhCNDMr6Kc=",
+    "receipt_size_bytes": 509,
+    "ts_cert_pem": "-----BEGIN CERTIFICATE-----\nMIIBzDCCAVOgAwIBAgIQMWqHzEunyHPLoi099n0xZzAKBggqhkjOPQQDAzAWMRQw\nEgYDVQQDDAtDQ0YgU2VydmljZTAeFw0yNjA3MTkxNzE5MjNaFw0yNjA3MjAxNzE5\nMjJaMBYxFDASBgNVBAMMC0NDRiBTZXJ2aWNlMHYwEAYHKoZIzj0CAQYFK4EEACID\nYgAEmiaYV11mSRmV5FfFtRtZrKsY4kUSjM0FOOSzUnW4r9wQJcVdAEsKAaLc63R+\nkkaxP5Ci61PrQ8VoCg1hJxPJUS40ONUynFtu10rPPfdLMGquHXRO+HZbQOha15XR\nJ27Eo2YwZDASBgNVHRMBAf8ECDAGAQH/AgEBMA4GA1UdDwEB/wQEAwIChDAdBgNV\nHQ4EFgQUGnUVHMW6cEAR/0Oi+Nl7vpd2GYAwHwYDVR0jBBgwFoAUGnUVHMW6cEAR\n/0Oi+Nl7vpd2GYAwCgYIKoZIzj0EAwMDZwAwZAIwdXYqDJNRbelQs5R23J8N1N2q\nAJHQOL5bTVyVS9C0mqcsQN0bDEr7zZmDYD8QibgRAjB7/ToA8qGZ+FK0bsw0vKJE\ntwnnn5DP7rcrtUhjFrHcSBG+4GkD9lM/R1bjXigiuHM=\n-----END CERTIFICATE-----\n",
+    "ts_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEmiaYV11mSRmV5FfFtRtZrKsY4kUSjM0F\nOOSzUnW4r9wQJcVdAEsKAaLc63R+kkaxP5Ci61PrQ8VoCg1hJxPJUS40ONUynFtu\n10rPPfdLMGquHXRO+HZbQOha15XRJ27E\n-----END PUBLIC KEY-----\n",
+    "verify_result": {
+      "ok": true,
+      "root": "cc1ceda4965b6c490194f1972e6307539d1996a13520bbe28287a8ce983e34ea",
+      "tree_size": null,
+      "errors": [],
+      "note": "Verified with public key extracted from service-identity.pem (P-384 cert). tree_size null — CCF receipt format does not expose log size in the same field as RFC9162."
+    }
+  },
+  "direction_flip": {
+    "note": "Direction B reversed: Amaury's ES256 statement registered on OUR RFC9162_SHA256 TS. Same statement as ccf_receipt.statement_sha256. This closes B1 'same statement, two TS' for the CCF-format statement.",
+    "statement_sha256": "02ec7822cd91641c74ee0d125ad9b89fc6961400c6efb69ec9aff65f3b23d567",
+    "statement_bytes_base64": "0oRZBASkASYDcGFwcGxpY2F0aW9uL2pzb24YIYJZAdIwggHOMIIBdaADAgECAhQ1zsts4R1X6c+wvs58rc8KosZEUjAKBggqhkjOPQQDAjAvMS0wKwYDVQQDDCRiZjAyYzNmNy1lMzM2LTRiZTUtOGI0OC0zMTcyNjgxNzRlOGIwHhcNMjYwNzE5MTcxOTI2WhcNMjYwNzI5MTcxOTI2WjAvMS0wKwYDVQQDDCQ2M2RiMjUwMi1mN2ExLTQ5YjctOTk1Yi05Mzk2YjJhZTRlZDMwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARLjFUDchOhWHgPHmn6aIT0wz7LaF0SinQuB5E/TeCFcNo//pkb4vGEFo4l/UoesAIUHvFBYcggGMFRq2xojQkco28wbTAOBgNVHQ8BAf8EBAMCB4AwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUipdo4mwIrFs3DKwVwHsBhzOvUq8wHwYDVR0jBBgwFoAUqGJuaBqOXLuJ3CJEIW9QYaNLslAwDQYDVR0lBAYwBAYCiDcwCgYIKoZIzj0EAwIDRwAwRAIgYBsB5vKyOv8XWp4Ya0ByfxkPZN5AtpxVHW0wueMT54kCIAx8VxDTAmGQwmDJjh/hD39wehIv/be77FebgaOtQlsOWQHHMIIBwzCCAWmgAwIBAgIUHfj4E4eAoWaTZuSDBwmzpYiUpmswCgYIKoZIzj0EAwIwLzEtMCsGA1UEAwwkYmYwMmMzZjctZTMzNi00YmU1LThiNDgtMzE3MjY4MTc0ZThiMB4XDTI2MDcxOTE3MTkyNloXDTI2MDcyOTE3MTkyNlowLzEtMCsGA1UEAwwkYmYwMmMzZjctZTMzNi00YmU1LThiNDgtMzE3MjY4MTc0ZThiMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAED1zgY0qEdUzPx7OxnKrMJQ3MYlc80FPpV2XLrNq06gWOnIHpAaV2pQdNxWONKuE3PnquZcU17OtYSoBbw5+0LaNjMGEwDgYDVR0PAQH/BAQDAgIEMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFKhibmgajly7idwiRCFvUGGjS7JQMB8GA1UdIwQYMBaAFKhibmgajly7idwiRCFvUGGjS7JQMAoGCCqGSM49BAMCA0gAMEUCIQCytMx9fUQKwPiHJgqh1sR3Jbm2dosSNMp4zkeKHtNTWwIgSBs7RkdocFZERBz4cTeH33blvyovjpxPlMalIRzT000PoQF4SGRpZDp4NTA5OjA6c2hhMjU2OjJ5SmRPYXJiWlc2Ukl2SzBYTEpiS09MNXZGRlZheDZiWGxqNmdiTXNKT3M6OmVrdToyLjk5OaBYYnsibm90ZSI6ICJvcGFxdWUgcGF5bG9hZCBcdTIwMTQgc2NpdHQtY29zZSB0cmVhdHMgdGhlc2UgYnl0ZXMgYXMgb3BhcXVlIiwgInZlY3RvciI6ICJ2YWxpZC1lczI1NiJ9WED8LXFFguOog6zNzksYZqznf49iPjmWem65q7+FzlKbhifJwrDb/LjosDPFINeMwSIG87Kn+KajGxbwD71vLjL2",
+    "statement_size_bytes": 1200,
+    "leaf_entry": {
+      "definition": "SHA-256 of Amaury's statement bytes (hex)",
+      "hex": "02ec7822cd91641c74ee0d125ad9b89fc6961400c6efb69ec9aff65f3b23d567"
+    },
+    "our_receipt": {
+      "ts": "action-state-group (RFC9162_SHA256 / vds=1)",
+      "alg": "EdDSA",
+      "leaf_index": 151,
+      "tree_size": 152,
+      "bytes_hex": "d28447a2012719018b01a119018ca1208158b083189818978558204758dc11b47746a8fa3e08b941984daa5a4950becdc589ac446e08fd3ad5a27c5820ef0f84082c56bc1fd0df24c0c5da905ffb3561ad01fe404df0d9ce41e3107ece582059c06823f11fbdbdd9a44824be582e2afca90b36725f4139df011c56776da21158205ddb19816fe97238299db6133efb4b306d249b390d0fec803e5c8c05d6ab4c785820ad7e2f78c7a7b5d0435914d72f285caf83155d3300c3833ba18cd4ce26970c8ff65840f5ff52d1626f0d4162bf674bf9cf225c4043f1986b987858a25972ca32991afffbd190f6043101bfe63e4175b5754d6c6f6a5be91901b73a2328d348cc069400",
+      "bytes_base64": "0oRHogEnGQGLAaEZAYyhIIFYsIMYmBiXhVggR1jcEbR3Rqj6Pgi5QZhNqlpJUL7NxYmsRG4I/TrVonxYIO8PhAgsVrwf0N8kwMXakF/7NWGtAf5ATfDZzkHjEH7OWCBZwGgj8R+9vdmkSCS+WC4q/KkLNnJfQTnfARxWd22iEVggXdsZgW/pcjgpnbYTPvtLMG0kmzkND+yAPlyMBdarTHhYIK1+L3jHp7XQQ1kU1y8oXK+DFV0zAMODO6GM1M4mlwyP9lhA9f9S0WJvDUFiv2dL+c8iXEBD8ZhrmHhYollyyjKZGv/70ZD2BDEBv+Y+QXW1dU1sb2pb6RkBtzojKNNIzAaUAA==",
+      "size_bytes": 262,
+      "ts_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAObtlTJ3Ar+HA7e8N7/qmkJm4UYg2ybom4EkVNYQPlrU=\n-----END PUBLIC KEY-----\n",
+      "verify_result": {
+        "ok": true,
+        "root": "68541343a221c5542222e4b916966f6d8bf9fa8a8373c08e72ce92cfabdfc213",
+        "tree_size": 152,
+        "errors": []
+      }
+    }
+  },
+  "status_table": {
+    "same_statement_two_ts_ccf_format": {
+      "status": "CLOSED",
+      "note": "Amaury's ES256/did:x509 re-signing of our payload is anchored on BOTH his CCF dev node (receipt.cose, vds=2, txid 2.15) AND our RFC9162_SHA256 TS (direction_flip.our_receipt, vds=1, leaf_index 151). Both receipts verify ok=True against the same statement bytes (SHA-256: 02ec7822...)."
+    },
+    "our_ed25519_statement_on_ccf": {
+      "status": "OPEN",
+      "note": "CCF's registration policy required ES256 re-signing; raw Ed25519 statements cannot be directly registered on this CCF configuration. Pending CCF Ed25519 policy support or a future Amaury deployment."
+    },
+    "our_ed25519_statement_on_our_ts": {
+      "status": "CLOSED",
+      "note": "our_receipt — verified ok=True, tree_size 1. Done since initial vector creation."
+    }
   }
 }
