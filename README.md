@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # scitt-cose
 
+[![CI](https://github.com/action-state-group/scitt-cose/actions/workflows/ci.yml/badge.svg)](https://github.com/action-state-group/scitt-cose/actions/workflows/ci.yml)
+
 A generic, **payload-agnostic** IETF **SCITT + COSE Receipts** substrate for Python:
 build/verify COSE_Sign1 **Signed Statements**, verify **Receipts** and RFC 9162
 **inclusion / consistency proofs**, with the **Merkle + receipt-signing
