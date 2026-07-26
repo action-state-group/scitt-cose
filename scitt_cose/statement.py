@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Generic SCITT Signed / Transparent Statement build + parse.
 
-A *Signed Statement* (per draft-ietf-scitt-architecture) is a COSE_Sign1 whose
+A *Signed Statement* (per RFC 9943, SCITT Architecture) is a COSE_Sign1 whose
 protected header carries a CWT Claims map (issuer / subject and friends) and a
 content type, signed over an opaque payload. A *Transparent Statement* is that
 same Signed Statement with one or more Receipts attached in the unprotected
@@ -39,7 +39,7 @@ HDR_KID = 4  # RFC 9052 §3.1
 HDR_CWT_CLAIMS = 15  # RFC 9597 §2 ("CWT Claims") — NOT label 13 (kcwt, RFC 9528)
 
 #: Unprotected header parameter for attached Receipts
-#: (draft-ietf-cose-merkle-tree-proofs / draft-ietf-scitt-architecture).
+#: (draft-ietf-cose-merkle-tree-proofs / RFC 9943).
 HDR_RECEIPTS = 394
 
 #: CWT claim labels (RFC 8392 / IANA CWT Claims registry).

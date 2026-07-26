@@ -19,8 +19,9 @@ def test_no_positive_rfc_9942_claim():
     assert "RFC 9942" not in notice
     assert "9942" not in notice
     assert "RFC 9942" not in _status.SUBSTRATE_RFCS
-    assert "draft-ietf-scitt-architecture-22" in notice
+    assert "RFC 9943" in notice  # architecture is now published
     assert "draft-ietf-cose-merkle-tree-proofs-18" in notice
+    assert "draft-ietf-scitt-architecture" not in notice  # no longer a draft
 
 
 def test_substrate_rfcs_listed():
@@ -31,16 +32,17 @@ def test_substrate_rfcs_listed():
 def test_draft_versions_pinned():
     # Tracked drafts must be version-pinned to the exact revisions audited against
     # the IETF Datatracker at ship date (Active Internet-Drafts, NOT RFCs).
-    assert _status.DRAFT_SCITT_ARCHITECTURE == "draft-ietf-scitt-architecture-22"
+    assert _status.RFC_SCITT_ARCHITECTURE == "RFC 9943"
+    assert _status.DRAFT_SCITT_ARCHITECTURE == "RFC 9943"  # backward-compat alias
     assert _status.DRAFT_COSE_MERKLE_TREE_PROOFS == "draft-ietf-cose-merkle-tree-proofs-18"
 
 
 def test_draft_status_is_internet_draft_work_in_progress():
     """The most visible claim for a spec verifier: get the status string right.
 
-    Per the Datatracker, both documents are Active Internet-Drafts (Work in
-    Progress) in the RFC Editor Queue and NOT yet published RFCs. The notice must
-    say exactly that — never imply a published RFC exists.
+    SCITT Architecture is now RFC 9943 (published). COSE Receipts remains an
+    Active Internet-Draft (Work in Progress) in the RFC Editor Queue. The notice
+    must say exactly that — never imply an unassigned RFC number exists.
     """
     notice = _status.DRAFT_TRACKING_NOTICE
     assert "Internet-Draft" in notice
@@ -64,7 +66,7 @@ def test_no_unassigned_rfc_claim_anywhere_in_package():
     # The ONLY RFC numbers this library may positively cite — every one is a
     # genuinely published RFC it implements or relies on. Anything else (notably
     # the fictional "RFC 9942") is a fabricated-conformance claim.
-    allowed = {"6962", "8032", "8392", "9052", "9053", "9162", "9528", "9597", "9964"}
+    allowed = {"6962", "8032", "8392", "9052", "9053", "9162", "9528", "9597", "9943", "9964"}
     rfc_ref = re.compile(r"\bRFC\s?(\d{3,5})\b")
     offenders = []
     # Scan the shipped package + docs/README — NOT the tests, which reference the
