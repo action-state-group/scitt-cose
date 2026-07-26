@@ -86,11 +86,11 @@ is ignored, defeating that downgrade.
 
 ## Draft-tracking
 
-The receipt structure tracks two IETF documents that are **Active Internet-Drafts
-(Work in Progress)**, currently in the **RFC Editor Queue** and **NOT yet
-published RFCs** (status per the IETF Datatracker at ship date):
-`draft-ietf-cose-merkle-tree-proofs-18` (COSE Receipts / COSE Merkle Tree Proofs)
-and `draft-ietf-scitt-architecture-22` (SCITT Architecture). The Merkle
+The receipt structure aligns with **[RFC 9943](https://www.rfc-editor.org/rfc/rfc9943)**
+(SCITT Architecture, published June 2026) and tracks one IETF document that remains
+an **Active Internet-Draft (Work in Progress)** in the **RFC Editor Queue**, NOT yet
+published as an RFC: `draft-ietf-cose-merkle-tree-proofs-18` (COSE Receipts / COSE
+Merkle Tree Proofs). The Merkle
 primitives follow the published **RFC 9162 / RFC 6962**
 (SHA-256); CWT Claims are at **label 15** (RFC 9597). ML-DSA COSE code points
 referenced elsewhere are per the published **RFC 9964** (*ML-DSA for JOSE and

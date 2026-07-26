@@ -98,12 +98,9 @@ nothing publishes after it without re-running it.
 
 Re-verify, against the live IETF Datatracker, **on flip day**:
 
-- [ ] `draft-ietf-scitt-architecture-22` — still the current revision? Still
-      "Active Internet-Draft / RFC Editor Queue"? If it has been **published as
-      an RFC**, update `scitt_cose/_status.py`, the README draft-tracking
-      section, the landing page, and the announcement text with the real RFC
-      number — and re-run the whole suite (the honesty tests pin the exact
-      status wording).
+- [x] `draft-ietf-scitt-architecture-22` — **published as RFC 9943** (June 2026).
+      Updated `scitt_cose/_status.py` (RFC_SCITT_ARCHITECTURE, SUBSTRATE_RFCS),
+      README standards-status section, and tests. Suite passes with RFC 9943 cited.
 - [ ] `draft-ietf-cose-merkle-tree-proofs-18` — same check.
 - [ ] Confirm the shipped prose still claims **no unassigned RFC number**
       (no unassigned RFC number is claimed anywhere; the scan test enforces this — keep it green).

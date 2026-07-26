@@ -257,16 +257,15 @@ the underlying documents are **drafts, not RFCs**, this exact CBOR shape is
 **validated by round-trip in this library's own tests**, not against a frozen
 RFC. Treat the wire shape as draft-tracking.
 
-## Draft-tracking / standards honesty
+## Standards status / honesty
 
-This library tracks two IETF documents that are **Active Internet-Drafts (Work in
-Progress)** — they have been approved and are in the **RFC Editor Queue**, but are
-**NOT yet published RFCs** (status audited against the IETF Datatracker at ship
-date; re-verify at publish time, since RFC-Ed-Queue documents can be published at
-any point):
+The **SCITT Architecture** is now **[RFC 9943](https://www.rfc-editor.org/rfc/rfc9943)**
+(published June 2026). This library implements RFC 9943 as its normative SCITT base.
 
-- `draft-ietf-scitt-architecture-22` — *SCITT Architecture* (Datatracker:
-  Active Internet-Draft, RFC Ed Queue)
+This library also tracks one IETF document that remains an **Active Internet-Draft
+(Work in Progress)** in the **RFC Editor Queue**, NOT yet published as an RFC
+(status audited at ship date; re-verify at publish time):
+
 - `draft-ietf-cose-merkle-tree-proofs-18` — *COSE Receipts / COSE Merkle Tree
   Proofs* (Datatracker: Active Internet-Draft, RFC Ed Queue)
 
