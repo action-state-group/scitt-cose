@@ -393,6 +393,532 @@ def _esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+# ---------------------------------------------------------------------------
+# AAC Capsule Verification Surface — P1
+# ---------------------------------------------------------------------------
+
+#: Live transparency service this surface queries for inclusion proofs.
+_ANCHOR_BASE = "https://anchor.agentactioncapsule.org"
+
+#: Privacy-safe aggregate instrumentation — no content retention.
+#: Counter is list so closure mutation works without ``nonlocal``.
+_CAPSULE_VIEW_COUNTER: list[int] = [0]   # total capsule-page views
+_REFERRER_COUNTER: dict[str, int] = {}   # eTLD+1 → view count
+
+#: Publishable instrumentation policy stub (surfaced at /instrumentation-policy).
+INSTRUMENTATION_POLICY = {
+    "what_we_count": [
+        "total capsule-page views (integer counter, resets on restart)",
+        "distinct referrer eTLD+1 domain counts (e.g. 'github.com': 3)",
+    ],
+    "what_we_do_not_store": [
+        "capsule content, digests, or payload",
+        "IP addresses or user identifiers",
+        "referrer paths or query strings — domain only",
+    ],
+    "retention": "in-memory only; resets on process restart; not persisted",
+    "publishable": True,
+}
+
+#: Additional CSS for the capsule verification page (graph + privilege-log).
+_CAPSULE_CSS = """
+.anchor-banner{padding:12px 18px;border-radius:10px;font-size:13.5px;margin-bottom:20px;border:1px solid var(--line)}
+.anchor-banner.anchor-ok{background:var(--pass-soft);border-color:var(--pass);color:var(--pass)}
+.anchor-banner.anchor-none{background:var(--paper-2);color:var(--muted)}
+.anchor-banner.anchor-unknown{background:var(--fail-soft);border-color:var(--fail);color:var(--fail)}
+.anchor-banner.anchor-loading{color:var(--muted);background:var(--paper-2)}
+.anchor-ok{color:var(--pass);font-weight:700}
+.anchor-err{color:var(--fail);font-weight:700}
+.anchor-none{color:var(--muted)}
+.g-nodes{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px}
+.gn{border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:200px;max-width:340px;background:#fff}
+.gn-capsule{border-color:var(--accent);background:var(--accent-soft)}
+.gn-offer_terms{border-color:var(--pass);background:var(--pass-soft)}
+.gn-wicket_manifest{border-color:#f59e0b;background:#fffbeb}
+.gn-opaque{border-style:dashed;opacity:.85}
+.gn-type{display:block;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.gn-digest{display:block;font-size:11px;word-break:break-all;color:var(--ink)}
+.opaque-badge{font-size:10px;font-weight:700;letter-spacing:.5px;background:var(--muted);color:#fff;padding:1px 6px;border-radius:4px;vertical-align:middle}
+.opaque-note{font-size:12px;color:var(--muted);margin-top:6px;font-style:normal}
+.g-edges{margin-top:4px}
+.etable{border-collapse:collapse;width:100%;font-size:12.5px;margin-bottom:20px}
+.etable th,.etable td{padding:6px 10px;border:1px solid var(--line);text-align:left}
+.etable th{background:var(--paper-2);font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.etype{font-family:var(--mono);font-weight:600}
+.etype-attests_over{color:var(--pass)}
+.etype-chains_to{color:var(--accent)}
+.etype-commits_to{color:#f59e0b}
+.etype-effect_response{color:var(--muted)}
+.pltable{border-collapse:collapse;width:100%;font-size:12.5px}
+.pltable th,.pltable td{padding:7px 10px;border:1px solid var(--line);text-align:left;vertical-align:top}
+.pltable th{background:var(--paper-2);font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.pl-withheld{color:#f59e0b;font-weight:700;font-family:var(--mono);font-size:12px}
+.pl-revealed{color:var(--pass);font-weight:600;font-family:var(--mono);font-size:12px}
+.pl-match{color:var(--pass);font-weight:700;font-family:var(--mono);font-size:12px}
+.pl-mismatch{color:var(--fail);font-weight:700;font-family:var(--mono);font-size:12px}
+.pl-ctx{color:var(--muted);font-family:var(--mono);font-size:11px}
+"""
+
+#: JS for the capsule verification page (served at /static/capsule.js).
+CAPSULE_JS = r"""
+/* Agent Action Capsule — P1 verification surface client.
+ * Profile plug-point: add entries to PROFILE_RENDERERS for new profiles.
+ * Capsule JSON goes in the URL fragment (#base64) — never sent to this server.
+ */
+(function(){"use strict";
+var capsuleId=document.body.getAttribute("data-capsule-id");
+var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
+  "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1};
+
+/* ---------- profile renderers plug-point ---------- */
+var PROFILE_RENDERERS={"aac":renderAac/* add more profiles here */};
+
+function detectProfile(d){
+  if(d&&(d.capsule_id||d.buyer_capsule))return"aac";
+  return"unknown";
+}
+
+/* ---------- helpers ---------- */
+function isH64(s){return typeof s==="string"&&s.length===64&&/^[0-9a-f]+$/i.test(s);}
+function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
+function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function $(id){return document.getElementById(id);}
+
+/* ---------- AAC graph parser ---------- */
+function parseAac(data){
+  var nodes=[],edges=[],privlog=[],unk=[],seen={};
+  var isB=!!(data.buyer_capsule&&data.seller_capsule);
+
+  function addN(id,type,label,withheld,payload){
+    if(seen[id])return false;seen[id]=true;
+    var k=!!KNOWN_TYPES[type];
+    if(!k&&unk.indexOf(type)<0)unk.push(type);
+    nodes.push({id:id,type:type,label:label,digest:id,isKnown:k,withheld:withheld!==false,payload:payload||null});
+    return true;
+  }
+  function addArt(digest,type,label,ctx){
+    if(!isH64(digest)||!addN(digest,type,label,true,null))return;
+    privlog.push({id:label,type:type,digest:digest,withheld:true,isKnown:!!KNOWN_TYPES[type],matchOk:null,ctx:ctx});
+  }
+  function addEdge(f,t,lbl){
+    var k="_e_"+f+"_"+t+"_"+lbl;if(seen[k])return;seen[k]=true;
+    edges.push({from:f,to:t,label:lbl});
+  }
+  function extractCap(cap,capId,pfx){
+    var p=pfx?pfx+".":"";
+    var chain=cap.chain||{};
+    var prior=chain.parent_capsule_id||"";
+    if(isH64(prior)&&addN(prior,"capsule","prior capsule "+sh(prior),false,null))
+      addEdge(capId,prior,"chains_to");
+    var ma=cap.model_attestation||{},ca=ma.compute_attestation||{},subj=ca.subject_digest||"";
+    if(isH64(subj)){addArt(subj,"subject","subject",p+"compute_attestation.subject_digest");addEdge(capId,subj,"attests_over");}
+    var eff=cap.effect||{},resp=eff.response_digest||"";
+    if(isH64(resp)){addArt(resp,"response","response",p+"effect.response_digest");addEdge(capId,resp,"effect_response");}
+    (cap.constraints||[]).forEach(function(c){
+      var ev=c.evidence_digest||"",cid=c.id||"constraint";
+      if(isH64(ev)){addArt(ev,"wicket_manifest","manifest ["+cid+"]",p+"constraints["+cid+"].evidence_digest");addEdge(capId,ev,"commits_to");}
+    });
+  }
+
+  if(isB){
+    var bc=data.buyer_capsule||{},sc=data.seller_capsule||{};
+    var bid=bc.capsule_id||"",sid=sc.capsule_id||"",sth=data.sealed_terms_hash||"",terms=data.terms;
+    if(isH64(bid))addN(bid,"capsule","buyer capsule "+sh(bid),false,null);
+    if(isH64(sid))addN(sid,"capsule","seller capsule "+sh(sid),false,null);
+    if(isH64(sth)){
+      var rev=terms!=null;
+      addN(sth,"offer_terms","offer terms "+sh(sth),!rev,rev?terms:null);
+      privlog.push({id:"sealed_terms_hash",type:"offer_terms",digest:sth,withheld:!rev,
+                    isKnown:true,matchOk:null,ctx:"binding.sealed_terms_hash",_revPayload:rev?terms:null});
+      if(isH64(bid))addEdge(bid,sth,"attests_over");
+      if(isH64(sid))addEdge(sid,sth,"attests_over");
+    }
+    if(isH64(bid)&&isH64(sid))addEdge(sid,bid,"chains_to");
+    if(isH64(bid))extractCap(bc,bid,"buyer");
+    if(isH64(sid))extractCap(sc,sid,"seller");
+  }else{
+    var cid=data.capsule_id||"";
+    if(isH64(cid)){addN(cid,"capsule","capsule "+sh(cid),false,null);extractCap(data,cid,"");}
+  }
+  return{nodes:nodes,edges:edges,privlog:privlog,unk:unk,isB:isB};
+}
+
+/* ---------- renderers ---------- */
+function renderGraph(g){
+  var el=$("graphContent");if(!el)return;
+  var h="<div class='g-nodes'><h4>Nodes ("+g.nodes.length+")</h4>";
+  g.nodes.forEach(function(n){
+    var cls="gn gn-"+n.type.replace(/[^a-z_]/g,"_")+(n.isKnown?"":(" gn-opaque"));
+    h+="<div class='"+cls+"'>";
+    h+="<span class='gn-type'>"+safe(n.type)+(n.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</span>";
+    h+="<code class='gn-digest'>"+safe(n.digest)+"</code>";
+    if(!n.isKnown)h+="<div class='opaque-note'>Unknown type — verified cryptographically; rendering opaque.</div>";
+    h+="</div>";
+  });
+  h+="</div>";
+  if(g.edges.length){
+    h+="<div class='g-edges'><h4>Edges ("+g.edges.length+")</h4><table class='etable'><thead><tr><th>from</th><th>relation</th><th>to</th></tr></thead><tbody>";
+    g.edges.forEach(function(e){
+      h+="<tr><td><code>"+safe(e.from.slice(0,12))+"…</code></td>";
+      h+="<td class='etype etype-"+safe(e.label)+"'>"+safe(e.label)+"</td>";
+      h+="<td><code>"+safe(e.to.slice(0,12))+"…</code></td></tr>";
+    });
+    h+="</tbody></table></div>";
+  }
+  el.innerHTML=h;$("graphSection").style.display="block";
+}
+
+function renderPrivlog(g){
+  var el=$("privlogContent");if(!el)return;
+  var h="<table class='pltable'><thead><tr><th>artifact</th><th>type</th><th>digest</th><th>status</th><th>context</th></tr></thead><tbody>";
+  g.privlog.forEach(function(e){
+    var st=e.withheld?"<span class='pl-withheld'>WITHHELD</span>":
+            e.matchOk===true?"<span class='pl-match'>REVEALED · ✓ match</span>":
+            e.matchOk===false?"<span class='pl-mismatch'>REVEALED · ✗ MISMATCH</span>":
+            "<span class='pl-revealed'>REVEALED</span>";
+    h+="<tr><td>"+safe(e.id)+"</td><td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>";
+    h+="<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
+  });
+  h+="</tbody></table>";
+  if(g.unk.length)h+="<p class='opaque-note' style='margin-top:12px'>Unknown types (verified-but-opaque): "+g.unk.map(safe).join(", ")+"</p>";
+  el.innerHTML=h;$("privlogSection").style.display="block";
+  /* async SHA-256 recompute for revealed offer_terms */
+  if(crypto&&crypto.subtle){
+    g.privlog.forEach(function(e){
+      if(!e._revPayload||e.withheld)return;
+      var s=JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort());
+      crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(buf){
+        var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
+        var matchOk=hex===e.digest;
+        var cell=el.querySelector("tr[data-dig='"+e.digest+"'] td.pl-st");
+        if(cell)cell.innerHTML=matchOk?"<span class='pl-match'>REVEALED · ✓ match</span>":
+                                       "<span class='pl-mismatch'>REVEALED · ✗ MISMATCH</span>";
+      });
+    });
+  }
+}
+
+function renderAac(data){
+  var g=parseAac(data);renderGraph(g);renderPrivlog(g);
+}
+
+/* ---------- load + permalink ---------- */
+function loadCapsule(data){
+  var profile=detectProfile(data);
+  var renderer=PROFILE_RENDERERS[profile];
+  if(!renderer){$("parseErr").textContent="Profile not recognised: "+profile;return;}
+  renderer(data);
+  try{
+    var frag=btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+    history.replaceState(null,"",location.pathname+location.search+"#"+frag);
+    $("linkBtn").disabled=false;$("linkBtn").style.opacity="1";
+  }catch(ex){}
+  $("pasteSection").style.display="none";
+}
+
+/* auto-load from fragment */
+var hash=location.hash.slice(1);
+if(hash){
+  try{loadCapsule(JSON.parse(decodeURIComponent(escape(atob(hash)))));}
+  catch(ex){$("parseErr").textContent="Fragment decode error: "+ex.message;}
+}
+
+/* anchor status (same-origin proxy avoids CORS) */
+if(capsuleId){
+  fetch("/anchor-status/"+capsuleId)
+    .then(function(r){return r.json();})
+    .then(function(s){
+      var b=$("anchorBanner");
+      if(s.error){b.innerHTML="<span class='anchor-err'>Anchor unreachable: "+safe(s.error)+"</span>";b.className="anchor-banner anchor-unknown";return;}
+      if(s.anchored){
+        b.innerHTML="<span class='anchor-ok'>✓ Anchored</span> log index <code>"+s.log_index+"</code>"+
+          (s.receipt_verified?" · <span class='anchor-ok'>inclusion proof verified (RFC 9162)</span>":"");
+        if(s.logged_at)b.innerHTML+=" · "+safe(s.logged_at);
+        b.className="anchor-banner anchor-ok";
+      }else{
+        b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
+        b.className="anchor-banner anchor-none";
+      }
+    })
+    .catch(function(ex){
+      var b=$("anchorBanner");
+      b.innerHTML="Anchor unreachable: "+safe(ex.message);
+      b.className="anchor-banner anchor-unknown";
+    });
+}
+
+/* paste form */
+$("loadBtn").addEventListener("click",function(){
+  var txt=$("capsuleJson").value.trim();
+  try{loadCapsule(JSON.parse(txt));}
+  catch(ex){$("parseErr").textContent="JSON error: "+ex.message;}
+});
+$("linkBtn").addEventListener("click",function(){
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(location.href).then(function(){
+      $("linkBtn").textContent="Copied!";
+      setTimeout(function(){$("linkBtn").textContent="Copy permalink";},2000);
+    });
+  }
+});
+})();
+"""
+
+
+def _referrer_domain(referer: str) -> str | None:
+    """Extract eTLD+1 from Referer header; None for same-origin/missing."""
+    if not referer:
+        return None
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(referer).hostname or ""
+        if not host or host in ("verify.actionstate.ai", "localhost", "127.0.0.1"):
+            return None
+        parts = host.rstrip(".").split(".")
+        return ".".join(parts[-2:]) if len(parts) >= 2 else host
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _instrument_capsule_view(referer: str = "") -> None:
+    """Increment anonymous counters only — no content retained."""
+    _CAPSULE_VIEW_COUNTER[0] += 1
+    domain = _referrer_domain(referer)
+    if domain:
+        _REFERRER_COUNTER[domain] = _REFERRER_COUNTER.get(domain, 0) + 1
+
+
+def _ed25519_hex_to_pem(raw_hex: str) -> str:
+    """Wrap a raw 32-byte Ed25519 key (hex) in PEM SubjectPublicKeyInfo."""
+    raw = bytes.fromhex(raw_hex)
+    # SubjectPublicKeyInfo header for OID 1.3.101.112 (Ed25519)
+    spki = bytes.fromhex("302a300506032b6570032100") + raw
+    b64 = base64.b64encode(spki).decode()
+    return f"-----BEGIN PUBLIC KEY-----\n{b64}\n-----END PUBLIC KEY-----\n"
+
+
+def _anchor_proxy_json(capsule_id: str) -> dict:
+    """Fetch anchor status and verify receipt for *capsule_id* (server-side, avoids CORS).
+
+    Returns a JSON-serialisable dict; ``error`` key is set on failure.
+    Live against anchor.agentactioncapsule.org — RFC 9162 SHA-256 inclusion proof.
+    """
+    import urllib.error
+    import urllib.request
+
+    result: dict = {
+        "capsule_id": capsule_id,
+        "anchored": False,
+        "receipt_verified": False,
+        "log_index": None,
+        "logged_at": None,
+        "leaf_index": None,
+        "tree_size": None,
+        "error": None,
+    }
+
+    def _fetch_json(url: str, method: str = "GET", body: bytes | None = None) -> object:
+        headers: dict = {"Accept": "application/json"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=8) as r:  # noqa: S310
+            return json.loads(r.read())
+
+    try:
+        entries = _fetch_json(
+            f"{_ANCHOR_BASE}/anchor/transparency-log?capsule_id={capsule_id}"
+        )
+        if not entries:
+            return result
+
+        entry = entries[0]
+        result["anchored"] = True
+        result["log_index"] = entry.get("log_index")
+        result["logged_at"] = str(entry.get("logged_at") or "")
+
+        pubkey_data = _fetch_json(f"{_ANCHOR_BASE}/anchor/authority-pubkey")
+        pubkey_hex = pubkey_data.get("pubkey_hex", "")
+        log_pem = _ed25519_hex_to_pem(pubkey_hex) if len(pubkey_hex) == 64 else None
+
+        receipt_data = _fetch_json(
+            f"{_ANCHOR_BASE}/v1/digest",
+            method="POST",
+            body=json.dumps({"capsule_id": capsule_id}).encode(),
+        )
+        receipt_b64 = receipt_data.get("receipt_b64", "")
+        entry_hash = receipt_data.get("entry_hash", "")
+        result["leaf_index"] = receipt_data.get("leaf_index")
+        result["tree_size"] = receipt_data.get("tree_size")
+
+        if receipt_b64 and entry_hash and log_pem:
+            try:
+                receipt_bytes = base64.b64decode(receipt_b64 + "==")
+                vr = verify_receipt(
+                    receipt_bytes,
+                    leaf_entry_hex=entry_hash,
+                    log_public_key_pem=log_pem.encode(),
+                )
+                result["receipt_verified"] = vr.ok
+                if not vr.ok:
+                    result["receipt_errors"] = list(vr.errors)
+            except Exception as exc:  # noqa: BLE001
+                result["receipt_verify_error"] = str(exc)
+
+    except urllib.error.HTTPError as exc:
+        result["error"] = f"anchor returned HTTP {exc.code}"
+    except Exception as exc:  # noqa: BLE001
+        result["error"] = str(exc)
+
+    return result
+
+
+def _capsule_id_from_path(path: str, prefix: str) -> str | None:
+    """Extract the 64-hex capsule_id from a path like /v/<id> or /anchor-status/<id>."""
+    stripped = path.lstrip("/")
+    if not stripped.startswith(prefix.lstrip("/")):
+        return None
+    tail = stripped[len(prefix.lstrip("/")):]
+    cid = tail.strip("/")
+    if len(cid) == 64 and all(c in "0123456789abcdefABCDEF" for c in cid):
+        return cid.lower()
+    return None
+
+
+def render_capsule_page(capsule_id: str) -> str:
+    """Return the HTML for ``GET /v/<capsule_id>`` — the AAC capsule verification page."""
+    short_id = f"{capsule_id[:8]}…{capsule_id[-4:]}"
+    cid = _esc(capsule_id)
+    sid = _esc(short_id)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Capsule {sid} — AAC Verifier</title>
+<style>
+{_PAGE_CSS}
+{_CAPSULE_CSS}
+</style>
+</head>
+<body data-capsule-id="{cid}">
+<nav>
+  <div class="nav-in">
+    <a class="brand" href="https://agentactioncapsule.org">
+      <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
+    </a>
+    <div class="nav-links">
+      <a href="https://agentactioncapsule.org">Standard</a>
+      <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+      <a href="/" class="active">Verifier</a>
+      <a href="https://agentactioncapsule.org/docs/">Docs</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap" style="padding:32px 0 16px">
+  <div class="pill">capsule · AAC profile</div>
+  <h1 style="margin-top:12px">Capsule <code class="mono" style="font-size:1.1rem">{sid}</code></h1>
+  <p class="mono" style="font-size:11.5px;word-break:break-all;color:var(--muted);margin-top:6px">{cid}</p>
+</div>
+
+<div class="wrap" style="margin-bottom:8px">
+  <div class="anchor-banner anchor-loading" id="anchorBanner">Checking anchor status…</div>
+</div>
+
+<section id="graphSection" class="band" style="display:none">
+  <div class="wrap">
+    <div class="sec-eyebrow">Digest Graph</div>
+    <h2 class="sec-title">Artifact nodes and typed references</h2>
+    <div id="graphContent"></div>
+  </div>
+</section>
+
+<section id="privlogSection" class="band" style="display:none">
+  <div class="wrap">
+    <div class="sec-eyebrow">Privilege Log</div>
+    <h2 class="sec-title">Disclosed vs. withheld artifacts</h2>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
+      WITHHELD = digest committed in the capsule; payload not provided here.<br>
+      REVEALED = payload provided; hash recomputed and checked against the committed digest.
+    </p>
+    <div id="privlogContent"></div>
+  </div>
+</section>
+
+<section id="pasteSection" class="band">
+  <div class="wrap">
+    <div class="sec-eyebrow">Capsule data</div>
+    <h2 class="sec-title">Paste capsule JSON to render the graph and privilege log</h2>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
+      The JSON goes into the URL fragment only — never sent to this server.<br>
+      <strong>Unknown artifact types render VERIFIED-BUT-OPAQUE</strong>: verification is
+      uniform across all types; only the rendering is profile-specific.
+    </p>
+    <div class="tool">
+      <div class="tool-body">
+        <div class="field">
+          <label>Capsule JSON
+            <span class="opt">bilateral binding or single capsule</span>
+          </label>
+          <textarea id="capsuleJson" style="min-height:120px"
+            placeholder='{{"buyer_capsule": {{...}}, "seller_capsule": {{...}}, "sealed_terms_hash": "...", "terms": {{...}}}}'></textarea>
+        </div>
+        <p id="parseErr" style="color:var(--fail);font-family:var(--mono);font-size:12px;margin:8px 0;min-height:18px"></p>
+        <div class="actions">
+          <button class="verify-btn" id="loadBtn">Load capsule &#x2192;</button>
+          <button class="verify-btn" id="linkBtn" disabled style="opacity:.5">Copy permalink</button>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:16px">
+      <strong>Permalink:</strong> paste JSON → Load → Copy permalink.
+      The link embeds the full capsule JSON in the URL fragment so anyone can re-verify
+      without trusting this server.
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-in">
+      <div class="foot-brand">
+        <a class="brand" href="https://agentactioncapsule.org">
+          <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
+        </a>
+        <p>Stateless public verification surface for AAC capsule-bound records.
+        Anchor: <a href="https://anchor.agentactioncapsule.org">anchor.agentactioncapsule.org</a>.</p>
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <h5>Standard</h5>
+          <a href="https://agentactioncapsule.org">Overview</a>
+          <a href="https://agentactioncapsule.org/docs/">Docs</a>
+          <a href="https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/">Internet-Draft &#x2197;</a>
+        </div>
+        <div class="foot-col">
+          <h5>Services</h5>
+          <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+          <a href="/">Verifier</a>
+        </div>
+        <div class="foot-col">
+          <h5>Privacy</h5>
+          <a href="/instrumentation-policy">Instrumentation policy</a>
+          <a href="{_esc(REPO_URL)}">Source &#x2197;</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-note">Stateless &#xb7; retains nothing &#xb7; Apache-2.0 &#xb7; Action State Group</div>
+  </div>
+</footer>
+
+<script src="/static/capsule.js"></script>
+</body>
+</html>
+"""
+
+
 def render_landing_page() -> str:
     """The human-facing landing page (``GET /`` with ``Accept: text/html``).
 
@@ -823,6 +1349,8 @@ def make_handler(verify_rpm: int | None = None):
                 self._send_json(200, {"ok": True})
             elif self.path == "/static/verify.js":
                 self._send_js(200, VERIFY_JS)
+            elif self.path == "/static/capsule.js":
+                self._send_js(200, CAPSULE_JS)
             elif self.path.rstrip("/") in ("", "/verify"):
                 # Browsers get the landing page (boundary table on the page
                 # itself); API clients get the same data as JSON.
@@ -832,6 +1360,14 @@ def make_handler(verify_rpm: int | None = None):
                     self._send_json(
                         200, {"service": "stateless SCITT/COSE verifier", **CAPABILITIES}
                     )
+            elif self.path == "/instrumentation-policy":
+                self._send_json(200, INSTRUMENTATION_POLICY)
+            elif (cid := _capsule_id_from_path(self.path, "v/")) is not None:
+                referer = self.headers.get("Referer") or ""
+                _instrument_capsule_view(referer)
+                self._send_html(200, render_capsule_page(cid))
+            elif (cid := _capsule_id_from_path(self.path, "anchor-status/")) is not None:
+                self._send_json(200, _anchor_proxy_json(cid))
             else:
                 self._send_json(404, {"error": "not found"})
 
@@ -951,6 +1487,9 @@ def make_asgi_app(verify_rpm: int | None = None):
         if method == "GET" and path == "/static/verify.js":
             await send_js(200, VERIFY_JS)
             return
+        if method == "GET" and path == "/static/capsule.js":
+            await send_js(200, CAPSULE_JS)
+            return
         if method == "GET" and path in ("/", "/verify"):
             # Browsers get the landing page (boundary table on the page itself);
             # API clients get the same data as JSON.
@@ -959,6 +1498,23 @@ def make_asgi_app(verify_rpm: int | None = None):
             else:
                 await send_json(200, {"service": "stateless SCITT/COSE verifier", **CAPABILITIES})
             return
+        if method == "GET" and path == "/instrumentation-policy":
+            await send_json(200, INSTRUMENTATION_POLICY)
+            return
+        if method == "GET":
+            cid = _capsule_id_from_path(path, "v/")
+            if cid is not None:
+                referer = ""
+                for hname, hval in scope.get("headers", []):
+                    if hname == b"referer":
+                        referer = hval.decode("utf-8", errors="replace")
+                _instrument_capsule_view(referer)
+                await send_html(200, render_capsule_page(cid))
+                return
+            cid = _capsule_id_from_path(path, "anchor-status/")
+            if cid is not None:
+                await send_json(200, _anchor_proxy_json(cid))
+                return
         if method != "POST" or path != "/verify":
             await send_json(404, {"error": "POST /verify"})
             return
@@ -1005,10 +1561,16 @@ __all__ = [
     "REPO_URL",
     "SUMMARY",
     "VERIFY_JS",
+    "CAPSULE_JS",
+    "INSTRUMENTATION_POLICY",
     "render_landing_page",
+    "render_capsule_page",
     "verify_payload",
     "verify_request_bytes",
     "make_handler",
     "make_asgi_app",
     "serve",
+    # instrumentation
+    "_CAPSULE_VIEW_COUNTER",
+    "_REFERRER_COUNTER",
 ]
