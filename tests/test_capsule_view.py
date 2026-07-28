@@ -30,6 +30,7 @@ from scitt_cose.hosted import (
     _anchor_proxy_json,
     _capsule_id_from_path,
     _instrument_capsule_view,
+    _render_reg_panel,
     render_capsule_page,
 )
 
@@ -347,8 +348,16 @@ def test_capsule_js_has_profile_renderers_plug_point():
 
 
 # ---------------------------------------------------------------------------
-# Acceptance 1: Live inclusion-proof — requires AAC_LIVE_CAPSULE_ID env var
+# Acceptance 1: Live inclusion-proof via GET /v1/inclusion/{capsule_id}
 # ---------------------------------------------------------------------------
+# The anchor now exposes GET /v1/inclusion/{capsule_id} (capsule-anchor PR #11)
+# instead of the old POST /anchor/transparency-log query.
+# leaf-199 capsule_id from the goose-demo-run:
+#   6d8c1a4718847f98aad34b4975482bdc11ae3cbaa11939ff2e920497c86274fc
+# Set AAC_LIVE_CAPSULE_ID in the environment to run against the real anchor.
+_LEAF_199_CAPSULE_ID = "6d8c1a4718847f98aad34b4975482bdc11ae3cbaa11939ff2e920497c86274fc"
+_FABRICATED_CAPSULE_ID = "deadbeefdeadbeef" + "00" * 24  # 64-char hex; not in log
+
 
 def test_live_inclusion_proof_contract():
     """Documents the contract for the live inclusion-proof acceptance case.
@@ -368,7 +377,7 @@ def test_live_inclusion_proof_contract():
             "anchored": True,
             "receipt_verified": True,
             "log_index": 0,
-            "logged_at": "2026-07-27T00:00:00",
+            "logged_at": None,
             "leaf_index": 0,
             "tree_size": 1,
             "error": None,
@@ -388,6 +397,49 @@ def test_live_inclusion_proof_contract():
     )
     assert isinstance(result["log_index"], int)
     assert result["log_index"] >= 0
+
+
+@pytest.mark.skipif(
+    not __import__("os").environ.get("AAC_LIVE_CAPSULE_ID"),
+    reason="Set AAC_LIVE_CAPSULE_ID to run live anchor tests",
+)
+def test_live_leaf199_anchored():
+    """leaf-199 (goose-demo-run check_inventory) must return anchored=True via /v1/inclusion/.
+
+    Requires network access to anchor.agentactioncapsule.org and the anchor
+    to have PR #11 (GET /v1/inclusion/{capsule_id}) deployed.
+    """
+    result = _anchor_proxy_json(_LEAF_199_CAPSULE_ID)
+    assert result["error"] is None, f"anchor error: {result['error']}"
+    assert result["anchored"] is True, (
+        "leaf-199 capsule must be anchored in the transparency log"
+    )
+    assert result["receipt_verified"] is True, (
+        f"RFC 9162 inclusion proof for leaf-199 must verify; errors: {result.get('receipt_errors')}"
+    )
+    assert isinstance(result["leaf_index"], int), "leaf_index must be an integer"
+    assert result["leaf_index"] == 199, (
+        f"leaf-199 capsule should map to leaf_index=199, got {result['leaf_index']}"
+    )
+
+
+@pytest.mark.skipif(
+    not __import__("os").environ.get("AAC_LIVE_CAPSULE_ID"),
+    reason="Set AAC_LIVE_CAPSULE_ID to run live anchor tests",
+)
+def test_live_fabricated_id_not_anchored():
+    """A fabricated (never-registered) capsule_id must return anchored=False.
+
+    GET /v1/inclusion/{capsule_id} returns 404 for unknown ids.
+    _anchor_proxy_json must translate that to anchored=False, error=None.
+    """
+    result = _anchor_proxy_json(_FABRICATED_CAPSULE_ID)
+    assert result["anchored"] is False, (
+        "fabricated capsule_id must not be anchored"
+    )
+    assert result["error"] is None, (
+        f"404 from anchor must NOT be treated as an error: {result['error']}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -433,3 +485,79 @@ def test_single_capsule_parse():
     assert any(n.node_type == "capsule" for n in view.nodes)
     assert any(n.node_type == "subject" for n in view.nodes)
     assert any(e.label == "attests_over" for e in view.edges)
+
+
+# ---------------------------------------------------------------------------
+# Regulatory context panel
+# ---------------------------------------------------------------------------
+
+def test_reg_panel_without_receipt_has_attribution_only():
+    """Without an anchor receipt, only per-action-attribution rows appear."""
+    html = _render_reg_panel(has_receipt=False, has_hitl=False, has_withheld=False)
+    assert "per-action-attribution" in html
+    assert "tamper-evident-log" not in html
+    assert "human-oversight-record" not in html
+    assert "disclosure-transparency-record" not in html
+
+
+def test_reg_panel_with_receipt_adds_tamper_evident_rows():
+    """With an anchor receipt, tamper-evident-log rows are included."""
+    html = _render_reg_panel(has_receipt=True, has_hitl=False, has_withheld=False)
+    assert "tamper-evident-log" in html
+    assert "EU AI Act Art 12" in html
+    assert "SEC Rule 17a-4" in html
+    assert "per-action-attribution" in html
+
+
+def test_reg_panel_with_hitl_adds_human_oversight_rows():
+    """With human disposition, human-oversight-record rows are included."""
+    html = _render_reg_panel(has_receipt=False, has_hitl=True, has_withheld=False)
+    assert "human-oversight-record" in html
+    assert "NIST AI RMF MANAGE 1.3" in html
+    assert "tamper-evident-log" not in html
+
+
+def test_reg_panel_with_withheld_adds_disclosure_rows():
+    """With withheld commitments, disclosure-transparency-record rows appear."""
+    html = _render_reg_panel(has_receipt=False, has_hitl=False, has_withheld=True)
+    assert "disclosure-transparency-record" in html
+    assert "EU AI Act Art 50(1)" in html
+
+
+def test_reg_panel_all_properties():
+    """All four properties active: all row categories present."""
+    html = _render_reg_panel(has_receipt=True, has_hitl=True, has_withheld=True)
+    for prop in ("tamper-evident-log", "human-oversight-record",
+                 "disclosure-transparency-record", "per-action-attribution"):
+        assert prop in html, f"expected {prop} in panel"
+
+
+def test_reg_panel_has_disclaimer():
+    """Panel always includes the verbatim disclaimer."""
+    html = _render_reg_panel(has_receipt=False, has_hitl=False, has_withheld=False)
+    assert "not legal advice" in html
+    assert "Regulatory context (informational)" in html
+
+
+def test_reg_panel_links_to_crosswalk():
+    """Panel links to the full regulatory crosswalk document."""
+    html = _render_reg_panel(has_receipt=True, has_hitl=False, has_withheld=False)
+    assert "regulatory-crosswalk.md" in html
+    assert "full crosswalk" in html
+
+
+def test_capsule_page_has_reg_panel_mount():
+    """Capsule permalink page includes the reg panel section mount point."""
+    cid = "c" * 64
+    html = render_capsule_page(cid)
+    assert "regPanelSection" in html
+    assert "regPanelMount" in html
+
+
+def test_capsule_js_has_reg_panel_logic():
+    """CAPSULE_JS includes the reg panel rendering function."""
+    assert "renderRegPanel" in CAPSULE_JS
+    assert "REG_ROWS" in CAPSULE_JS
+    assert "regulatory-crosswalk.md" in CAPSULE_JS
+    assert "not legal advice" in CAPSULE_JS
+    assert "per-action-attribution" in CAPSULE_JS
