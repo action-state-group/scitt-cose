@@ -33,6 +33,7 @@ from typing import Any
 
 from ._status import DRAFT_TRACKING_NOTICE
 from .cose_sign1 import CoseError
+from .machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
 from .receipt import verify_receipt
 from .statement import parse_signed_statement
 
@@ -471,10 +472,18 @@ var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
   "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1};
 
 /* ---------- profile renderers plug-point ---------- */
-var PROFILE_RENDERERS={"aac":renderAac/* add more profiles here */};
+/* MachineMandate renderer inserted here — Tyche Institute vocabulary only.
+ * Source: tyche-institute/machine-mandate@524e6a3. Not an endorsement. */
+""" + _MM_RENDER_JS + """
+var PROFILE_RENDERERS={"aac":renderAac,"machine-mandate":renderMachineMandate};
 
 function detectProfile(d){
   if(d&&(d.capsule_id||d.buyer_capsule))return"aac";
+  /* MachineMandate: vct, eat_profile, or action_hash */
+  if(d&&(d.vct==="https://vocab.tyche.institute/vct/machine-mandate"||
+         (typeof d.eat_profile==="string"&&(d.eat_profile.indexOf("eatf.eu/aep")>=0||d.eat_profile.indexOf("veraison/ear")>=0))||
+         (typeof d.action_hash==="string"&&d.action_hash.indexOf("sha256:")===0)))
+    return"machine-mandate";
   return"unknown";
 }
 
