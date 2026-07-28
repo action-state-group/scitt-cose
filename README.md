@@ -354,6 +354,14 @@ self-consistency:
 > implementation would be a *misleading* oracle, so the COSE WG spec vector is
 > used in its place.
 
+## Cross-implementation validation
+
+At IETF 126 (Vienna, Jul 2026), receipt verification was cross-validated:
+[microsoft/scitt-ccf-ledger PR #424](https://github.com/microsoft/scitt-ccf-ledger/pull/424)
+pins the published `pyscitt` test inputs as `vectors-ietf126`; `ccf.v1` + RFC 9162
+SHA-256 receipts were verified under one dispatch path against this library's
+`verify_receipt()`.
+
 ## Hosted verification — a standalone SCITT-only verifier
 
 `scitt_cose.hosted` is a **stateless, read-only** wrapper over the *same* verify
