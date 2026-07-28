@@ -1,0 +1,20 @@
+{
+  "schema": "northwind-demo-disclosure/1",
+  "record_type": "demonstration record",
+  "bank": "Northwind Demo Bank",
+  "disclosure_note": "This is the disclosed agent_output that was withheld in Capsule A. The SHA-256 JCS-canonical digest of this object matches model_attestation.compute_attestation.agent_output_digest in Capsule A, proving the committed digest committed to this exact content. Nothing was hidden \u2014 only the raw data was withheld pending authorization.",
+  "disclosed": {
+    "record_type": "demonstration record",
+    "bank": "Northwind Demo Bank",
+    "transaction_ref": "NDB-2024-88A-9921",
+    "customer_name": "Morgan Chen",
+    "account_number_suffix": "7842",
+    "transaction_amount_usd": "247.50",
+    "transaction_date": "2024-03-15",
+    "merchant": "Acme Online Store",
+    "dispute_status": "pending_review",
+    "transaction_category": "online_retail"
+  },
+  "verify_digest_field": "model_attestation.compute_attestation.agent_output_digest",
+  "expected_digest": "096e65f99265fe5c0542895adb1484a1956f3c3b3b6a592c62a3247c20922340"
+}

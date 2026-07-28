@@ -1,0 +1,17 @@
+{
+  "schema": "northwind-demo-withheld-manifest/1",
+  "capsule_id": "6549127e35a6750b217520354929423a85f695acaa9decabace521bc8e7dcc8a",
+  "bank": "Northwind Demo Bank",
+  "record_type": "demonstration record",
+  "withheld": [
+    {
+      "label": "customer_pii_response",
+      "type": "agent_output",
+      "capsule_field": "model_attestation.compute_attestation.agent_output_digest",
+      "committed_digest": "096e65f99265fe5c0542895adb1484a1956f3c3b3b6a592c62a3247c20922340",
+      "reason": "customer PII",
+      "content_type": "application/json",
+      "reveal_file": "reveal_a.json"
+    }
+  ]
+}
