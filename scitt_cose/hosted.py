@@ -458,6 +458,15 @@ _CAPSULE_CSS = """
 .pl-match{color:var(--pass);font-weight:700;font-family:var(--mono);font-size:12px}
 .pl-mismatch{color:var(--fail);font-weight:700;font-family:var(--mono);font-size:12px}
 .pl-ctx{color:var(--muted);font-family:var(--mono);font-size:11px}
+.chain-table{border-collapse:collapse;width:100%;font-size:13px;margin-bottom:16px}
+.chain-table th,.chain-table td{padding:8px 12px;border:1px solid var(--line);text-align:left;vertical-align:middle}
+.chain-table th{background:var(--paper-2);font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.chain-table tr.chain-row{cursor:pointer}
+.chain-table tr.chain-active td{background:var(--accent-soft);font-weight:600}
+.chain-table tr.chain-row:hover td{background:var(--paper-2)}
+.chain-nav-btns{display:flex;align-items:center;gap:16px;margin-top:12px}
+.chain-pos{font-size:13px;color:var(--muted);flex:1;text-align:center}
+.gn-capsule-prev .gn-digest{color:var(--accent);text-decoration:underline;cursor:pointer}
 """
 
 #: JS for the capsule verification page (served at /static/capsule.js).
@@ -625,11 +634,13 @@ function loadCapsule(data){
   $("pasteSection").style.display="none";
 }
 
-/* auto-load from fragment */
+/* auto-load from fragment (single capsule object; arrays handled by bundle section below) */
 var hash=location.hash.slice(1);
 if(hash){
-  try{loadCapsule(JSON.parse(decodeURIComponent(escape(atob(hash)))));}
-  catch(ex){$("parseErr").textContent="Fragment decode error: "+ex.message;}
+  try{
+    var _fragData=JSON.parse(decodeURIComponent(escape(atob(hash))));
+    if(!Array.isArray(_fragData)){loadCapsule(_fragData);}
+  }catch(ex){$("parseErr").textContent="Fragment decode error: "+ex.message;}
 }
 
 /* anchor status (same-origin proxy avoids CORS) */
@@ -664,12 +675,111 @@ $("loadBtn").addEventListener("click",function(){
 });
 $("linkBtn").addEventListener("click",function(){
   if(navigator.clipboard){
-    navigator.clipboard.writeText(location.href).then(function(){
+    var txt=_bundle?btoa(unescape(encodeURIComponent(JSON.stringify(_bundle)))):location.hash.slice(1);
+    var url=location.origin+location.pathname+"#"+txt;
+    navigator.clipboard.writeText(url).then(function(){
       $("linkBtn").textContent="Copied!";
       setTimeout(function(){$("linkBtn").textContent="Copy permalink";},2000);
     });
   }
 });
+
+/* ---------- bundle / chain navigation ---------- */
+var _bundle=null,_bundleIdx=0;
+
+function _capSummary(cap){
+  var d=cap.disposition||{};
+  return{
+    capsule_id:cap.capsule_id||"",
+    action_type:cap.action_type||"",
+    verdict:d.verdict_class||d.decision||"",
+    human:d.human_disposed?"human":"policy",
+    timestamp:(cap.timestamp||"").slice(0,19).replace("T"," "),
+  };
+}
+
+function renderChainTable(capsules,activeIdx){
+  var el=$("chainTableContent");if(!el)return;
+  var h="<table class='chain-table'><thead><tr>"
+    +"<th>#</th><th>capsule_id</th><th>action_type</th><th>verdict</th><th>approver</th><th>timestamp</th>"
+    +"</tr></thead><tbody>";
+  capsules.forEach(function(cap,i){
+    var s=_capSummary(cap);
+    var cls="chain-row"+(i===activeIdx?" chain-active":"");
+    h+="<tr class='"+cls+"' data-idx='"+i+"'>"
+      +"<td>"+safe(String(i+1))+"</td>"
+      +"<td><code>"+safe(s.capsule_id.slice(0,12))+"…</code></td>"
+      +"<td><code>"+safe(s.action_type)+"</code></td>"
+      +"<td>"+safe(s.verdict)+"</td>"
+      +"<td>"+safe(s.human)+"</td>"
+      +"<td><code style='font-size:11px'>"+safe(s.timestamp)+"</code></td>"
+      +"</tr>";
+  });
+  h+="</tbody></table>";
+  el.innerHTML=h;
+  el.querySelectorAll("tr.chain-row").forEach(function(tr){
+    tr.addEventListener("click",function(){navigateBundle(parseInt(this.getAttribute("data-idx"),10));});
+  });
+  $("chainNav").style.display="block";
+  var prev=$("chainPrevBtn"),next=$("chainNextBtn"),pos=$("chainPos");
+  if(prev&&next){
+    if(activeIdx>0){prev.disabled=false;prev.style.opacity="1";}
+    else{prev.disabled=true;prev.style.opacity=".5";}
+    if(activeIdx<capsules.length-1){next.disabled=false;next.style.opacity="1";}
+    else{next.disabled=true;next.style.opacity=".5";}
+  }
+  if(pos)pos.textContent=(activeIdx+1)+" of "+capsules.length;
+}
+
+function navigateBundle(idx){
+  if(!_bundle||idx<0||idx>=_bundle.length)return;
+  _bundleIdx=idx;
+  renderChainTable(_bundle,idx);
+  loadCapsule(_bundle[idx]);
+}
+
+$("chainPrevBtn")&&$("chainPrevBtn").addEventListener("click",function(){navigateBundle(_bundleIdx-1);});
+$("chainNextBtn")&&$("chainNextBtn").addEventListener("click",function(){navigateBundle(_bundleIdx+1);});
+
+/* prior-capsule graph nodes become clickable when bundle contains them */
+function _patchGraphPriorLinks(){
+  if(!_bundle)return;
+  var byId={};
+  _bundle.forEach(function(cap,i){if(cap.capsule_id)byId[cap.capsule_id]=i;});
+  document.querySelectorAll(".gn-capsule").forEach(function(node){
+    var codeEl=node.querySelector(".gn-digest");
+    if(!codeEl)return;
+    var fullId=codeEl.textContent;
+    if(fullId&&byId[fullId]!==undefined){
+      var idx=byId[fullId];
+      if(!node.classList.contains("_linked")){
+        node.classList.add("_linked");
+        node.style.cursor="pointer";
+        codeEl.style.color="var(--accent)";
+        codeEl.style.textDecoration="underline";
+        node.addEventListener("click",function(){navigateBundle(idx);});
+      }
+    }
+  });
+}
+
+/* override renderGraph to also patch links after each render */
+var _origRenderGraph=renderGraph;
+renderGraph=function(g){_origRenderGraph(g);_patchGraphPriorLinks();};
+
+/* auto-load bundle from fragment (array) */
+var hash=location.hash.slice(1);
+if(hash){
+  try{
+    var decoded=JSON.parse(decodeURIComponent(escape(atob(hash))));
+    if(Array.isArray(decoded)&&decoded.length>0){
+      _bundle=decoded;
+      _bundleIdx=0;
+      renderChainTable(decoded,0);
+      loadCapsule(decoded[0]);
+    }
+  }catch(ex){}
+}
 })();
 """
 
@@ -835,6 +945,19 @@ def render_capsule_page(capsule_id: str) -> str:
 <div class="wrap" style="margin-bottom:8px">
   <div class="anchor-banner anchor-loading" id="anchorBanner">Checking anchor status…</div>
 </div>
+
+<section id="chainNav" class="band" style="display:none">
+  <div class="wrap">
+    <div class="sec-eyebrow">Capsule Chain</div>
+    <h2 class="sec-title">Chain navigation</h2>
+    <div id="chainTableContent"></div>
+    <div class="chain-nav-btns">
+      <button id="chainPrevBtn" class="verify-btn" style="opacity:.5" disabled>&#x2190; Previous</button>
+      <span class="chain-pos" id="chainPos"></span>
+      <button id="chainNextBtn" class="verify-btn" style="opacity:.5" disabled>Next &#x2192;</button>
+    </div>
+  </div>
+</section>
 
 <section id="graphSection" class="band" style="display:none">
   <div class="wrap">

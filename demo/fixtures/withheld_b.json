@@ -1,0 +1,24 @@
+{
+  "schema": "northwind-demo-withheld-manifest/1",
+  "capsule_id": "fcdc47760e6c9b8f96b9b776e2003e2eb17bb659750b8f010b16a2b1375d63f8",
+  "bank": "Northwind Demo Bank",
+  "record_type": "demonstration record",
+  "withheld": [
+    {
+      "label": "max_refund_policy_evidence",
+      "type": "constraint_evidence",
+      "capsule_field": "constraints[0].evidence_digest",
+      "committed_digest": "4520ed5ed1da004d5025ba72858b2b862e2ff6d950dad24dde58477bb98d3b70",
+      "reason": "internal policy",
+      "content_type": "application/json"
+    },
+    {
+      "label": "refund_confirmation",
+      "type": "effect_response",
+      "capsule_field": "effect.response_digest",
+      "committed_digest": "eb24d6c6e7abe05ede4879de22ac2f41a82f1e592223202c3c446b37712ca53a",
+      "reason": "operational data",
+      "content_type": "application/json"
+    }
+  ]
+}

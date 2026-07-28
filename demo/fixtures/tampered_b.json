@@ -1,0 +1,58 @@
+{
+  "spec_version": "draft-mih-scitt-agent-action-capsule-02",
+  "format_version": "2",
+  "capsule_id": "fcdc47760e6c9b8f96b9b776e2003e2eb17bb659750b8f010b16a2b1375d63f8",
+  "action_id": "northwind-demo/refund-decision/NDB-2024-88A-9921/approve",
+  "action_type": "decide",
+  "operator": "northwind-demo-bank",
+  "developer": "refund-policy-agent@v1",
+  "timestamp": "2024-03-16T14:23:08Z",
+  "model_attestation": {
+    "model_id": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "compute_attestation": {
+      "agent_input_digest": "a7ea249b0e2c1741428e2a9e7ffbc6999d9f5110923cc59ee5529521b8ce2a43",
+      "runtime": "demonstration",
+      "hitl_approver_name": "Jordan Kim",
+      "hitl_role": "Senior Dispute Analyst",
+      "hitl_review_duration_s": 47,
+      "hitl_review_channel": "northwind-dispute-portal",
+      "hitl_decision_timestamp": "2024-03-16T14:23:07Z",
+      "demo_note": "Constraint evidence digest and effect response digest are committed-but-withheld (see withheld_b.json for reasons)"
+    }
+  },
+  "effect": {
+    "status": "confirmed",
+    "type": "credit-refund",
+    "response_digest": "0b24d6c6e7abe05ede4879de22ac2f41a82f1e592223202c3c446b37712ca53a",
+    "effect_attestation": "runtime_claimed"
+  },
+  "assurance": {
+    "attestation_mode": "self_attested",
+    "effect_mode": "confirmed",
+    "ledger_mode": "chained"
+  },
+  "disposition": {
+    "decision": "approve",
+    "approver": "human",
+    "human_disposed": true,
+    "verdict_class": "executed"
+  },
+  "constraints": [
+    {
+      "id": "max-refund-limit-check",
+      "result": "pass",
+      "severity": "high",
+      "blocking": true,
+      "check_type": "max-amount-gate",
+      "method": "policy-engine",
+      "evidence_digest": "4520ed5ed1da004d5025ba72858b2b862e2ff6d950dad24dde58477bb98d3b70"
+    }
+  ],
+  "chain": {
+    "parent_capsule_id": "6549127e35a6750b217520354929423a85f695acaa9decabace521bc8e7dcc8a",
+    "relation": "follows"
+  },
+  "_demo_tamper_note": "DEMONSTRATION TAMPER: effect.response_digest first nibble changed ('e' \u2192 '0'). The capsule_id no longer matches the capsule body \u2014 verify surface should flag INTEGRITY_FAILURE.",
+  "_demo_original_response_digest": "eb24d6c6e7abe05ede4879de22ac2f41a82f1e592223202c3c446b37712ca53a"
+}
