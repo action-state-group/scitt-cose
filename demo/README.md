@@ -36,6 +36,29 @@ All three are registered against the live SCITT transparency service
 
 ---
 
+## Dual-anchor witnesses
+
+Each capsule is registered with **two independent transparency services**:
+
+| Witness | Endpoint | leaf_index (A / B / C) |
+|---------|----------|------------------------|
+| SCITT TS (RFC 9162) | `ts.agentactioncapsule.org` | see `anchor_results.json` → `.witnesses.scitt_ts` |
+| Public digest anchor | `anchor.agentactioncapsule.org` | 210 / 211 / 212 |
+
+The public anchor (`anchor.agentactioncapsule.org`) is what the verify surface's
+anchor banner queries — that's why all three capsule pages show green inclusion proofs.
+The SCITT TS receipt is the full COSE Receipt (RFC 9162 SHA-256 inclusion proof);
+the public anchor issues its own receipt independently.
+
+**This is not a workaround — it is the multi-witness story in practice.** The same
+capsule_id is witnessed by two logs that cannot coordinate their receipts. An auditor
+can check both independently. Neither can unilaterally revise the other's record.
+
+Both receipts (base64) and entry_hashes are in `fixtures/anchor_results.json` under
+`.capsules.<label>.witnesses`.
+
+---
+
 ## Fixture files
 
 | File | What |
