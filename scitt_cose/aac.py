@@ -250,16 +250,38 @@ def _extract_refs(view: GraphView, cap: dict, capsule_id: str, prefix: str) -> N
 # ---------------------------------------------------------------------------
 PROFILE_PARSERS: dict[str, Any] = {
     "aac": parse_capsule,
-    # "future-profile": future_module.parse_capsule,
+    # Machine-Mandate profile — accurate rendering of Tyche Institute's published vocabulary.
+    # Source: tyche-institute/machine-mandate@524e6a3. Not an endorsement.
+    "machine-mandate": None,  # populated on first import of machine_mandate to avoid circularity
 }
 
 
 def detect_profile(data: dict) -> str:
-    """Return the profile key for ``data``, or 'unknown' if unrecognised."""
+    """Return the profile key for ``data``, or 'unknown' if unrecognised.
+
+    Profiles checked in priority order: aac first, then machine-mandate.
+    New profiles: register in PROFILE_PARSERS and add detection here.
+    """
     if isinstance(data, dict):
         if "capsule_id" in data or "buyer_capsule" in data:
             return "aac"
+        # MachineMandate: vct, eat_profile, or action_hash marker
+        from .machine_mandate import is_machine_mandate  # lazy to avoid circular
+        if is_machine_mandate(data):
+            return "machine-mandate"
     return "unknown"
+
+
+# Populate the machine-mandate slot now that machine_mandate is importable.
+# This lazy approach avoids a circular import (machine_mandate imports from aac).
+def _register_machine_mandate() -> None:
+    try:
+        from .machine_mandate import parser_entry
+        PROFILE_PARSERS["machine-mandate"] = parser_entry
+    except Exception:  # noqa: BLE001
+        pass  # missing optional dependency; machine-mandate slot stays None
+
+_register_machine_mandate()
 
 
 __all__ = [

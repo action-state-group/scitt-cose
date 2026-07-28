@@ -397,6 +397,10 @@ def _esc(s: str) -> str:
 # AAC Capsule Verification Surface — P1
 # ---------------------------------------------------------------------------
 
+#: MachineMandate client-side renderer JS, injected into CAPSULE_JS at the plug-point.
+#: Source: tyche-institute/machine-mandate@524e6a3. Accurate rendering only; not an endorsement.
+from .machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
+
 #: Live transparency service this surface queries for inclusion proofs.
 _ANCHOR_BASE = "https://anchor.agentactioncapsule.org"
 
@@ -471,10 +475,18 @@ var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
   "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1};
 
 /* ---------- profile renderers plug-point ---------- */
-var PROFILE_RENDERERS={"aac":renderAac/* add more profiles here */};
+/* MachineMandate renderer inserted here — Tyche Institute vocabulary only.
+ * Source: tyche-institute/machine-mandate@524e6a3. Not an endorsement. */
+""" + _MM_RENDER_JS + """
+var PROFILE_RENDERERS={"aac":renderAac,"machine-mandate":renderMachineMandate};
 
 function detectProfile(d){
   if(d&&(d.capsule_id||d.buyer_capsule))return"aac";
+  /* MachineMandate: vct, eat_profile, or action_hash */
+  if(d&&(d.vct==="https://vocab.tyche.institute/vct/machine-mandate"||
+         (typeof d.eat_profile==="string"&&(d.eat_profile.indexOf("eatf.eu/aep")>=0||d.eat_profile.indexOf("veraison/ear")>=0))||
+         (typeof d.action_hash==="string"&&d.action_hash.indexOf("sha256:")===0)))
+    return"machine-mandate";
   return"unknown";
 }
 
