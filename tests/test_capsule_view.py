@@ -643,13 +643,8 @@ def test_goose_compute_attestation_reveal_path():
     """If agent_input / agent_output preimages are supplied, they are revealed and match-checked."""
     ai_preimage = {"prompt": "check inventory for item_id=42", "tool": "check_inventory"}
     ao_preimage = {"result": "in_stock", "quantity": 7}
-    import hashlib, json
-    ai_digest = hashlib.sha256(
-        json.dumps(ai_preimage, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    ).hexdigest()
-    ao_digest = hashlib.sha256(
-        json.dumps(ao_preimage, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    ).hexdigest()
+    ai_digest = _aac._json_digest(ai_preimage)
+    ao_digest = _aac._json_digest(ao_preimage)
 
     cap_with_preimage = {
         "capsule_id": _fake_hex64("77"),
