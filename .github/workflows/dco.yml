@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# DCO sign-off enforcement — replaces the hosted probot DCO app with a
+# self-contained Actions job that is outage-proof and pinned.
+#
+# Branch protection: require the "dco / dco" check (Settings → Branches →
+# Require status checks → search "dco"). Drop the "DCO" probot app entry.
+name: dco
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Check all commits carry a DCO Signed-off-by line
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=()
+          while IFS= read -r sha; do
+            msg=$(git log --format=%B -n 1 "$sha")
+            if ! echo "$msg" | grep -qiE "^Signed-off-by: .+ <.+@.+>"; then
+              missing+=("$(git log --format='%h %s' -n 1 "$sha")")
+            fi
+          done < <(git rev-list "$BASE_SHA..$HEAD_SHA")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "ERROR: Missing DCO Signed-off-by on the following commits:"
+            printf '  %s\n' "${missing[@]}"
+            echo
+            echo "Fix: git commit --amend -s  (for last commit)"
+            echo "     git rebase --signoff HEAD~N  (for N commits)"
+            exit 1
+          fi
+          echo "All commits signed off. ✓"
