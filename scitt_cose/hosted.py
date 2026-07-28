@@ -33,6 +33,7 @@ from typing import Any
 
 from ._status import DRAFT_TRACKING_NOTICE
 from .cose_sign1 import CoseError
+from .machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
 from .receipt import verify_receipt
 from .statement import parse_signed_statement
 
@@ -396,10 +397,6 @@ def _esc(s: str) -> str:
 # ---------------------------------------------------------------------------
 # AAC Capsule Verification Surface — P1
 # ---------------------------------------------------------------------------
-
-#: MachineMandate client-side renderer JS, injected into CAPSULE_JS at the plug-point.
-#: Source: tyche-institute/machine-mandate@524e6a3. Accurate rendering only; not an endorsement.
-from .machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
 
 #: Live transparency service this surface queries for inclusion proofs.
 _ANCHOR_BASE = "https://anchor.agentactioncapsule.org"

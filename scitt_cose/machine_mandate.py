@@ -26,8 +26,6 @@ No external dependencies beyond the stdlib.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -305,7 +303,7 @@ def parse_machine_mandate(data: dict) -> MachineMandate:
 # GraphView adapter — wraps MachineMandate render into the AAC graph model
 # ---------------------------------------------------------------------------
 
-def parse_as_graph_view(data: dict) -> "Any":
+def parse_as_graph_view(data: dict) -> Any:
     """Parse MachineMandate data into a GraphView for the P1 surface.
 
     The verification path is identical to AAC: the SCITT/COSE receipt and
@@ -315,10 +313,10 @@ def parse_as_graph_view(data: dict) -> "Any":
     Returns a GraphView with profile="machine-mandate" and a single synthetic
     node carrying the MachineMandate render result in revealed_payload.
     """
-    from .aac import GraphView, GraphNode  # local import to avoid circular
-
     import hashlib as _h
     import json as _j
+
+    from .aac import GraphNode, GraphView  # local import to avoid circular
 
     mm = parse_machine_mandate(data)
     blob = _j.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
@@ -344,7 +342,7 @@ def parse_as_graph_view(data: dict) -> "Any":
 # PROFILE_PARSERS entry — callable matching aac.parse_capsule signature
 # ---------------------------------------------------------------------------
 
-def parser_entry(data: dict) -> "Any":
+def parser_entry(data: dict) -> Any:
     """Entry point for PROFILE_PARSERS['machine-mandate'].
 
     Mirrors the aac.parse_capsule(data) -> GraphView signature so the detect +

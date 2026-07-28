@@ -23,7 +23,6 @@ from scitt_cose import aac as _aac
 from scitt_cose import machine_mandate as mm
 from scitt_cose.hosted import CAPSULE_JS
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — verbatim from tyche-institute/machine-mandate@524e6a3
 # ---------------------------------------------------------------------------
