@@ -467,6 +467,17 @@ _CAPSULE_CSS = """
 .chain-nav-btns{display:flex;align-items:center;gap:16px;margin-top:12px}
 .chain-pos{font-size:13px;color:var(--muted);flex:1;text-align:center}
 .gn-capsule-prev .gn-digest{color:var(--accent);text-decoration:underline;cursor:pointer}
+.reg-panel{margin:24px 0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.reg-panel summary{padding:14px 18px;cursor:pointer;font-size:14px;font-weight:600;background:var(--paper-2);list-style:none;display:flex;align-items:center;gap:10px;user-select:none}
+.reg-panel summary::-webkit-details-marker{display:none}
+.reg-panel summary::before{content:'▶';font-size:10px;color:var(--muted);transition:transform .15s;flex-shrink:0}
+.reg-panel[open] summary::before{transform:rotate(90deg)}
+.reg-panel-body{padding:16px 18px}
+.reg-disclaimer{font-size:12.5px;color:var(--muted);font-style:italic;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.reg-table{border-collapse:collapse;width:100%;font-size:12.5px}
+.reg-table th,.reg-table td{padding:8px 10px;border:1px solid var(--line);text-align:left;vertical-align:top}
+.reg-table th{background:var(--paper-2);font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.reg-prop{font-family:var(--mono);font-size:11px;background:var(--paper-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;white-space:nowrap;display:inline-block;margin-bottom:2px}
 """
 
 #: JS for the capsule verification page (served at /static/capsule.js).
@@ -620,12 +631,88 @@ function renderAac(data){
   var g=parseAac(data);renderGraph(g);renderPrivlog(g);
 }
 
+/* ---------- regulatory-context panel ----------
+ * Property-driven: rows appear only for structural properties detected in
+ * the capsule or the anchor status.  No scores, no checkmarks.
+ * Called from loadCapsule (initial, hasReceipt=false) and again after
+ * anchor status resolves if the capsule is anchored.
+ */
+var REG_ROWS=[
+  /* tamper-evident-log */
+  ["EU AI Act Art 12(1)","Automatic logging capabilities for high-risk AI systems","tamper-evident-log"],
+  ["EU AI Act Art 12(2)","Level of traceability appropriate to the system's purpose","tamper-evident-log"],
+  ["DORA Art 9(4)","ICT security policies — logging and monitoring","tamper-evident-log"],
+  ["DORA Art 10(1)-(2)","Detection of anomalous activity","tamper-evident-log"],
+  ["DORA Art 17(3)(b)","ICT incident records","tamper-evident-log"],
+  ["SEC Rule 17a-4(f)(2)(ii)(A)","Non-rewriteable, non-erasable electronic records","tamper-evident-log"],
+  ["FINRA Rule 4511(c)","17a-4 format compliance","tamper-evident-log"],
+  /* human-oversight-record */
+  ["EU AI Act Art 50(2)/(3)","Notice and disclosure to persons subject to AI interaction","human-oversight-record"],
+  ["MAS SAFR (Jul 2026)","Human oversight and decision review","human-oversight-record"],
+  ["FCA AI accountability (FS23/5)","Transparency of AI decision-making","human-oversight-record"],
+  ["NIST AI RMF MANAGE 1.3","High-priority risk response planning and documentation","human-oversight-record"],
+  /* disclosure-transparency-record */
+  ["EU AI Act Art 50(1)","Machine-readable AI-content marking","disclosure-transparency-record"],
+  ["NIST AI RMF MEASURE 2.8","Transparency and accountability risks","disclosure-transparency-record"],
+  ["prEN 18229-1","Transparency documentation requirements for AI systems","disclosure-transparency-record"],
+  /* per-action-attribution — always shown */
+  ["EU AI Act Art 26(6)","Deployer log retention","per-action-attribution"],
+  ["DORA Art 17(3)(b)","ICT incident records — attribution","per-action-attribution"],
+  ["NIST AI RMF GOVERN 1.1","Risk management policies and practices","per-action-attribution"],
+  ["FCA AI accountability (FS23/5)","Accountability and audit trails","per-action-attribution"]
+];
+var REG_CROSSWALK_URL="https://github.com/action-state-group/agent-action-capsule/blob/main/docs/regulatory-crosswalk.md";
+
+var _regLastData=null;
+var _regHasReceipt=false;
+
+function renderRegPanel(data,hasReceipt){
+  _regLastData=data;_regHasReceipt=hasReceipt;
+  var sec=$("regPanelSection");var mount=$("regPanelMount");
+  if(!sec||!mount)return;
+
+  /* detect properties from capsule data */
+  var activeProps={"per-action-attribution":1};
+  if(hasReceipt)activeProps["tamper-evident-log"]=1;
+  /* human-oversight: disposition + human_disposed on any capsule */
+  function checkHitl(cap){
+    return cap&&cap.disposition&&(cap.human_disposed===true||(cap.disposition&&cap.disposition.approver==="human"));
+  }
+  if(checkHitl(data)||checkHitl(data&&data.buyer_capsule)||checkHitl(data&&data.seller_capsule))
+    activeProps["human-oversight-record"]=1;
+  /* disclosure: withheld_commitments or sealed_terms_hash with no terms */
+  function checkSd(cap){
+    return cap&&(cap.withheld_commitments||(cap.constraints&&cap.constraints.some(function(c){return c.evidence_digest;})));
+  }
+  if((data&&data.sealed_terms_hash&&!data.terms)||checkSd(data)||checkSd(data&&data.buyer_capsule)||checkSd(data&&data.seller_capsule))
+    activeProps["disclosure-transparency-record"]=1;
+
+  var propsShown=Object.keys(activeProps).sort().join(", ");
+  var rows="";
+  REG_ROWS.forEach(function(r){
+    if(!activeProps[r[2]])return;
+    rows+="<tr><td>"+safe(r[0])+"</td><td>"+safe(r[1])+"</td><td><span class='reg-prop'>"+safe(r[2])+"</span></td></tr>";
+  });
+
+  mount.innerHTML="<details class='reg-panel' id='regPanelDetails'>"
+    +"<summary>Regulatory context (informational) "
+    +"<span style='font-weight:400;font-size:12px;color:var(--muted);margin-left:8px'>properties detected: "+safe(propsShown)+"</span></summary>"
+    +"<div class='reg-panel-body'>"
+    +"<p class='reg-disclaimer'>This panel identifies structural properties of this record. It is not legal advice. "
+    +"Consult the <a href='"+safe(REG_CROSSWALK_URL)+"' target='_blank' rel='noopener noreferrer'>full crosswalk</a> for instrument citations and limits.</p>"
+    +"<table class='reg-table'><thead><tr><th>Regulation / Article</th><th>Summary</th><th>Property</th></tr></thead>"
+    +"<tbody>"+rows+"</tbody></table>"
+    +"</div></details>";
+  sec.style.display="block";
+}
+
 /* ---------- load + permalink ---------- */
 function loadCapsule(data){
   var profile=detectProfile(data);
   var renderer=PROFILE_RENDERERS[profile];
   if(!renderer){$("parseErr").textContent="Profile not recognised: "+profile;return;}
   renderer(data);
+  renderRegPanel(data,false);
   try{
     var frag=btoa(unescape(encodeURIComponent(JSON.stringify(data))));
     history.replaceState(null,"",location.pathname+location.search+"#"+frag);
@@ -655,6 +742,8 @@ if(capsuleId){
           (s.receipt_verified?" · <span class='anchor-ok'>inclusion proof verified (RFC 9162)</span>":"");
         if(s.logged_at)b.innerHTML+=" · "+safe(s.logged_at);
         b.className="anchor-banner anchor-ok";
+        /* upgrade reg panel with tamper-evident-log rows now that receipt is confirmed */
+        if(_regLastData)renderRegPanel(_regLastData,true);
       }else{
         b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
         b.className="anchor-banner anchor-none";
@@ -819,6 +908,11 @@ def _ed25519_hex_to_pem(raw_hex: str) -> str:
 def _anchor_proxy_json(capsule_id: str) -> dict:
     """Fetch anchor status and verify receipt for *capsule_id* (server-side, avoids CORS).
 
+    Calls ``GET /v1/inclusion/{capsule_id}`` on the anchor — a read-only resolve
+    endpoint added in capsule-anchor PR #11.  200 → anchored; 404 → not found.
+    The returned bundle contains ``receipt_b64`` and ``entry_hash`` so we can
+    verify the RFC 9162 inclusion proof locally without a second round-trip.
+
     Returns a JSON-serialisable dict; ``error`` key is set on failure.
     Live against anchor.agentactioncapsule.org — RFC 9162 SHA-256 inclusion proof.
     """
@@ -836,55 +930,47 @@ def _anchor_proxy_json(capsule_id: str) -> dict:
         "error": None,
     }
 
-    def _fetch_json(url: str, method: str = "GET", body: bytes | None = None) -> object:
-        headers: dict = {"Accept": "application/json"}
-        if body is not None:
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    def _fetch_json(url: str) -> object:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(req, timeout=8) as r:  # noqa: S310
             return json.loads(r.read())
 
     try:
-        entries = _fetch_json(
-            f"{_ANCHOR_BASE}/anchor/transparency-log?capsule_id={capsule_id}"
-        )
-        if not entries:
-            return result
+        # GET /v1/inclusion/{capsule_id} — 200 present / 404 absent (PR #11)
+        inclusion = _fetch_json(f"{_ANCHOR_BASE}/v1/inclusion/{capsule_id}")
 
-        entry = entries[0]
         result["anchored"] = True
-        result["log_index"] = entry.get("log_index")
-        result["logged_at"] = str(entry.get("logged_at") or "")
+        result["leaf_index"] = inclusion.get("leaf_index")
+        result["tree_size"] = inclusion.get("tree_size")
+        # log_index == leaf_index for this log (sequential, 0-based)
+        result["log_index"] = inclusion.get("leaf_index")
 
-        pubkey_data = _fetch_json(f"{_ANCHOR_BASE}/anchor/authority-pubkey")
-        pubkey_hex = pubkey_data.get("pubkey_hex", "")
-        log_pem = _ed25519_hex_to_pem(pubkey_hex) if len(pubkey_hex) == 64 else None
+        receipt_b64 = inclusion.get("receipt_b64", "")
+        entry_hash = inclusion.get("entry_hash", "")
 
-        receipt_data = _fetch_json(
-            f"{_ANCHOR_BASE}/v1/digest",
-            method="POST",
-            body=json.dumps({"capsule_id": capsule_id}).encode(),
-        )
-        receipt_b64 = receipt_data.get("receipt_b64", "")
-        entry_hash = receipt_data.get("entry_hash", "")
-        result["leaf_index"] = receipt_data.get("leaf_index")
-        result["tree_size"] = receipt_data.get("tree_size")
-
-        if receipt_b64 and entry_hash and log_pem:
+        if receipt_b64 and entry_hash:
             try:
-                receipt_bytes = base64.b64decode(receipt_b64 + "==")
-                vr = verify_receipt(
-                    receipt_bytes,
-                    leaf_entry_hex=entry_hash,
-                    log_public_key_pem=log_pem.encode(),
-                )
-                result["receipt_verified"] = vr.ok
-                if not vr.ok:
-                    result["receipt_errors"] = list(vr.errors)
+                pubkey_data = _fetch_json(f"{_ANCHOR_BASE}/anchor/authority-pubkey")
+                pubkey_hex = pubkey_data.get("pubkey_hex", "")
+                log_pem = _ed25519_hex_to_pem(pubkey_hex) if len(pubkey_hex) == 64 else None
+
+                if log_pem:
+                    receipt_bytes = base64.b64decode(receipt_b64 + "==")
+                    vr = verify_receipt(
+                        receipt_bytes,
+                        leaf_entry_hex=entry_hash,
+                        log_public_key_pem=log_pem.encode(),
+                    )
+                    result["receipt_verified"] = vr.ok
+                    if not vr.ok:
+                        result["receipt_errors"] = list(vr.errors)
             except Exception as exc:  # noqa: BLE001
                 result["receipt_verify_error"] = str(exc)
 
     except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            # capsule_id not found in log — not an error, just not anchored
+            return result
         result["error"] = f"anchor returned HTTP {exc.code}"
     except Exception as exc:  # noqa: BLE001
         result["error"] = str(exc)
@@ -902,6 +988,98 @@ def _capsule_id_from_path(path: str, prefix: str) -> str | None:
     if len(cid) == 64 and all(c in "0123456789abcdefABCDEF" for c in cid):
         return cid.lower()
     return None
+
+
+#: URL for the regulatory crosswalk document (public repo path).
+_REG_CROSSWALK_URL = (
+    "https://github.com/action-state-group/agent-action-capsule"
+    "/blob/main/docs/regulatory-crosswalk.md"
+)
+
+#: Crosswalk rows by property — (regulation, article_summary, property_id).
+#: Rendered in the regulatory-context panel on the capsule permalink page.
+#: Property IDs drive panel gating: tamper-evident-log (receipt), human-oversight
+#: (disposition+human_disposed), disclosure-transparency (withheld commitments).
+_CROSSWALK_ROWS: tuple[tuple[str, str, str], ...] = (
+    # tamper-evident-log rows (shown when anchor receipt present)
+    ("EU AI Act Art 12(1)", "Automatic logging capabilities for high-risk AI systems", "tamper-evident-log"),
+    ("EU AI Act Art 12(2)", "Level of traceability appropriate to the system's purpose", "tamper-evident-log"),
+    ("DORA Art 9(4)", "ICT security policies — logging and monitoring", "tamper-evident-log"),
+    ("DORA Art 10(1)-(2)", "Detection of anomalous activity", "tamper-evident-log"),
+    ("DORA Art 17(3)(b)", "ICT incident records", "tamper-evident-log"),
+    ("SEC Rule 17a-4(f)(2)(ii)(A)", "Non-rewriteable, non-erasable electronic records", "tamper-evident-log"),
+    ("FINRA Rule 4511(c)", "17a-4 format compliance", "tamper-evident-log"),
+    # human-oversight-record rows (shown when disposition + human_disposed present)
+    ("EU AI Act Art 50(2)/(3)", "Notice and disclosure to persons subject to AI interaction", "human-oversight-record"),
+    ("MAS SAFR (Jul 2026)", "Human oversight and decision review", "human-oversight-record"),
+    ("FCA AI accountability (FS23/5)", "Transparency of AI decision-making", "human-oversight-record"),
+    ("NIST AI RMF MANAGE 1.3", "High-priority risk response planning and documentation", "human-oversight-record"),
+    # disclosure-transparency-record rows (shown when withheld commitments present)
+    ("EU AI Act Art 50(1)", "Machine-readable AI-content marking", "disclosure-transparency-record"),
+    ("NIST AI RMF MEASURE 2.8", "Transparency and accountability risks", "disclosure-transparency-record"),
+    ("prEN 18229-1", "Transparency documentation requirements for AI systems", "disclosure-transparency-record"),
+    # per-action-attribution rows — always shown (capsule_id + operator + developer are always present)
+    ("EU AI Act Art 26(6)", "Deployer log retention", "per-action-attribution"),
+    ("DORA Art 17(3)(b)", "ICT incident records — attribution", "per-action-attribution"),
+    ("NIST AI RMF GOVERN 1.1", "Risk management policies and practices", "per-action-attribution"),
+    ("FCA AI accountability (FS23/5)", "Accountability and audit trails", "per-action-attribution"),
+)
+
+_PROP_LABELS: dict[str, str] = {
+    "tamper-evident-log": "tamper-evident-log",
+    "human-oversight-record": "human-oversight-record",
+    "disclosure-transparency-record": "disclosure-transparency-record",
+    "per-action-attribution": "per-action-attribution",
+}
+
+
+def _render_reg_panel(has_receipt: bool, has_hitl: bool, has_withheld: bool) -> str:
+    """Return HTML for the regulatory-context collapsible panel.
+
+    Property-driven: rows are filtered by which structural properties are
+    detected in the capsule.  No scores, no checkmarks against regulations.
+
+    Args:
+        has_receipt:  True if an anchor receipt is present (tamper-evident-log).
+        has_hitl:     True if disposition + human_disposed fields are present
+                      (human-oversight-record).
+        has_withheld: True if withheld commitments (SD) block is present
+                      (disclosure-transparency-record).
+    """
+    # per-action-attribution is always shown — capsule_id + operator + developer
+    # are structural invariants of every capsule.
+    active_props: set[str] = {"per-action-attribution"}
+    if has_receipt:
+        active_props.add("tamper-evident-log")
+    if has_hitl:
+        active_props.add("human-oversight-record")
+    if has_withheld:
+        active_props.add("disclosure-transparency-record")
+
+    rows_html = "\n".join(
+        f"<tr><td>{_esc(reg)}</td><td>{_esc(summary)}</td>"
+        f"<td><span class='reg-prop'>{_esc(prop_id)}</span></td></tr>"
+        for reg, summary, prop_id in _CROSSWALK_ROWS
+        if prop_id in active_props
+    )
+
+    props_shown = ", ".join(sorted(active_props))
+    crosswalk_url = _esc(_REG_CROSSWALK_URL)
+
+    return f"""<details class="reg-panel">
+  <summary>Regulatory context (informational) <span style="font-weight:400;font-size:12px;color:var(--muted);margin-left:8px">properties detected: {_esc(props_shown)}</span></summary>
+  <div class="reg-panel-body">
+    <p class="reg-disclaimer">This panel identifies structural properties of this record. It is not legal advice. Consult the <a href="{crosswalk_url}" target="_blank" rel="noopener noreferrer">full crosswalk</a> for instrument citations and limits.</p>
+    <table class="reg-table">
+      <thead>
+        <tr><th>Regulation / Article</th><th>Summary</th><th>Property</th></tr>
+      </thead>
+      <tbody>
+{rows_html}
+      </tbody>
+    </table>
+  </div>
+</details>"""
 
 
 def render_capsule_page(capsule_id: str) -> str:
@@ -1009,6 +1187,12 @@ def render_capsule_page(capsule_id: str) -> str:
       The link embeds the full capsule JSON in the URL fragment so anyone can re-verify
       without trusting this server.
     </div>
+  </div>
+</section>
+
+<section id="regPanelSection" class="band" style="display:none">
+  <div class="wrap">
+    <div id="regPanelMount"></div>
   </div>
 </section>
 
@@ -1697,6 +1881,7 @@ __all__ = [
     "INSTRUMENTATION_POLICY",
     "render_landing_page",
     "render_capsule_page",
+    "_render_reg_panel",
     "verify_payload",
     "verify_request_bytes",
     "make_handler",
