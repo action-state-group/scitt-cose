@@ -678,3 +678,71 @@ def test_reg_panel_disclosure_fires_for_compute_attestation_digests():
     html = _render_reg_panel(has_receipt=False, has_hitl=False, has_withheld=True)
     assert "disclosure-transparency-record" in html
     assert "EU AI Act Art 50(1)" in html
+
+
+# ---------------------------------------------------------------------------
+# /anchor-status endpoint — recorded fixture tests for _anchor_proxy_json
+# (The DEPLOYED verify surface used to query /anchor/transparency-log?capsule_id=<id>
+#  which always returned []. Fix landed in PR #16 (8ba25df) — now queries
+#  GET /v1/inclusion/{capsule_id}. These tests exercise the field mapping
+#  and 404 handling without live network access.)
+# ---------------------------------------------------------------------------
+
+
+def test_anchor_proxy_maps_inclusion_response_fields():
+    """Recorded fixture: /v1/inclusion/ 200 maps correctly to the response dict.
+
+    Uses the real Goose leaf-199 capsule_id. The mock returns a plausible
+    inclusion response without receipt_b64 so the receipt-verify block is
+    skipped (live test covers that path).
+    """
+    from unittest.mock import MagicMock, patch
+
+    inclusion_body = json.dumps({
+        "capsule_id": _LEAF_199_CAPSULE_ID,
+        "entry_hash": "a" * 64,
+        "leaf_index": 199,
+        "tree_size": 200,
+        "leaf_hash": "b" * 64,
+        "audit_path": [],
+        "root_hash": "c" * 64,
+        "receipt_b64": "",   # empty → receipt-verify block skipped
+    }).encode()
+
+    mock_resp = MagicMock()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.read.return_value = inclusion_body
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        result = _anchor_proxy_json(_LEAF_199_CAPSULE_ID)
+
+    assert result["capsule_id"] == _LEAF_199_CAPSULE_ID
+    assert result["anchored"] is True
+    assert result["leaf_index"] == 199
+    assert result["tree_size"] == 200
+    assert result["log_index"] == 199   # log_index mirrors leaf_index
+    assert result["error"] is None
+    assert result["receipt_verified"] is False  # no receipt_b64 → not verified
+
+
+def test_anchor_proxy_404_returns_not_anchored_no_error():
+    """Recorded fixture: 404 from /v1/inclusion/ → anchored=False, error=None.
+
+    This is the correct treatment for a capsule_id not yet in the log —
+    absence is not an error condition.
+    """
+    import urllib.error
+    from unittest.mock import patch
+
+    _UNKNOWN_ID = "d" * 64
+
+    def _raise_404(req, **_kw):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    with patch("urllib.request.urlopen", side_effect=_raise_404):
+        result = _anchor_proxy_json(_UNKNOWN_ID)
+
+    assert result["anchored"] is False
+    assert result["error"] is None
+    assert result["capsule_id"] == _UNKNOWN_ID
