@@ -542,13 +542,16 @@ function parseAac(data){
       addEdge(capId,prior,"chains_to");
     var ma=cap.model_attestation||{},ca=ma.compute_attestation||{},subj=ca.subject_digest||"";
     if(isH64(subj)){addArt(subj,"subject","subject",p+"compute_attestation.subject_digest");addEdge(capId,subj,"attests_over");}
-    var _actx=p+"compute_attestation — payload not carried in the record";
-    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input;
-    if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),aiPre==null,aiPre!=null?aiPre:null)){
-      privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:aiPre==null,isKnown:true,matchOk:null,ctx:_actx});addEdge(capId,ai,"attests_over");}
-    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output;
-    if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),aoPre==null,aoPre!=null?aoPre:null)){
-      privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:aoPre==null,isKnown:true,matchOk:null,ctx:_actx});addEdge(capId,ao,"attests_over");}
+    var _actxW=p+"compute_attestation — payload not carried in the record";
+    var _actxR="payload carried in fragment; recomputed against committed digest";
+    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input,aiRev=aiPre!=null;
+    if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),!aiRev,aiRev?aiPre:null)){
+      privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:!aiRev,isKnown:true,matchOk:null,
+                    ctx:aiRev?_actxR:_actxW,_revPayload:aiRev?aiPre:null});addEdge(capId,ai,"attests_over");}
+    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output,aoRev=aoPre!=null;
+    if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),!aoRev,aoRev?aoPre:null)){
+      privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:!aoRev,isKnown:true,matchOk:null,
+                    ctx:aoRev?_actxR:_actxW,_revPayload:aoRev?aoPre:null});addEdge(capId,ao,"attests_over");}
     var eff=cap.effect||{},resp=eff.response_digest||"";
     if(isH64(resp)){addArt(resp,"response","response",p+"effect.response_digest");addEdge(capId,resp,"effect_response");}
     (cap.constraints||[]).forEach(function(c){
@@ -613,18 +616,20 @@ function renderPrivlog(g){
             e.matchOk===true?"<span class='pl-match'>REVEALED · ✓ match</span>":
             e.matchOk===false?"<span class='pl-mismatch'>REVEALED · ✗ MISMATCH</span>":
             "<span class='pl-revealed'>REVEALED</span>";
-    h+="<tr><td>"+safe(e.id)+"</td><td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>";
-    h+="<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
+    h+="<tr data-dig='"+safe(e.digest)+"'><td>"+safe(e.id)+"</td><td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>";
+    h+="<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td class='pl-st'>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
   });
   h+="</tbody></table>";
   if(g.unk.length)h+="<p class='opaque-note' style='margin-top:12px'>Unknown types (verified-but-opaque): "+g.unk.map(safe).join(", ")+"</p>";
   el.innerHTML=h;$("privlogSection").style.display="block";
-  /* async SHA-256 recompute for revealed offer_terms */
+  /* async SHA-256 recompute for revealed rows (objects: canonical JSON; strings: raw UTF-8) */
   if(crypto&&crypto.subtle){
     g.privlog.forEach(function(e){
       if(!e._revPayload||e.withheld)return;
-      var s=JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort());
-      crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(buf){
+      var _bytes=typeof e._revPayload==="string"
+        ?new TextEncoder().encode(e._revPayload)
+        :new TextEncoder().encode(JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort()));
+      crypto.subtle.digest("SHA-256",_bytes).then(function(buf){
         var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
         var matchOk=hex===e.digest;
         var cell=el.querySelector("tr[data-dig='"+e.digest+"'] td.pl-st");
