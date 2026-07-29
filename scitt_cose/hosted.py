@@ -489,7 +489,8 @@ CAPSULE_JS = r"""
 (function(){"use strict";
 var capsuleId=document.body.getAttribute("data-capsule-id");
 var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
-  "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1};
+  "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1,
+  "agent_input":1,"agent_output":1};
 
 /* ---------- profile renderers plug-point ---------- */
 /* MachineMandate renderer inserted here — Tyche Institute vocabulary only.
@@ -541,6 +542,13 @@ function parseAac(data){
       addEdge(capId,prior,"chains_to");
     var ma=cap.model_attestation||{},ca=ma.compute_attestation||{},subj=ca.subject_digest||"";
     if(isH64(subj)){addArt(subj,"subject","subject",p+"compute_attestation.subject_digest");addEdge(capId,subj,"attests_over");}
+    var _actx=p+"compute_attestation — payload not carried in the record";
+    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input;
+    if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),aiPre==null,aiPre!=null?aiPre:null)){
+      privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:aiPre==null,isKnown:true,matchOk:null,ctx:_actx});addEdge(capId,ai,"attests_over");}
+    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output;
+    if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),aoPre==null,aoPre!=null?aoPre:null)){
+      privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:aoPre==null,isKnown:true,matchOk:null,ctx:_actx});addEdge(capId,ao,"attests_over");}
     var eff=cap.effect||{},resp=eff.response_digest||"";
     if(isH64(resp)){addArt(resp,"response","response",p+"effect.response_digest");addEdge(capId,resp,"effect_response");}
     (cap.constraints||[]).forEach(function(c){
@@ -682,7 +690,10 @@ function renderRegPanel(data,hasReceipt){
     activeProps["human-oversight-record"]=1;
   /* disclosure: withheld_commitments or sealed_terms_hash with no terms */
   function checkSd(cap){
-    return cap&&(cap.withheld_commitments||(cap.constraints&&cap.constraints.some(function(c){return c.evidence_digest;})));
+    var _ca=cap&&((cap.model_attestation||{}).compute_attestation)||{};
+    return cap&&(cap.withheld_commitments
+      ||(cap.constraints&&cap.constraints.some(function(c){return c.evidence_digest;}))
+      ||isH64(_ca.agent_input_digest)||isH64(_ca.agent_output_digest));
   }
   if((data&&data.sealed_terms_hash&&!data.terms)||checkSd(data)||checkSd(data&&data.buyer_capsule)||checkSd(data&&data.seller_capsule))
     activeProps["disclosure-transparency-record"]=1;

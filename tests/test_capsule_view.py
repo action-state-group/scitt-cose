@@ -561,3 +561,188 @@ def test_capsule_js_has_reg_panel_logic():
     assert "regulatory-crosswalk.md" in CAPSULE_JS
     assert "not legal advice" in CAPSULE_JS
     assert "per-action-attribution" in CAPSULE_JS
+
+
+# ---------------------------------------------------------------------------
+# compute_attestation agent_input / agent_output digest parsing (Goose fixture)
+# ---------------------------------------------------------------------------
+
+# Real goose-demo ledger record (leaf-199, capsule_id from _work/goose-demo/goose-session-ledger.jsonl).
+# No subject_digest, no effect request/response_digest — only agent_input_digest + agent_output_digest.
+_GOOSE_LEAF_199 = {
+    "spec_version": "draft-mih-scitt-agent-action-capsule-02",
+    "format_version": "2",
+    "capsule_id": "6d8c1a4718847f98aad34b4975482bdc11ae3cbaa11939ff2e920497c86274fc",
+    "action_id": "check_inventory/fb70e774-a7cb-4e9c-a838-19c183994156",
+    "action_type": "decide",
+    "operator": "demo-org",
+    "developer": "goose@v1.39.0",
+    "timestamp": "2026-07-28T05:32:01.975608Z",
+    "model_attestation": {
+        "compute_attestation": {
+            "agent_input_digest": "69b9552c1e559977744c3279775fb2db656d9e0632f23f17fa3416fe929a8924",
+            "agent_output_digest": "caeadaa1a378b7df5530040b9111982f0cf52c16e3af178b3dd10ab97e2330a5",
+            "runtime": "mcp",
+        }
+    },
+    "effect": {"status": "dispatched", "type": "check_inventory", "effect_attestation": "runtime_claimed"},
+    "assurance": {
+        "attestation_mode": "self_attested",
+        "effect_mode": "dispatched_unconfirmed",
+        "ledger_mode": "standalone",
+    },
+    "disposition": {"decision": "accept", "approver": "policy", "human_disposed": False, "verdict_class": "executed"},
+}
+
+_GOOSE_AI_DIGEST = "69b9552c1e559977744c3279775fb2db656d9e0632f23f17fa3416fe929a8924"
+_GOOSE_AO_DIGEST = "caeadaa1a378b7df5530040b9111982f0cf52c16e3af178b3dd10ab97e2330a5"
+
+
+def test_goose_compute_attestation_digests_produce_3_nodes():
+    """Goose leaf-199: capsule node + agent_input + agent_output = 3 nodes total."""
+    view = _aac.parse_capsule(_GOOSE_LEAF_199)
+
+    assert not view.parse_error
+    assert not view.is_binding
+    assert len(view.nodes) == 3, (
+        f"expected 3 nodes (capsule+agent_input+agent_output), got {len(view.nodes)}: "
+        + str([n.node_type for n in view.nodes])
+    )
+    node_types = {n.node_type for n in view.nodes}
+    assert node_types == {"capsule", "agent_input", "agent_output"}
+
+
+def test_goose_compute_attestation_digests_in_privilege_log():
+    """Goose leaf-199: privilege log has exactly 2 WITHHELD entries (agent_input, agent_output)."""
+    view = _aac.parse_capsule(_GOOSE_LEAF_199)
+
+    assert not view.parse_error
+    assert len(view.privilege_log) == 2, (
+        f"expected 2 privilege-log rows, got {len(view.privilege_log)}: "
+        + str([e.artifact_type for e in view.privilege_log])
+    )
+    log_types = {e.artifact_type for e in view.privilege_log}
+    assert log_types == {"agent_input", "agent_output"}
+
+    for entry in view.privilege_log:
+        assert entry.is_withheld, f"{entry.artifact_type} should be WITHHELD"
+        assert entry.match_ok is None, f"{entry.artifact_type} match_ok should be None (withheld)"
+        assert "compute_attestation" in entry.context
+        assert entry.is_known_type
+
+
+def test_goose_compute_attestation_edges():
+    """Goose leaf-199: attests_over edges from capsule to both agent digests."""
+    view = _aac.parse_capsule(_GOOSE_LEAF_199)
+    edge_targets = {e.to_id for e in view.edges if e.label == "attests_over"}
+    assert _GOOSE_AI_DIGEST in edge_targets
+    assert _GOOSE_AO_DIGEST in edge_targets
+
+
+def test_goose_compute_attestation_reveal_path():
+    """If agent_input / agent_output preimages are supplied, they are revealed and match-checked."""
+    ai_preimage = {"prompt": "check inventory for item_id=42", "tool": "check_inventory"}
+    ao_preimage = {"result": "in_stock", "quantity": 7}
+    ai_digest = _aac._json_digest(ai_preimage)
+    ao_digest = _aac._json_digest(ao_preimage)
+
+    cap_with_preimage = {
+        "capsule_id": _fake_hex64("77"),
+        "model_attestation": {
+            "compute_attestation": {
+                "agent_input_digest": ai_digest,
+                "agent_input": ai_preimage,
+                "agent_output_digest": ao_digest,
+                "agent_output": ao_preimage,
+            }
+        },
+        "disposition": {"decision": "accept"},
+    }
+    view = _aac.parse_capsule(cap_with_preimage)
+    assert not view.parse_error
+    ai_node = next(n for n in view.nodes if n.node_type == "agent_input")
+    ao_node = next(n for n in view.nodes if n.node_type == "agent_output")
+    assert not ai_node.is_withheld
+    assert ai_node.revealed_payload == ai_preimage
+    assert not ao_node.is_withheld
+    assert ao_node.revealed_payload == ao_preimage
+
+    ai_entry = next(e for e in view.privilege_log if e.artifact_type == "agent_input")
+    ao_entry = next(e for e in view.privilege_log if e.artifact_type == "agent_output")
+    assert ai_entry.match_ok is True
+    assert ao_entry.match_ok is True
+
+
+def test_reg_panel_disclosure_fires_for_compute_attestation_digests():
+    """disclosure-transparency-record row lights when a capsule has agent_input/output digests."""
+    html = _render_reg_panel(has_receipt=False, has_hitl=False, has_withheld=True)
+    assert "disclosure-transparency-record" in html
+    assert "EU AI Act Art 50(1)" in html
+
+
+# ---------------------------------------------------------------------------
+# /anchor-status endpoint — recorded fixture tests for _anchor_proxy_json
+# (The DEPLOYED verify surface used to query /anchor/transparency-log?capsule_id=<id>
+#  which always returned []. Fix landed in PR #16 (8ba25df) — now queries
+#  GET /v1/inclusion/{capsule_id}. These tests exercise the field mapping
+#  and 404 handling without live network access.)
+# ---------------------------------------------------------------------------
+
+
+def test_anchor_proxy_maps_inclusion_response_fields():
+    """Recorded fixture: /v1/inclusion/ 200 maps correctly to the response dict.
+
+    Uses the real Goose leaf-199 capsule_id. The mock returns a plausible
+    inclusion response without receipt_b64 so the receipt-verify block is
+    skipped (live test covers that path).
+    """
+    from unittest.mock import MagicMock, patch
+
+    inclusion_body = json.dumps({
+        "capsule_id": _LEAF_199_CAPSULE_ID,
+        "entry_hash": "a" * 64,
+        "leaf_index": 199,
+        "tree_size": 200,
+        "leaf_hash": "b" * 64,
+        "audit_path": [],
+        "root_hash": "c" * 64,
+        "receipt_b64": "",   # empty → receipt-verify block skipped
+    }).encode()
+
+    mock_resp = MagicMock()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.read.return_value = inclusion_body
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        result = _anchor_proxy_json(_LEAF_199_CAPSULE_ID)
+
+    assert result["capsule_id"] == _LEAF_199_CAPSULE_ID
+    assert result["anchored"] is True
+    assert result["leaf_index"] == 199
+    assert result["tree_size"] == 200
+    assert result["log_index"] == 199   # log_index mirrors leaf_index
+    assert result["error"] is None
+    assert result["receipt_verified"] is False  # no receipt_b64 → not verified
+
+
+def test_anchor_proxy_404_returns_not_anchored_no_error():
+    """Recorded fixture: 404 from /v1/inclusion/ → anchored=False, error=None.
+
+    This is the correct treatment for a capsule_id not yet in the log —
+    absence is not an error condition.
+    """
+    import urllib.error
+    from unittest.mock import patch
+
+    _UNKNOWN_ID = "d" * 64
+
+    def _raise_404(req, **_kw):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    with patch("urllib.request.urlopen", side_effect=_raise_404):
+        result = _anchor_proxy_json(_UNKNOWN_ID)
+
+    assert result["anchored"] is False
+    assert result["error"] is None
+    assert result["capsule_id"] == _UNKNOWN_ID

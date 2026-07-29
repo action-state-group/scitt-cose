@@ -31,6 +31,8 @@ _KNOWN_TYPES: frozenset[str] = frozenset({
     "subject",
     "bilateral_subject",
     "compute_attestation",
+    "agent_input",
+    "agent_output",
 })
 
 
@@ -225,6 +227,33 @@ def _extract_refs(view: GraphView, cap: dict, capsule_id: str, prefix: str) -> N
     if _is_hex64(subj):
         if _add(subj, "subject", "subject", f"{pfx}compute_attestation.subject_digest"):
             view.edges.append(GraphEdge(capsule_id, subj, "attests_over", "attests_over"))
+
+    # Agent input / output digests (compute_attestation) — withheld by default;
+    # reveal when preimage is supplied alongside the digest under the sibling key.
+    _ctx = f"{pfx}compute_attestation — payload not carried in the record"
+    for _key, _type, _label in (
+        ("agent_input_digest", "agent_input", "agent input"),
+        ("agent_output_digest", "agent_output", "agent output"),
+    ):
+        _digest = ca.get(_key, "")
+        if not _is_hex64(_digest) or _digest in seen:
+            continue
+        _pre = ca.get(_key.replace("_digest", ""))
+        _revealed = _pre is not None
+        _match = (_json_digest(_pre) == _digest) if _revealed else None
+        view.nodes.append(GraphNode(
+            id=_digest, node_type=_type, digest=_digest,
+            label=f"{_label} {_short(_digest)}", is_known_type=True,
+            is_withheld=not _revealed,
+            revealed_payload=_pre if _revealed else None,
+        ))
+        seen.add(_digest)
+        view.privilege_log.append(PrivilegeLogEntry(
+            artifact_id=_label, artifact_type=_type,
+            digest=_digest, is_withheld=not _revealed, is_known_type=True,
+            match_ok=_match, context=_ctx,
+        ))
+        view.edges.append(GraphEdge(capsule_id, _digest, "attests_over", "attests_over"))
 
     # Effect response digest
     effect = cap.get("effect") or {}
