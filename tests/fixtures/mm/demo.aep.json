@@ -1,0 +1,31 @@
+{
+  "_comment": "DEMO AEP for Veraison community presentation 2026-06-24. Neutral domain: policy compliance review.",
+  "eat_profile": "https://eatf.eu/aep/v1",
+  "iss": "aep-demo/veraison-presentation",
+  "sub": "policy-compliance-reviewer",
+  "iat": 1782878400,
+  "iat_iso": "2026-06-24T14:00:00Z",
+  "nonce": "a9f3c21e88b04d17",
+  "action_id": "review-clause-4.3-gdpr-art22",
+  "authorizing_principal": {
+    "type": "human_operator",
+    "token_ref": "auth-2026-06-24-T1847Z-op42",
+    "policy": "operator-must-authorize-compliance-review/v1"
+  },
+  "swname": "compliance-assistant/demo-model-v1",
+  "oemid": "demo-deployment",
+  "measurements": {
+    "prompt_sha256": "0f7e9d636d10503a954467882b498f9d5811c04d4dd24dd6b1ffebb5f2733a52",
+    "output_sha256": "26721ce6789469056112204f29289955796762b8b6a30fda4c2a6e9f857e1058",
+    "outcome_sha256": "15dc47e8434e1b169fa0499a3b862db9f6238a1eacd61aee83c155a9e51c5743"
+  },
+  "outcome": {
+    "verdict": "GAPS_FOUND",
+    "gap_count": 3,
+    "human_signoff_required": true
+  },
+  "status": "ok",
+  "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "receipt_hash": "d37b2efe9529c720ebe0ed60831aa9f6fac9f7167335c082040dd60d2b3067d8",
+  "_output_binding_note": "For the TPM-quote demo: H(outcome_sha256 || appraiser_nonce) is folded into the qualifying data of an AK-signed TPM quote (swtpm). PCR3 carries the model artefact measurement. Verdict: Attested when PCRs match reference; Contested when PCR3 is perturbed (model swapped); Expired when quote is replayed under a new nonce."
+}

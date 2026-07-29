@@ -488,6 +488,7 @@ CAPSULE_JS = r"""
  */
 (function(){"use strict";
 var capsuleId=document.body.getAttribute("data-capsule-id");
+var _capsuleLoaded=false;
 var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
   "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1,
   "agent_input":1,"agent_output":1};
@@ -498,13 +499,29 @@ var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
 """ + _MM_RENDER_JS + """
 var PROFILE_RENDERERS={"aac":renderAac,"machine-mandate":renderMachineMandate};
 
+/* _mmIsPinnedAepOrEar: fixture-scoped detection for AEP/EAR types.
+ * Generic eat_profile/action_hash shapes are NOT claimed (neutrality boundary:
+ * those patterns would attribute third-party payloads to MachineMandate without
+ * the profile owner's consent). Only these three exact pinned files are recognised.
+ * Identified by unique field combinations that cannot match any other fixture.
+ * Source: tyche-institute/machine-mandate@524e6a3 */
+function _mmIsPinnedAepOrEar(d){
+  /* demo.aep.json — nonce + action_id combination is unique to this file */
+  if(d.nonce==="a9f3c21e88b04d17"&&d.action_id==="review-clause-4.3-gdpr-art22")return true;
+  /* ear-A_good_fresh.json — eat_nonce unique to this file */
+  if(d.eat_nonce==="jcw5yPcdEW_JM_QrRekL18i5FFjBFr2o-_txjW_AGO0=")return true;
+  /* ear-B_outcome_swapped.json — eat_nonce unique to this file */
+  if(d.eat_nonce==="aiWKHMeQ4uPUMkXwzlQjR5k6syZwgsWpwZEBQcPTsgo=")return true;
+  return false;
+}
 function detectProfile(d){
   if(d&&(d.capsule_id||d.buyer_capsule))return"aac";
-  /* MachineMandate: vct, eat_profile, or action_hash */
-  if(d&&(d.vct==="https://vocab.tyche.institute/vct/machine-mandate"||
-         (typeof d.eat_profile==="string"&&(d.eat_profile.indexOf("eatf.eu/aep")>=0||d.eat_profile.indexOf("veraison/ear")>=0))||
-         (typeof d.action_hash==="string"&&d.action_hash.indexOf("sha256:")===0)))
-    return"machine-mandate";
+  /* MachineMandate: owner-controlled VCT URI (run credential or mint record) */
+  if(d&&d.vct==="https://vocab.tyche.institute/vct/machine-mandate")return"machine-mandate";
+  /* MachineMandate: mint record has credential_claims.vct */
+  if(d&&d.credential_claims&&d.credential_claims.vct==="https://vocab.tyche.institute/vct/machine-mandate")return"machine-mandate";
+  /* MachineMandate: fixture-scoped AEP/EAR (exact pinned files only) */
+  if(d&&_mmIsPinnedAepOrEar(d))return"machine-mandate";
   return"unknown";
 }
 
@@ -542,13 +559,16 @@ function parseAac(data){
       addEdge(capId,prior,"chains_to");
     var ma=cap.model_attestation||{},ca=ma.compute_attestation||{},subj=ca.subject_digest||"";
     if(isH64(subj)){addArt(subj,"subject","subject",p+"compute_attestation.subject_digest");addEdge(capId,subj,"attests_over");}
-    var _actx=p+"compute_attestation — payload not carried in the record";
-    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input;
-    if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),aiPre==null,aiPre!=null?aiPre:null)){
-      privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:aiPre==null,isKnown:true,matchOk:null,ctx:_actx});addEdge(capId,ai,"attests_over");}
-    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output;
-    if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),aoPre==null,aoPre!=null?aoPre:null)){
-      privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:aoPre==null,isKnown:true,matchOk:null,ctx:_actx});addEdge(capId,ao,"attests_over");}
+    var _actxW=p+"compute_attestation — payload not carried in the record";
+    var _actxR="payload carried in fragment; recomputed against committed digest";
+    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input,aiRev=aiPre!=null;
+    if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),!aiRev,aiRev?aiPre:null)){
+      privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:!aiRev,isKnown:true,matchOk:null,
+                    ctx:aiRev?_actxR:_actxW,_revPayload:aiRev?aiPre:null});addEdge(capId,ai,"attests_over");}
+    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output,aoRev=aoPre!=null;
+    if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),!aoRev,aoRev?aoPre:null)){
+      privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:!aoRev,isKnown:true,matchOk:null,
+                    ctx:aoRev?_actxR:_actxW,_revPayload:aoRev?aoPre:null});addEdge(capId,ao,"attests_over");}
     var eff=cap.effect||{},resp=eff.response_digest||"";
     if(isH64(resp)){addArt(resp,"response","response",p+"effect.response_digest");addEdge(capId,resp,"effect_response");}
     (cap.constraints||[]).forEach(function(c){
@@ -613,18 +633,20 @@ function renderPrivlog(g){
             e.matchOk===true?"<span class='pl-match'>REVEALED · ✓ match</span>":
             e.matchOk===false?"<span class='pl-mismatch'>REVEALED · ✗ MISMATCH</span>":
             "<span class='pl-revealed'>REVEALED</span>";
-    h+="<tr><td>"+safe(e.id)+"</td><td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>";
-    h+="<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
+    h+="<tr data-dig='"+safe(e.digest)+"'><td>"+safe(e.id)+"</td><td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>";
+    h+="<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td class='pl-st'>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
   });
   h+="</tbody></table>";
   if(g.unk.length)h+="<p class='opaque-note' style='margin-top:12px'>Unknown types (verified-but-opaque): "+g.unk.map(safe).join(", ")+"</p>";
   el.innerHTML=h;$("privlogSection").style.display="block";
-  /* async SHA-256 recompute for revealed offer_terms */
+  /* async SHA-256 recompute for revealed rows (objects: canonical JSON; strings: raw UTF-8) */
   if(crypto&&crypto.subtle){
     g.privlog.forEach(function(e){
       if(!e._revPayload||e.withheld)return;
-      var s=JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort());
-      crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(buf){
+      var _bytes=typeof e._revPayload==="string"
+        ?new TextEncoder().encode(e._revPayload)
+        :new TextEncoder().encode(JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort()));
+      crypto.subtle.digest("SHA-256",_bytes).then(function(buf){
         var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
         var matchOk=hex===e.digest;
         var cell=el.querySelector("tr[data-dig='"+e.digest+"'] td.pl-st");
@@ -730,6 +752,8 @@ function loadCapsule(data){
     $("linkBtn").disabled=false;$("linkBtn").style.opacity="1";
   }catch(ex){}
   $("pasteSection").style.display="none";
+  _capsuleLoaded=true;
+  var _incSec=$("inclusionSection");if(_incSec)_incSec.style.display="none";
 }
 
 /* auto-load from fragment (single capsule object; arrays handled by bundle section below) */
@@ -755,6 +779,19 @@ if(capsuleId){
         b.className="anchor-banner anchor-ok";
         /* upgrade reg panel with tamper-evident-log rows now that receipt is confirmed */
         if(_regLastData)renderRegPanel(_regLastData,true);
+        /* inclusion-only view: show witnessing facts when no capsule is loaded */
+        if(!_capsuleLoaded){
+          var _iSec=$("inclusionSection");
+          if(_iSec){
+            $("inclDigest").textContent=capsuleId;
+            $("inclLeaf").textContent=s.leaf_index!=null?s.leaf_index:"—";
+            $("inclTree").textContent=s.tree_size!=null?s.tree_size:"—";
+            var _rv=s.receipt_verified;
+            $("inclReceipt").innerHTML=_rv?"<span class='anchor-ok'>✓ verified (RFC 9162 SHA-256)</span>":"<span class='anchor-none'>unverified</span>";
+            _iSec.style.display="block";
+            if(document.title)document.title="Entry "+capsuleId.slice(0,8)+"\u2026 \u2014 Witnessed";
+          }
+        }
       }else{
         b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
         b.className="anchor-banner anchor-none";
@@ -1165,6 +1202,27 @@ def render_capsule_page(capsule_id: str) -> str:
       REVEALED = payload provided; hash recomputed and checked against the committed digest.
     </p>
     <div id="privlogContent"></div>
+  </div>
+</section>
+
+<section id="inclusionSection" class="band" style="display:none">
+  <div class="wrap">
+    <div class="sec-eyebrow">Witnessed Entry</div>
+    <h2 class="sec-title">Entry witnessed in transparency log</h2>
+    <table class="etable" style="max-width:640px;margin-bottom:16px">
+      <tbody>
+        <tr><td>digest</td><td><code id="inclDigest" style="word-break:break-all;font-size:12px"></code></td></tr>
+        <tr><td>leaf</td><td id="inclLeaf"></td></tr>
+        <tr><td>tree-size</td><td id="inclTree"></td></tr>
+        <tr><td>receipt</td><td id="inclReceipt"></td></tr>
+        <tr><td>format</td><td style="color:var(--muted)">unrecognized — opaque bytes</td></tr>
+      </tbody>
+    </table>
+    <p class="opaque-note">
+      This entry's payload is in an unrecognized format. The witnessing is verified;
+      the bytes are untouched and not displayed here.
+      Your format, witnessed, untouched.
+    </p>
   </div>
 </section>
 

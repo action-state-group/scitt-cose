@@ -1,0 +1,37 @@
+{
+  "ear.verifier-id": {
+    "build": "N/A",
+    "developer": "Veraison Project"
+  },
+  "eat_nonce": "aiWKHMeQ4uPUMkXwzlQjR5k6syZwgsWpwZEBQcPTsgo=",
+  "eat_profile": "tag:github.com,2023:veraison/ear",
+  "iat": 1782598790,
+  "submods": {
+    "TPM_ENACTTRUST": {
+      "ear.appraisal-policy-id": "policy:TPM_ENACTTRUST",
+      "ear.status": "contraindicated",
+      "ear.trustworthiness-vector": {
+        "configuration": 0,
+        "executables": 33,
+        "file-system": 0,
+        "hardware": 0,
+        "instance-identity": 0,
+        "runtime-opaque": 0,
+        "sourced-data": 0,
+        "storage-opaque": 0
+      },
+      "ear.veraison.annotated-evidence": {
+        "firmware-version": 2312897626142815700,
+        "hash-algorithm": 11,
+        "node-id": "345ccd98-a30b-4baf-9aa9-9b0861d2c042",
+        "pcr-digest": "cQhf0UzaSuKcvrRBmQVMqs0O/WLQAvvIC2+FXupbM10=",
+        "pcr-selection": [
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    }
+  }
+}

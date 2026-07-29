@@ -746,3 +746,120 @@ def test_anchor_proxy_404_returns_not_anchored_no_error():
     assert result["anchored"] is False
     assert result["error"] is None
     assert result["capsule_id"] == _UNKNOWN_ID
+
+
+# ---------------------------------------------------------------------------
+# verify-reveal-match-badge: string-payload reveal + context string switch
+# ---------------------------------------------------------------------------
+
+
+def test_agent_digest_reveal_string_payload_match():
+    """String preimages hash raw UTF-8, not JSON — reveal must set match_ok=True."""
+    import hashlib as _hl
+    ai_str = "list current inventory for item=42"
+    ao_str = '{"status":"in_stock","quantity":7}'
+    ai_digest = _hl.sha256(ai_str.encode()).hexdigest()
+    ao_digest = _hl.sha256(ao_str.encode()).hexdigest()
+
+    cap = {
+        "capsule_id": _fake_hex64("55"),
+        "model_attestation": {
+            "compute_attestation": {
+                "agent_input_digest": ai_digest,
+                "agent_input": ai_str,
+                "agent_output_digest": ao_digest,
+                "agent_output": ao_str,
+            }
+        },
+        "disposition": {"decision": "accept"},
+    }
+    view = _aac.parse_capsule(cap)
+    assert not view.parse_error
+
+    ai_entry = next(e for e in view.privilege_log if e.artifact_type == "agent_input")
+    ao_entry = next(e for e in view.privilege_log if e.artifact_type == "agent_output")
+
+    assert not ai_entry.is_withheld
+    assert ai_entry.match_ok is True, "string preimage must match via raw UTF-8 hash"
+    assert not ao_entry.is_withheld
+    assert ao_entry.match_ok is True, "string preimage must match via raw UTF-8 hash"
+
+
+def test_agent_digest_reveal_context_string_switches():
+    """When preimage is supplied, context changes from 'not carried' to 'carried in fragment'."""
+    import hashlib as _hl
+    s = "example agent input"
+    d = _hl.sha256(s.encode()).hexdigest()
+
+    cap_withheld = {
+        "capsule_id": _fake_hex64("61"),
+        "model_attestation": {"compute_attestation": {"agent_input_digest": d}},
+        "disposition": {"decision": "accept"},
+    }
+    cap_revealed = {
+        "capsule_id": _fake_hex64("62"),
+        "model_attestation": {
+            "compute_attestation": {"agent_input_digest": d, "agent_input": s}
+        },
+        "disposition": {"decision": "accept"},
+    }
+
+    view_w = _aac.parse_capsule(cap_withheld)
+    view_r = _aac.parse_capsule(cap_revealed)
+
+    entry_w = next(e for e in view_w.privilege_log if e.artifact_type == "agent_input")
+    entry_r = next(e for e in view_r.privilege_log if e.artifact_type == "agent_input")
+
+    assert "not carried in the record" in entry_w.context
+    assert "carried in fragment" in entry_r.context
+    assert "recomputed" in entry_r.context
+
+
+def test_agent_digest_withheld_still_withheld_without_preimage():
+    """Without a preimage key in compute_attestation, rows remain WITHHELD + match_ok=None."""
+    view = _aac.parse_capsule(_GOOSE_LEAF_199)
+    for entry in view.privilege_log:
+        assert entry.is_withheld
+        assert entry.match_ok is None
+        assert "not carried in the record" in entry.context
+
+
+# ---------------------------------------------------------------------------
+# verify-inclusion-only-view: fallback view for unrecognized-profile entries
+# ---------------------------------------------------------------------------
+
+
+def test_capsule_page_has_inclusion_section():
+    """render_capsule_page includes the inclusionSection with KV element IDs."""
+    cid = "e" * 64
+    html = render_capsule_page(cid)
+    assert "inclusionSection" in html
+    assert "inclDigest" in html
+    assert "inclLeaf" in html
+    assert "inclTree" in html
+    assert "inclReceipt" in html
+    assert "unrecognized" in html
+    assert "opaque bytes" in html
+
+
+def test_capsule_js_has_inclusion_logic():
+    """CAPSULE_JS wires _capsuleLoaded flag and inclusion-section population."""
+    assert "_capsuleLoaded" in CAPSULE_JS
+    assert "inclusionSection" in CAPSULE_JS
+    assert "inclDigest" in CAPSULE_JS
+    assert "inclLeaf" in CAPSULE_JS
+    assert "inclReceipt" in CAPSULE_JS
+    assert "Witnessed" in CAPSULE_JS
+    # "opaque bytes" is server-rendered HTML, not in CAPSULE_JS
+
+
+def test_capsule_page_inclusion_section_hidden_by_default():
+    """inclusionSection starts hidden; the JS shows it only after anchor resolves anchored."""
+    cid = "f" * 64
+    html = render_capsule_page(cid)
+    # The section must start hidden (display:none) — shown by anchor-status callback
+    idx = html.find("inclusionSection")
+    assert idx >= 0
+    # Check that display:none appears on the inclusionSection tag (within 100 chars)
+    tag_region = html[idx - 50:idx + 100]
+    assert "display:none" in tag_region

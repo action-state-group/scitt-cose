@@ -230,7 +230,6 @@ def _extract_refs(view: GraphView, cap: dict, capsule_id: str, prefix: str) -> N
 
     # Agent input / output digests (compute_attestation) — withheld by default;
     # reveal when preimage is supplied alongside the digest under the sibling key.
-    _ctx = f"{pfx}compute_attestation — payload not carried in the record"
     for _key, _type, _label in (
         ("agent_input_digest", "agent_input", "agent input"),
         ("agent_output_digest", "agent_output", "agent output"),
@@ -240,7 +239,19 @@ def _extract_refs(view: GraphView, cap: dict, capsule_id: str, prefix: str) -> N
             continue
         _pre = ca.get(_key.replace("_digest", ""))
         _revealed = _pre is not None
-        _match = (_json_digest(_pre) == _digest) if _revealed else None
+        if _revealed:
+            # String payloads are hashed as raw UTF-8 bytes; objects use canonical JSON.
+            if isinstance(_pre, str):
+                _match = hashlib.sha256(_pre.encode()).hexdigest() == _digest
+            else:
+                _match = _json_digest(_pre) == _digest
+        else:
+            _match = None
+        _ctx = (
+            "payload carried in fragment; recomputed against committed digest"
+            if _revealed
+            else f"{pfx}compute_attestation — payload not carried in the record"
+        )
         view.nodes.append(GraphNode(
             id=_digest, node_type=_type, digest=_digest,
             label=f"{_label} {_short(_digest)}", is_known_type=True,
