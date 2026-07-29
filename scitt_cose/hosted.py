@@ -488,6 +488,7 @@ CAPSULE_JS = r"""
  */
 (function(){"use strict";
 var capsuleId=document.body.getAttribute("data-capsule-id");
+var _capsuleLoaded=false;
 var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
   "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1,
   "agent_input":1,"agent_output":1};
@@ -735,6 +736,8 @@ function loadCapsule(data){
     $("linkBtn").disabled=false;$("linkBtn").style.opacity="1";
   }catch(ex){}
   $("pasteSection").style.display="none";
+  _capsuleLoaded=true;
+  var _incSec=$("inclusionSection");if(_incSec)_incSec.style.display="none";
 }
 
 /* auto-load from fragment (single capsule object; arrays handled by bundle section below) */
@@ -760,6 +763,19 @@ if(capsuleId){
         b.className="anchor-banner anchor-ok";
         /* upgrade reg panel with tamper-evident-log rows now that receipt is confirmed */
         if(_regLastData)renderRegPanel(_regLastData,true);
+        /* inclusion-only view: show witnessing facts when no capsule is loaded */
+        if(!_capsuleLoaded){
+          var _iSec=$("inclusionSection");
+          if(_iSec){
+            $("inclDigest").textContent=capsuleId;
+            $("inclLeaf").textContent=s.leaf_index!=null?s.leaf_index:"—";
+            $("inclTree").textContent=s.tree_size!=null?s.tree_size:"—";
+            var _rv=s.receipt_verified;
+            $("inclReceipt").innerHTML=_rv?"<span class='anchor-ok'>✓ verified (RFC 9162 SHA-256)</span>":"<span class='anchor-none'>unverified</span>";
+            _iSec.style.display="block";
+            if(document.title)document.title="Entry "+capsuleId.slice(0,8)+"\u2026 \u2014 Witnessed";
+          }
+        }
       }else{
         b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
         b.className="anchor-banner anchor-none";
@@ -1170,6 +1186,27 @@ def render_capsule_page(capsule_id: str) -> str:
       REVEALED = payload provided; hash recomputed and checked against the committed digest.
     </p>
     <div id="privlogContent"></div>
+  </div>
+</section>
+
+<section id="inclusionSection" class="band" style="display:none">
+  <div class="wrap">
+    <div class="sec-eyebrow">Witnessed Entry</div>
+    <h2 class="sec-title">Entry witnessed in transparency log</h2>
+    <table class="etable" style="max-width:640px;margin-bottom:16px">
+      <tbody>
+        <tr><td>digest</td><td><code id="inclDigest" style="word-break:break-all;font-size:12px"></code></td></tr>
+        <tr><td>leaf</td><td id="inclLeaf"></td></tr>
+        <tr><td>tree-size</td><td id="inclTree"></td></tr>
+        <tr><td>receipt</td><td id="inclReceipt"></td></tr>
+        <tr><td>format</td><td style="color:var(--muted)">unrecognized — opaque bytes</td></tr>
+      </tbody>
+    </table>
+    <p class="opaque-note">
+      This entry's payload is in an unrecognized format. The witnessing is verified;
+      the bytes are untouched and not displayed here.
+      Your format, witnessed, untouched.
+    </p>
   </div>
 </section>
 

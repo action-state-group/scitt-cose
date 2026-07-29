@@ -822,3 +822,44 @@ def test_agent_digest_withheld_still_withheld_without_preimage():
         assert entry.is_withheld
         assert entry.match_ok is None
         assert "not carried in the record" in entry.context
+
+
+# ---------------------------------------------------------------------------
+# verify-inclusion-only-view: fallback view for unrecognized-profile entries
+# ---------------------------------------------------------------------------
+
+
+def test_capsule_page_has_inclusion_section():
+    """render_capsule_page includes the inclusionSection with KV element IDs."""
+    cid = "e" * 64
+    html = render_capsule_page(cid)
+    assert "inclusionSection" in html
+    assert "inclDigest" in html
+    assert "inclLeaf" in html
+    assert "inclTree" in html
+    assert "inclReceipt" in html
+    assert "unrecognized" in html
+    assert "opaque bytes" in html
+
+
+def test_capsule_js_has_inclusion_logic():
+    """CAPSULE_JS wires _capsuleLoaded flag and inclusion-section population."""
+    assert "_capsuleLoaded" in CAPSULE_JS
+    assert "inclusionSection" in CAPSULE_JS
+    assert "inclDigest" in CAPSULE_JS
+    assert "inclLeaf" in CAPSULE_JS
+    assert "inclReceipt" in CAPSULE_JS
+    assert "Witnessed" in CAPSULE_JS
+    # "opaque bytes" is server-rendered HTML, not in CAPSULE_JS
+
+
+def test_capsule_page_inclusion_section_hidden_by_default():
+    """inclusionSection starts hidden; the JS shows it only after anchor resolves anchored."""
+    cid = "f" * 64
+    html = render_capsule_page(cid)
+    # The section must start hidden (display:none) — shown by anchor-status callback
+    idx = html.find("inclusionSection")
+    assert idx >= 0
+    # Check that display:none appears on the inclusionSection tag (within 100 chars)
+    tag_region = html[idx - 50:idx + 100]
+    assert "display:none" in tag_region
