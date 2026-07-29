@@ -16,11 +16,12 @@ Boundary:
   any other profile.  This module uses Tyche Institute's own published field names
   exactly as they appear in tyche-institute/machine-mandate@524e6a3.
 
-Profile detection:
-  A payload is recognised as MachineMandate when it contains ``vct`` ==
-  ``https://vocab.tyche.institute/vct/machine-mandate`` OR ``eat_profile``
-  containing ``eatf.eu/aep`` OR ``eat_profile`` containing ``veraison/ear``
-  OR top-level ``action_hash`` starting with ``sha256:``.
+Profile detection (interim — until Anton provides an owner-controlled discriminator):
+  1. ``vct`` == ``https://vocab.tyche.institute/vct/machine-mandate`` (owner-controlled URI).
+  2. ``credential_claims.vct`` == the VCT URI (mint record shape).
+  3. Exact canonical-JSON SHA-256 of pinned fixture files (AEP + two EAR variants).
+  Generic eat_profile / action_hash patterns are NOT used — too broad to claim without
+  the profile owner's consent. See ``_MM_PINNED_CANONICAL_DIGESTS``.
 
 No external dependencies beyond the stdlib.
 """
@@ -44,30 +45,44 @@ _EAR_EAT_PROFILE_PREFIX = "tag:github.com,2023:veraison/ear"
 # ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
+# Canonical-JSON SHA-256 of exact pinned fixture files from tyche-institute/machine-mandate@524e6a3.
+# AEP/EAR fixtures have no owner-controlled discriminator beyond eat_profile, which is too generic
+# to claim safely. Digest-scoping limits detection to these exact files until Anton designates a
+# discriminator field (PM ask in flight). Mint records are detected via credential_claims.vct.
+_MM_PINNED_CANONICAL_DIGESTS: frozenset[str] = frozenset({
+    "63bc7577d7929da79db0d6b045dd1cbdd2e9fb0a708618e3a5093869b8c2bdce",  # fixtures/demo.aep.json
+    "8cd9e0588b83416891ff1c4480767daeeaa2d82324dc01bda4114f6c2e98c2b3",  # fixtures/ear-A_good_fresh.json
+    "4ac69f7b8524a7084be503196d3b0a3aaedac99b42422ae6fe5be198ffb3b2a2",  # fixtures/ear-B_outcome_swapped.json
+})
+
 
 def is_machine_mandate(data: object) -> bool:
-    """Return True if *data* looks like a MachineMandate payload."""
+    """Return True if *data* is a recognised MachineMandate payload.
+
+    Intentionally narrow: generic eat_profile / action_hash shapes are not
+    used as discriminators; they would attribute third-party payloads without
+    the profile owner's consent. Three detection paths:
+    1. Top-level ``vct`` equals the owner-controlled VCT URI.
+    2. ``credential_claims.vct`` equals the VCT URI (mint record shape).
+    3. Canonical-JSON SHA-256 matches one of the exact pinned fixture files.
+    """
     if not isinstance(data, dict):
         return False
+    # 1. Owner-controlled VCT URI
     vct = data.get("vct", "")
     if isinstance(vct, str) and vct == MM_VCT:
         return True
-    eat = data.get("eat_profile", "")
-    if isinstance(eat, str) and ("eatf.eu/aep" in eat or "veraison/ear" in eat):
-        return True
-    ah = data.get("action_hash", "")
-    if isinstance(ah, str) and ah.startswith("sha256:"):
-        return True
-    # Mint record: has credential_claims (with vct or action_hash) and credential_preimage
+    # 2. Mint record: credential_claims carries the VCT URI
     cred = data.get("credential_claims")
     if isinstance(cred, dict):
         inner_vct = cred.get("vct", "")
         if isinstance(inner_vct, str) and inner_vct == MM_VCT:
             return True
-        inner_ah = cred.get("action_hash", "")
-        if isinstance(inner_ah, str) and inner_ah.startswith("sha256:"):
-            return True
-    return False
+    # 3. Fixture-scoped: exact pinned AEP/EAR files only
+    import hashlib as _h
+    import json as _j
+    blob = _j.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return _h.sha256(blob).hexdigest() in _MM_PINNED_CANONICAL_DIGESTS
 
 
 # ---------------------------------------------------------------------------

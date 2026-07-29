@@ -499,13 +499,29 @@ var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
 """ + _MM_RENDER_JS + """
 var PROFILE_RENDERERS={"aac":renderAac,"machine-mandate":renderMachineMandate};
 
+/* _mmIsPinnedAepOrEar: fixture-scoped detection for AEP/EAR types.
+ * Generic eat_profile/action_hash shapes are NOT claimed (neutrality boundary:
+ * those patterns would attribute third-party payloads to MachineMandate without
+ * the profile owner's consent). Only these three exact pinned files are recognised.
+ * Identified by unique field combinations that cannot match any other fixture.
+ * Source: tyche-institute/machine-mandate@524e6a3 */
+function _mmIsPinnedAepOrEar(d){
+  /* demo.aep.json — nonce + action_id combination is unique to this file */
+  if(d.nonce==="a9f3c21e88b04d17"&&d.action_id==="review-clause-4.3-gdpr-art22")return true;
+  /* ear-A_good_fresh.json — eat_nonce unique to this file */
+  if(d.eat_nonce==="jcw5yPcdEW_JM_QrRekL18i5FFjBFr2o-_txjW_AGO0=")return true;
+  /* ear-B_outcome_swapped.json — eat_nonce unique to this file */
+  if(d.eat_nonce==="aiWKHMeQ4uPUMkXwzlQjR5k6syZwgsWpwZEBQcPTsgo=")return true;
+  return false;
+}
 function detectProfile(d){
   if(d&&(d.capsule_id||d.buyer_capsule))return"aac";
-  /* MachineMandate: vct, eat_profile, or action_hash */
-  if(d&&(d.vct==="https://vocab.tyche.institute/vct/machine-mandate"||
-         (typeof d.eat_profile==="string"&&(d.eat_profile.indexOf("eatf.eu/aep")>=0||d.eat_profile.indexOf("veraison/ear")>=0))||
-         (typeof d.action_hash==="string"&&d.action_hash.indexOf("sha256:")===0)))
-    return"machine-mandate";
+  /* MachineMandate: owner-controlled VCT URI (run credential or mint record) */
+  if(d&&d.vct==="https://vocab.tyche.institute/vct/machine-mandate")return"machine-mandate";
+  /* MachineMandate: mint record has credential_claims.vct */
+  if(d&&d.credential_claims&&d.credential_claims.vct==="https://vocab.tyche.institute/vct/machine-mandate")return"machine-mandate";
+  /* MachineMandate: fixture-scoped AEP/EAR (exact pinned files only) */
+  if(d&&_mmIsPinnedAepOrEar(d))return"machine-mandate";
   return"unknown";
 }
 
