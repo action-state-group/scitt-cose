@@ -676,20 +676,28 @@ var REG_ROWS=[
   ["DORA Art 17(3)(b)","ICT incident records","tamper-evident-log"],
   ["SEC Rule 17a-4(f)(2)(ii)(A)","Non-rewriteable, non-erasable electronic records","tamper-evident-log"],
   ["FINRA Rule 4511(c)","17a-4 format compliance","tamper-evident-log"],
+  ["NSA CSI U/OO/6030316-26 (May 2026)","Structured audit records of all MCP tool interactions","tamper-evident-log"],
+  ["ASD ACSC et al. (May 2026)","Comprehensive logging and audit trails for all agent actions and decisions","tamper-evident-log"],
   /* human-oversight-record */
   ["EU AI Act Art 50(2)/(3)","Notice and disclosure to persons subject to AI interaction","human-oversight-record"],
   ["MAS SAFR (Jul 2026)","Human oversight and decision review","human-oversight-record"],
   ["FCA AI accountability (FS23/5)","Transparency of AI decision-making","human-oversight-record"],
   ["NIST AI RMF MANAGE 1.3","High-priority risk response planning and documentation","human-oversight-record"],
+  ["NSA CSI U/OO/6030316-26 (May 2026)","Approval workflows for agentic capability and data-access changes","human-oversight-record"],
+  ["ASD ACSC et al. (May 2026)","Mandatory human approval for high-impact agentic decisions","human-oversight-record"],
   /* disclosure-transparency-record */
   ["EU AI Act Art 50(1)","Machine-readable AI-content marking","disclosure-transparency-record"],
   ["NIST AI RMF MEASURE 2.8","Transparency and accountability risks","disclosure-transparency-record"],
   ["prEN 18229-1","Transparency documentation requirements for AI systems","disclosure-transparency-record"],
+  ["NSA CSI U/OO/6030316-26 (May 2026)","Filter and validate tool output before downstream consumption","disclosure-transparency-record"],
+  ["ASD ACSC et al. (May 2026)","Trust classification of all external and tool-provided content","disclosure-transparency-record"],
   /* per-action-attribution — always shown */
   ["EU AI Act Art 26(6)","Deployer log retention","per-action-attribution"],
   ["DORA Art 17(3)(b)","ICT incident records — attribution","per-action-attribution"],
   ["NIST AI RMF GOVERN 1.1","Risk management policies and practices","per-action-attribution"],
-  ["FCA AI accountability (FS23/5)","Accountability and audit trails","per-action-attribution"]
+  ["FCA AI accountability (FS23/5)","Accountability and audit trails","per-action-attribution"],
+  ["NSA CSI U/OO/6030316-26 (May 2026)","Message signing, expiration timestamps, and replay-protection metadata","per-action-attribution"],
+  ["ASD ACSC et al. (May 2026)","Cryptographically anchored per-agent identity and delegation chain traceability","per-action-attribution"]
 ];
 var REG_CROSSWALK_URL="https://github.com/action-state-group/agent-action-capsule/blob/main/docs/regulatory-crosswalk.md";
 
@@ -1057,20 +1065,28 @@ _CROSSWALK_ROWS: tuple[tuple[str, str, str], ...] = (
     ("DORA Art 17(3)(b)", "ICT incident records", "tamper-evident-log"),
     ("SEC Rule 17a-4(f)(2)(ii)(A)", "Non-rewriteable, non-erasable electronic records", "tamper-evident-log"),
     ("FINRA Rule 4511(c)", "17a-4 format compliance", "tamper-evident-log"),
+    ("NSA CSI U/OO/6030316-26 (May 2026)", "Structured audit records of all MCP tool interactions", "tamper-evident-log"),
+    ("ASD ACSC et al. (May 2026)", "Comprehensive logging and audit trails for all agent actions and decisions", "tamper-evident-log"),
     # human-oversight-record rows (shown when disposition + human_disposed present)
     ("EU AI Act Art 50(2)/(3)", "Notice and disclosure to persons subject to AI interaction", "human-oversight-record"),
     ("MAS SAFR (Jul 2026)", "Human oversight and decision review", "human-oversight-record"),
     ("FCA AI accountability (FS23/5)", "Transparency of AI decision-making", "human-oversight-record"),
     ("NIST AI RMF MANAGE 1.3", "High-priority risk response planning and documentation", "human-oversight-record"),
+    ("NSA CSI U/OO/6030316-26 (May 2026)", "Approval workflows for agentic capability and data-access changes", "human-oversight-record"),
+    ("ASD ACSC et al. (May 2026)", "Mandatory human approval for high-impact agentic decisions", "human-oversight-record"),
     # disclosure-transparency-record rows (shown when withheld commitments present)
     ("EU AI Act Art 50(1)", "Machine-readable AI-content marking", "disclosure-transparency-record"),
     ("NIST AI RMF MEASURE 2.8", "Transparency and accountability risks", "disclosure-transparency-record"),
     ("prEN 18229-1", "Transparency documentation requirements for AI systems", "disclosure-transparency-record"),
+    ("NSA CSI U/OO/6030316-26 (May 2026)", "Filter and validate tool output before downstream consumption", "disclosure-transparency-record"),
+    ("ASD ACSC et al. (May 2026)", "Trust classification of all external and tool-provided content", "disclosure-transparency-record"),
     # per-action-attribution rows — always shown (capsule_id + operator + developer are always present)
     ("EU AI Act Art 26(6)", "Deployer log retention", "per-action-attribution"),
     ("DORA Art 17(3)(b)", "ICT incident records — attribution", "per-action-attribution"),
     ("NIST AI RMF GOVERN 1.1", "Risk management policies and practices", "per-action-attribution"),
     ("FCA AI accountability (FS23/5)", "Accountability and audit trails", "per-action-attribution"),
+    ("NSA CSI U/OO/6030316-26 (May 2026)", "Message signing, expiration timestamps, and replay-protection metadata", "per-action-attribution"),
+    ("ASD ACSC et al. (May 2026)", "Cryptographically anchored per-agent identity and delegation chain traceability", "per-action-attribution"),
 )
 
 _PROP_LABELS: dict[str, str] = {
