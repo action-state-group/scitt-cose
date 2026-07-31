@@ -30,8 +30,8 @@ from pathlib import Path
 
 import pytest
 
-from scitt_cose import aac as _aac
-from scitt_cose import machine_mandate as mm
+from hosted_profiles import aac as _aac
+from hosted_profiles import machine_mandate as mm
 from scitt_cose.hosted import CAPSULE_JS
 
 # ---------------------------------------------------------------------------

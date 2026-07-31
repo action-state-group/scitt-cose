@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from scitt_cose import aac as _aac
+from hosted_profiles import aac as _aac
 from scitt_cose.hosted import (
     _CAPSULE_VIEW_COUNTER,
     _REFERRER_COUNTER,

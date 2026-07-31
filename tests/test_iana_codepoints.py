@@ -108,3 +108,15 @@ def test_no_reserved_or_downstream_code_in_package():
         if any(n in text for n in needles):
             offenders.append(src.name)
     assert not offenders, f"downstream package referenced in neutral substrate: {offenders}"
+
+
+def test_no_application_profile_renderers_in_package():
+    """Neutrality gate: application-profile renderers (AAC, MachineMandate) must
+    never ship inside scitt_cose/ — they belong in hosted_profiles/, which is
+    excluded from the built wheel (see [tool.setuptools] packages)."""
+    import pathlib
+
+    pkg = pathlib.Path(__file__).resolve().parents[1] / "scitt_cose"
+    module_names = {src.name for src in pkg.rglob("*.py")}
+    assert "aac.py" not in module_names
+    assert "machine_mandate.py" not in module_names

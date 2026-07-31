@@ -33,15 +33,33 @@ from typing import Any
 
 from ._status import DRAFT_TRACKING_NOTICE
 from .cose_sign1 import CoseError
-from .machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
 from .receipt import verify_receipt
 from .statement import parse_signed_statement
+
+# hosted_profiles/ carries the AAC + MachineMandate renderers and is
+# deliberately excluded from the published scitt-cose wheel (neutral package
+# ships no application-profile awareness). It is only importable when hosted.py
+# runs from a full repo checkout (the deployed hosted verify surface — see the
+# Dockerfile). A plain `pip install scitt-cose[serve]` outside the checkout
+# still gets the core /verify endpoint; only the capsule-page profile
+# renderers degrade to a stub.
+try:
+    from hosted_profiles.machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
+except ImportError:
+    _MM_RENDER_JS = (
+        'function renderMachineMandate(data){'
+        'var el=document.getElementById("graphContent");if(!el)return;'
+        'el.innerHTML="<div style=\'color:var(--muted)\'>'
+        'MachineMandate renderer not available in this deployment.</div>";'
+        'document.getElementById("graphSection").style.display="block";'
+        '}'
+    )
 
 #: One sentence, the whole offering. Served on the page and in the JSON.
 SUMMARY = (
     "A free, stateless verification endpoint for SCITT receipts and signed "
-    "statements (RFC9162_SHA256 profile). It verifies; it stores nothing; "
-    "it issues nothing."
+    "statements (RFC9162_SHA256 vds=1 or CCF ccf.v1 vds=2). It verifies; it "
+    "stores nothing; it issues nothing."
 )
 
 #: The open-source home of the verifier this endpoint runs. The ONLY external
@@ -115,7 +133,8 @@ CAPABILITIES = {
     "does": [
         "verify a SCITT COSE_Sign1 Signed Statement signature (if a key is given)",
         "report the statement's issuer / subject / content-type / alg (payload-opaque)",
-        "verify a COSE Receipt inclusion proof + log signature (RFC 9162 SHA-256)",
+        "verify a COSE Receipt inclusion proof + log signature "
+        "(RFC 9162 SHA-256 vds=1, or CCF ccf.v1 vds=2)",
     ],
     "does_not": [
         "operate a Transparency Service (register / issue receipts / anchor)",

@@ -25,13 +25,15 @@ use `python-cwt` or any other COSE library.
 
 - Verify a SCITT **Signed Statement** (`COSE_Sign1`) signature against a supplied
   key — EdDSA and ES256 — and report its issuer / subject / content-type / alg.
-- Verify a **COSE Receipt** whose verifiable data structure is
+- Verify a **COSE Receipt** carrying either of two verifiable data structures:
   **`RFC9162_SHA256`** (vds = 1, the tree algorithm registered by
-  draft-ietf-cose-merkle-tree-proofs): the RFC 9162 SHA-256 inclusion proof
-  *and* the log's signature over the reconstructed root — i.e. *"this statement
-  is provably in the log"* — **without trusting the log operator**. The vds value
-  is read from the protected header only and anything other than
-  `RFC9162_SHA256` is rejected, not silently accepted.
+  draft-ietf-cose-merkle-tree-proofs) or **CCF `ccf.v1`** (vds = 2, Microsoft
+  CCF's Merkle format, used by scitt-ccf-ledger v7+) — the RFC 9162 SHA-256
+  inclusion proof *and* the log's signature over the reconstructed root — i.e.
+  *"this statement is provably in the log"* — **without trusting the log
+  operator**. The vds value is read from the protected header only and
+  anything other than these two registered structures is rejected, not
+  silently accepted.
 - Provide the RFC 9162 **Merkle primitives** (root, inclusion, consistency) and a
   `build_receipt` primitive.
 

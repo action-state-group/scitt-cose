@@ -24,6 +24,13 @@ Profile detection (interim — until Anton provides an owner-controlled discrimi
   the profile owner's consent. See ``_MM_PINNED_CANONICAL_DIGESTS``.
 
 No external dependencies beyond the stdlib.
+
+**Not part of the published ``scitt-cose`` package.** This module lives outside
+the ``scitt_cose/`` directory (see ``[tool.setuptools] packages`` in
+pyproject.toml) so the neutral wheel carries no application-profile awareness.
+It is consumed only by ``scitt_cose/hosted.py`` when run from a full repo
+checkout (the deployed hosted verify surface — see the Dockerfile), and by the
+test suite.
 """
 from __future__ import annotations
 
