@@ -13,9 +13,9 @@ Profile plug-point: register additional profile parsers in ``PROFILE_PARSERS``.
 **Not part of the published ``scitt-cose`` package.** This module lives outside
 the ``scitt_cose/`` directory (see ``[tool.setuptools] packages`` in
 pyproject.toml) so the neutral wheel carries no application-profile awareness.
-It is consumed only by ``scitt_cose/hosted.py`` when run from a full repo
-checkout (the deployed hosted verify surface — see the Dockerfile), and by the
-test suite.
+It is consumed only by its sibling ``hosted_profiles/hosted.py`` when run from
+a full repo checkout (the deployed hosted verify surface — see the
+Dockerfile), and by the test suite.
 """
 from __future__ import annotations
 

@@ -31,14 +31,15 @@ Issues = "https://github.com/action-state-group/scitt-cose/issues"
 # pycose is a THIRD-PARTY COSE library used ONLY in tests as an independent
 # conformance oracle (test_thirdparty_cose.py); never imported at runtime.
 dev = ["pytest>=7.0", "ruff>=0.4,<0.16", "pycose>=1.1"]
-# serve: run the stateless HTTP verifier as a standalone SCITT-only service under
-# a production ASGI server. The library/CLI need NO web deps; this is opt-in.
-# (The stdlib `scitt-cose-serve` entry point needs nothing extra.)
+# serve: pulls in a production ASGI server for running the hosted verify
+# surface (hosted_profiles/hosted.py) from a full repo checkout — see the
+# Dockerfile. hosted_profiles/ is NOT part of this package (excluded from the
+# wheel below); this extra has no effect on `pip install scitt-cose` alone,
+# it only benefits a full checkout that also wants uvicorn.
 serve = ["uvicorn[standard]>=0.27"]
 
 [project.scripts]
 scitt-cose = "scitt_cose.cli:main"
-scitt-cose-serve = "scitt_cose.hosted:serve"
 
 [tool.setuptools]
 packages = ["scitt_cose"]

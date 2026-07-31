@@ -22,8 +22,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
+from hosted_profiles.hosted import make_asgi_app, make_handler, verify_payload
 from scitt_cose import build_receipt, build_signed_statement
-from scitt_cose.hosted import make_asgi_app, make_handler, verify_payload
 from scitt_cose.receipt import verify_receipt
 from scitt_cose.statement import parse_signed_statement
 

@@ -19,7 +19,7 @@ A public, **read-only, stateless** HTTP utility that verifies a SCITT
 anything** — and without having to trust the operator with their data.
 
 The endpoint is a thin wrapper over the *same* library the CLI uses
-(`scitt_cose.hosted.verify_payload`, which calls `parse_signed_statement` and
+(`hosted_profiles.hosted.verify_payload`, which calls `parse_signed_statement` and
 `verify_receipt`). `tests/test_hosted_parity.py` asserts **hosted verdict ==
 local verdict** on a fixture set — so "the hosted endpoint runs the identical
 verified library" is a checked claim, not marketing.
@@ -114,22 +114,24 @@ malformed transport (oversized body, non-JSON).
 
 ## Private ride-along deployment (this pass)
 
-The neutral package ships a **framework-free ASGI app** (`make_asgi_app()`,
-stdlib-only — ASGI is just an async-callable protocol, so no web framework leaks
-into the package). Any ASGI host can mount it; the host application does so
-opt-in:
+`hosted_profiles.hosted` (a full-checkout-only sibling of the neutral
+`scitt_cose` package — see below) ships a **framework-free ASGI app**
+(`make_asgi_app()`, stdlib-only — ASGI is just an async-callable protocol, so
+no web framework leaks into the neutral package it wraps). Any ASGI host can
+mount it; the host application does so opt-in:
 
 ```python
 # the host app's factory — import-guarded, OFF by default
 if os.environ.get("HOST_ENABLE_SCITT_VERIFY") == "1":
-    from scitt_cose.hosted import make_asgi_app
+    from hosted_profiles.hosted import make_asgi_app
     app.mount("/scitt-verify", make_asgi_app())
 ```
 
-To run it on the host service (private; bound to wherever that service binds):
+To run it on the host service (private; bound to wherever that service binds,
+from a full repo checkout so `hosted_profiles` is importable):
 
 ```bash
-pip install scitt-cose                       # make scitt_cose importable
+pip install .                                # make scitt_cose importable
 HOST_ENABLE_SCITT_VERIFY=1 <host-app-cmd>    # mounts GET/POST /scitt-verify
 ```
 
@@ -154,9 +156,8 @@ from the host app and, crucially, separate from the Transparency Service. Three
 run modes, all serving the identical verified logic (asserted by the parity test):
 
 ```bash
-scitt-cose-serve                       # stdlib HTTP, zero extra deps
-uvicorn scitt_cose.hosted:make_asgi_app --factory --port 8080   # [serve] extra
-docker run -p 8080:8080 scitt-verifier # the package's Dockerfile
+uvicorn hosted_profiles.hosted:make_asgi_app --factory --port 8080   # [serve] extra
+docker run -p 8080:8080 scitt-verifier # the repo's Dockerfile
 ```
 
 This was run and verified privately under uvicorn with **only `scitt_cose`
@@ -171,7 +172,7 @@ a Signed Statement and a digest-only Receipt; the capabilities declare it is
 | Verb | verify (read-only) | register + **issue receipts** + anchor |
 | State | none | durable append-only log |
 | Trust obligation | none (verify it yourself) | uptime, integrity, non-equivocation |
-| Code | `scitt_cose` (this package) | a separate Transparency Service |
+| Code | `hosted_profiles.hosted`, wrapping `scitt_cose` | a separate Transparency Service |
 
 The SCITT-only verifier may *verify receipts a Transparency Service issued*, but
 it never becomes one.
@@ -181,7 +182,7 @@ it never becomes one.
 A single, small, stateless service — trivially horizontally scalable because it
 holds no state:
 
-- **Runtime:** one container running `scitt_cose.hosted` behind any ASGI/WSGI or
+- **Runtime:** one container running `hosted_profiles.hosted` behind any ASGI/WSGI or
   the stdlib handler; or a serverless function (the verify call is short and
   pure, a natural fit). No attached storage, no database, no secrets beyond TLS.
 - **Edge:** TLS termination + **rate limiting** + body-size limit at the gateway

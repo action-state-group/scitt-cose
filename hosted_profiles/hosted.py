@@ -21,9 +21,19 @@ construction:
   asserts hosted verdict == local verdict on a fixture set, so "the hosted
   endpoint runs the identical verified library" is a checked claim, not a promise.
 
-Dependencies: standard library only (``http.server``, ``json``, ``base64``).
-No web framework is pulled into the package; the runtime deps stay cbor2 +
-cryptography.
+Dependencies: the ``scitt-cose`` library (``cbor2`` + ``cryptography``) plus
+stdlib (``http.server``, ``json``, ``base64``). No web framework is required
+for the stdlib path; ``make_asgi_app`` needs an ASGI host (e.g. uvicorn) to run.
+
+This module lives in ``hosted_profiles/`` — a sibling of the ``scitt_cose``
+package, deliberately excluded from the published wheel (see
+``[tool.setuptools] packages`` in ``pyproject.toml``). The neutral, pip-
+installable ``scitt-cose`` package carries no application-profile awareness and
+no hosted-surface code; this file, and the AAC/MachineMandate renderers beside
+it, exist only in a full repo checkout (the deployed hosted verify surface —
+see the Dockerfile, which ``COPY . /app`` then runs this module directly). It
+imports the neutral verifier through ``scitt_cose``'s public API, exactly as
+any other downstream consumer would.
 """
 from __future__ import annotations
 
@@ -31,20 +41,16 @@ import base64
 import json
 from typing import Any
 
-from ._status import DRAFT_TRACKING_NOTICE
-from .cose_sign1 import CoseError
-from .receipt import verify_receipt
-from .statement import parse_signed_statement
+from scitt_cose._status import DRAFT_TRACKING_NOTICE
+from scitt_cose.cose_sign1 import CoseError
+from scitt_cose.receipt import verify_receipt
+from scitt_cose.statement import parse_signed_statement
 
-# hosted_profiles/ carries the AAC + MachineMandate renderers and is
-# deliberately excluded from the published scitt-cose wheel (neutral package
-# ships no application-profile awareness). It is only importable when hosted.py
-# runs from a full repo checkout (the deployed hosted verify surface — see the
-# Dockerfile). A plain `pip install scitt-cose[serve]` outside the checkout
-# still gets the core /verify endpoint; only the capsule-page profile
-# renderers degrade to a stub.
+# machine_mandate.py is this module's sibling in hosted_profiles/; the
+# try/except keeps this file degrading gracefully (stub renderer) if that
+# sibling is ever absent, rather than failing the whole hosted surface.
 try:
-    from hosted_profiles.machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
+    from .machine_mandate import MM_RENDER_JS as _MM_RENDER_JS
 except ImportError:
     _MM_RENDER_JS = (
         'function renderMachineMandate(data){'

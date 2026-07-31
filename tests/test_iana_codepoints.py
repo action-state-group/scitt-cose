@@ -111,12 +111,14 @@ def test_no_reserved_or_downstream_code_in_package():
 
 
 def test_no_application_profile_renderers_in_package():
-    """Neutrality gate: application-profile renderers (AAC, MachineMandate) must
-    never ship inside scitt_cose/ — they belong in hosted_profiles/, which is
-    excluded from the built wheel (see [tool.setuptools] packages)."""
+    """Neutrality gate: application-profile renderers (AAC, MachineMandate) and
+    the hosted-surface HTTP wrapper must never ship inside scitt_cose/ — they
+    belong in hosted_profiles/, which is excluded from the built wheel (see
+    [tool.setuptools] packages). The neutral wheel is verifier APIs only."""
     import pathlib
 
     pkg = pathlib.Path(__file__).resolve().parents[1] / "scitt_cose"
     module_names = {src.name for src in pkg.rglob("*.py")}
     assert "aac.py" not in module_names
     assert "machine_mandate.py" not in module_names
+    assert "hosted.py" not in module_names
