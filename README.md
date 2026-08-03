@@ -25,13 +25,15 @@ use `python-cwt` or any other COSE library.
 
 - Verify a SCITT **Signed Statement** (`COSE_Sign1`) signature against a supplied
   key — EdDSA and ES256 — and report its issuer / subject / content-type / alg.
-- Verify a **COSE Receipt** whose verifiable data structure is
+- Verify a **COSE Receipt** carrying either of two verifiable data structures:
   **`RFC9162_SHA256`** (vds = 1, the tree algorithm registered by
-  draft-ietf-cose-merkle-tree-proofs): the RFC 9162 SHA-256 inclusion proof
-  *and* the log's signature over the reconstructed root — i.e. *"this statement
-  is provably in the log"* — **without trusting the log operator**. The vds value
-  is read from the protected header only and anything other than
-  `RFC9162_SHA256` is rejected, not silently accepted.
+  draft-ietf-cose-merkle-tree-proofs) or **CCF `ccf.v1`** (vds = 2, Microsoft
+  CCF's Merkle format, used by scitt-ccf-ledger v7+) — the RFC 9162 SHA-256
+  inclusion proof *and* the log's signature over the reconstructed root — i.e.
+  *"this statement is provably in the log"* — **without trusting the log
+  operator**. The vds value is read from the protected header only and
+  anything other than these two registered structures is rejected, not
+  silently accepted.
 - Provide the RFC 9162 **Merkle primitives** (root, inclusion, consistency) and a
   `build_receipt` primitive.
 
@@ -364,28 +366,32 @@ SHA-256 receipts were verified under one dispatch path against this library's
 
 ## Hosted verification — a standalone SCITT-only verifier
 
-`scitt_cose.hosted` is a **stateless, read-only** wrapper over the *same* verify
-functions, so you can offer verification without anyone installing anything — and
-without the submitter having to trust the operator with their data (nothing
-stored, nothing logged, payload-opaque; the receipt path needs only the leaf
-*digest*, never the payload). `tests/test_hosted_parity.py` asserts the hosted
-verdict equals the local verdict on a fixture set, including the ASGI path.
+`hosted_profiles.hosted` is a **stateless, read-only** wrapper over the *same*
+verify functions, so you can offer verification without anyone installing
+anything — and without the submitter having to trust the operator with their
+data (nothing stored, nothing logged, payload-opaque; the receipt path needs
+only the leaf *digest*, never the payload). `tests/test_hosted_parity.py`
+asserts the hosted verdict equals the local verdict on a fixture set,
+including the ASGI path.
+
+**Not part of the published `scitt-cose` package.** `hosted_profiles/` (the
+hosted HTTP wrapper plus its application-profile renderers) is excluded from
+the built wheel — the neutral, `pip install`-able package is verifier APIs
+only. `hosted_profiles.hosted` only runs from a full repo checkout (see the
+Dockerfile, or clone + run below).
 
 **This is a SCITT-*only* verifier, and it is NOT a Transparency Service.** It
 verifies statements and receipts; it never registers, issues receipts, or
 anchors. Running a Transparency Service is a **separate** offering with its own
 operational trust obligations — deliberately out of scope here.
 
-Run it standalone (no other service involved):
+Run it standalone from a repo checkout (no other service involved):
 
 ```bash
-# Zero extra deps — stdlib HTTP server:
-scitt-cose-serve                                  # 127.0.0.1:8080
+# Under a production ASGI server (pip install ".[serve]" from the checkout):
+uvicorn hosted_profiles.hosted:make_asgi_app --factory --host 0.0.0.0 --port 8080
 
-# Or under a production ASGI server (pip install "scitt-cose[serve]"):
-uvicorn scitt_cose.hosted:make_asgi_app --factory --host 0.0.0.0 --port 8080
-
-# Or containerized (Dockerfile ships with the package):
+# Or containerized (Dockerfile ships in the repo):
 docker build -t scitt-verifier . && docker run -p 8080:8080 scitt-verifier
 ```
 
@@ -398,12 +404,12 @@ POST /verify   -> {valid, statement, receipt, reasons}   # JSON body, see below
 landing **page that renders the verifier-vs-Transparency-Service boundary table
 on the page itself** — not buried in docs — while API clients get the same data
 as JSON (including a `boundary` field). Both are generated from the same
-constants (`scitt_cose.hosted.BOUNDARY_TABLE`), so page and API can't drift;
-`tests/test_hosted_page.py` pins the table's presence on both.
+constants (`hosted_profiles.hosted.BOUNDARY_TABLE`), so page and API can't
+drift; `tests/test_hosted_page.py` pins the table's presence on both.
 
 It can also **ride along** inside an existing ASGI app via
-`app.mount("/scitt-verify", scitt_cose.hosted.make_asgi_app())` — same logic,
-shared deployment, still standalone code. The full design, submitter-safety
+`app.mount("/scitt-verify", hosted_profiles.hosted.make_asgi_app())` — same
+logic, shared deployment, still standalone code. The full design, submitter-safety
 constraints, and proposed deployment shape are in
 [`docs/hosted-verifier-design.md`](docs/hosted-verifier-design.md). A hosted
 instance is live at <https://verify.actionstate.ai> — this package unchanged

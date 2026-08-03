@@ -91,8 +91,8 @@ nothing publishes after it without re-running it.
       **Verified: Cloud Run request logs carry method + URL + status only;
       app access logging is silenced by design.**
 - [ ] On repo extraction / name claim (§2): update `REPO_URL` and the
-      `pip install` lines in `scitt_cose/hosted.py` — the landing page's repo
-      link must point at the real public repo before the flip.
+      `pip install` lines in `hosted_profiles/hosted.py` — the landing page's
+      repo link must point at the real public repo before the flip.
 
 ## 5. Datatracker prose audit — FINAL GATE before the flip
 

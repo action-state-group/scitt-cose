@@ -13,7 +13,7 @@ import threading
 from http.server import HTTPServer
 from urllib.request import Request, urlopen
 
-from scitt_cose.hosted import (
+from hosted_profiles.hosted import (
     ATTRIBUTION,
     BOUNDARY_TABLE,
     CAPABILITIES,
@@ -289,7 +289,7 @@ def test_security_headers_on_every_response():
     """HSTS, nosniff, frame denial, self-only CSP, no-referrer — on HTML, JSON,
     JS, and verdict responses, from both wrappers. CSP: script-src 'self' (no
     unsafe-inline), connect-src 'self', form-action 'self'."""
-    from scitt_cose.hosted import SECURITY_HEADERS
+    from hosted_profiles.hosted import SECURITY_HEADERS
 
     expected = {k.lower(): v for k, v in SECURITY_HEADERS}
     assert "strict-transport-security" in expected
@@ -359,7 +359,7 @@ def test_static_js_route():
     correct content-type and the same security headers as every other response.
     The JS content must include the same-origin fetch target and VALID/INVALID
     verdict strings."""
-    from scitt_cose.hosted import SECURITY_HEADERS
+    from hosted_profiles.hosted import SECURITY_HEADERS
 
     # ASGI
     app = make_asgi_app(verify_rpm=0)

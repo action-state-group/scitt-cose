@@ -22,5 +22,8 @@ USER verifier
 EXPOSE 8080
 
 # Stateless and read-only: the ASGI app retains nothing across requests.
-CMD ["python", "-m", "uvicorn", "scitt_cose.hosted:make_asgi_app", "--factory", \
+# hosted_profiles/ (incl. hosted.py) ships in this checkout via COPY . /app
+# above but is NOT part of the pip-installed scitt-cose wheel — see
+# [tool.setuptools] packages in pyproject.toml.
+CMD ["python", "-m", "uvicorn", "hosted_profiles.hosted:make_asgi_app", "--factory", \
      "--host", "0.0.0.0", "--port", "8080", "--no-server-header"]
