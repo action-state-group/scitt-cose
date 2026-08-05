@@ -1,0 +1,69 @@
+{
+  "bundle": [
+    {
+      "action_type": "decide",
+      "capsule_id": "4722ab55138455ea9ef0c95b8449009dee19f2c54cbe2e8730ce2ec76ce996da",
+      "disposition": {
+        "decision": "accept",
+        "verdict_class": "executed"
+      },
+      "operator": "acme-research",
+      "signed_statement": {
+        "pubkey_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwHfmPgNCOw7dqvij24ZNuGit3Wd34XgfzM9dxC2Qbk8=\n-----END PUBLIC KEY-----\n",
+        "statement_b64": "0oRYaaMDcGFwcGxpY2F0aW9uL2pzb24PogFtYWNtZS1yZXNlYXJjaAJ4QDQ3MjJhYjU1MTM4NDU1ZWE5ZWYwYzk1Yjg0NDkwMDlkZWUxOWYyYzU0Y2JlMmU4NzMwY2UyZWM3NmNlOTk2ZGEBJ6BY5XsiYWN0aW9uX3R5cGUiOiJkZWNpZGUiLCJjYXBzdWxlX2lkIjoiNDcyMmFiNTUxMzg0NTVlYTllZjBjOTViODQ0OTAwOWRlZTE5ZjJjNTRjYmUyZTg3MzBjZTJlYzc2Y2U5OTZkYSIsImRpc3Bvc2l0aW9uIjp7ImRlY2lzaW9uIjoiYWNjZXB0IiwidmVyZGljdF9jbGFzcyI6ImV4ZWN1dGVkIn0sIm9wZXJhdG9yIjoiYWNtZS1yZXNlYXJjaCIsInRpbWVzdGFtcCI6IjIwMjYtMDgtMDFUMTQ6MDA6MDBaIn1YQEWm/sQTbcmSpKYW0uCuLwp20kMIfSAlRI1yIuiJVq1amVHjLRc2IKdKcWAhM5SszCLP2zt4lx2UbrrxSZmGswI="
+      },
+      "timestamp": "2026-08-01T14:00:00Z"
+    },
+    {
+      "action_type": "decide",
+      "capsule_id": "e2942eeba530b574e9d273be37d29df50bf43e8213f5f10201dd170f791b053e",
+      "chain": {
+        "parent_capsule_id": "4722ab55138455ea9ef0c95b8449009dee19f2c54cbe2e8730ce2ec76ce996da",
+        "relation": "confirms"
+      },
+      "disposition": {
+        "decision": "accept",
+        "verdict_class": "executed"
+      },
+      "model_attestation": {
+        "compute_attestation": {
+          "agent_input": {
+            "amount_usd": 9999,
+            "tool": "refund"
+          },
+          "agent_input_digest": "185c8d76a682d12622200be8ac14ce3bcfcd5d88517c7ed57435574b4bf12007"
+        }
+      },
+      "operator": "acme-research",
+      "signed_statement": {
+        "pubkey_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwHfmPgNCOw7dqvij24ZNuGit3Wd34XgfzM9dxC2Qbk8=\n-----END PUBLIC KEY-----\n",
+        "statement_b64": "0oRYaaMDcGFwcGxpY2F0aW9uL2pzb24PogFtYWNtZS1yZXNlYXJjaAJ4QGUyOTQyZWViYTUzMGI1NzRlOWQyNzNiZTM3ZDI5ZGY1MGJmNDNlODIxM2Y1ZjEwMjAxZGQxNzBmNzkxYjA1M2UBJ6BZAhR7ImFjdGlvbl90eXBlIjoiZGVjaWRlIiwiY2Fwc3VsZV9pZCI6ImUyOTQyZWViYTUzMGI1NzRlOWQyNzNiZTM3ZDI5ZGY1MGJmNDNlODIxM2Y1ZjEwMjAxZGQxNzBmNzkxYjA1M2UiLCJjaGFpbiI6eyJwYXJlbnRfY2Fwc3VsZV9pZCI6IjQ3MjJhYjU1MTM4NDU1ZWE5ZWYwYzk1Yjg0NDkwMDlkZWUxOWYyYzU0Y2JlMmU4NzMwY2UyZWM3NmNlOTk2ZGEiLCJyZWxhdGlvbiI6ImNvbmZpcm1zIn0sImRpc3Bvc2l0aW9uIjp7ImRlY2lzaW9uIjoiYWNjZXB0IiwidmVyZGljdF9jbGFzcyI6ImV4ZWN1dGVkIn0sIm1vZGVsX2F0dGVzdGF0aW9uIjp7ImNvbXB1dGVfYXR0ZXN0YXRpb24iOnsiYWdlbnRfaW5wdXQiOnsiYW1vdW50X3VzZCI6OTk5OSwidG9vbCI6InJlZnVuZCJ9LCJhZ2VudF9pbnB1dF9kaWdlc3QiOiIxODVjOGQ3NmE2ODJkMTI2MjIyMDBiZThhYzE0Y2UzYmNmY2Q1ZDg4NTE3YzdlZDU3NDM1NTc0YjRiZjEyMDA3In19LCJvcGVyYXRvciI6ImFjbWUtcmVzZWFyY2giLCJ0aW1lc3RhbXAiOiIyMDI2LTA4LTAyVDE0OjAxOjAwWiJ9WECJJ0wjGsJ+2q0da/+mqas7YxIJZ6jO8Qvi6EAlNqOAO/19SGsze9+ea+auMvxrQQ8ps3KlAQHDD0fvoapRr7kJ"
+      },
+      "timestamp": "2026-08-02T14:01:00Z"
+    },
+    {
+      "action_type": "decide",
+      "capsule_id": "6d1398da5cda120c1efbc0329cc8ffc08eb81e4c8b8edb89d570e46965f71f01",
+      "chain": {
+        "parent_capsule_id": "e2942eeba530b574e9d273be37d29df50bf43e8213f5f10201dd170f791b053e",
+        "relation": "confirms"
+      },
+      "disposition": {
+        "decision": "accept",
+        "verdict_class": "executed"
+      },
+      "operator": "acme-research",
+      "signed_statement": {
+        "pubkey_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwHfmPgNCOw7dqvij24ZNuGit3Wd34XgfzM9dxC2Qbk8=\n-----END PUBLIC KEY-----\n",
+        "statement_b64": "0oRYaaMDcGFwcGxpY2F0aW9uL2pzb24PogFtYWNtZS1yZXNlYXJjaAJ4QDZkMTM5OGRhNWNkYTEyMGMxZWZiYzAzMjljYzhmZmMwOGViODFlNGM4YjhlZGI4OWQ1NzBlNDY5NjVmNzFmMDEBJ6BZAVx7ImFjdGlvbl90eXBlIjoiZGVjaWRlIiwiY2Fwc3VsZV9pZCI6IjZkMTM5OGRhNWNkYTEyMGMxZWZiYzAzMjljYzhmZmMwOGViODFlNGM4YjhlZGI4OWQ1NzBlNDY5NjVmNzFmMDEiLCJjaGFpbiI6eyJwYXJlbnRfY2Fwc3VsZV9pZCI6ImUyOTQyZWViYTUzMGI1NzRlOWQyNzNiZTM3ZDI5ZGY1MGJmNDNlODIxM2Y1ZjEwMjAxZGQxNzBmNzkxYjA1M2UiLCJyZWxhdGlvbiI6ImNvbmZpcm1zIn0sImRpc3Bvc2l0aW9uIjp7ImRlY2lzaW9uIjoiYWNjZXB0IiwidmVyZGljdF9jbGFzcyI6ImV4ZWN1dGVkIn0sIm9wZXJhdG9yIjoiYWNtZS1yZXNlYXJjaCIsInRpbWVzdGFtcCI6IjIwMjYtMDgtMDNUMTQ6MDI6MDBaIn1YQCGsY0+nrjm80OnwjJ+67rHy+vDbrLCxCI6zqG8ZYZ2iPa8IALcCQv0Y8wy0KZfMcbo7hS9mUXfm+Ugmm71IJwc="
+      },
+      "timestamp": "2026-08-03T14:02:00Z"
+    }
+  ],
+  "witness": {
+    "configured": 1,
+    "held": 1,
+    "reachable": true,
+    "verified": true
+  }
+}

@@ -291,6 +291,238 @@ def _extract_refs(view: GraphView, cap: dict, capsule_id: str, prefix: str) -> N
 
 
 # ---------------------------------------------------------------------------
+# Ritual evaluation — the 4-stage conformance surface (Integrity / Sequence /
+# Authenticity / Witness) used by the tamper-states view. Operates over a
+# *bundle*: an ordered list of capsule dicts (a single capsule is a bundle of
+# one). No network access here — Witness is evaluated from data the caller
+# already fetched (or declares absent), never fetched inside this function.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChainGap:
+    before_index: int   # index of the capsule right before the gap
+    after_index: int     # index of the capsule right after the gap
+    missing_parent: str  # the parent_capsule_id that isn't in the bundle
+
+
+def find_chain_gaps(capsules: list[dict]) -> list[ChainGap]:
+    """Detect breaks in ``chain.parent_capsule_id`` linkage across a bundle.
+
+    A gap exists when a capsule names a well-formed parent digest that does
+    not match any other capsule_id present in the bundle. Order in ``capsules``
+    is assumed to be the display/chain order (as loaded from a bundle array).
+    """
+    ids = {c.get("capsule_id") for c in capsules if _is_hex64(c.get("capsule_id", ""))}
+    gaps: list[ChainGap] = []
+    for i, cap in enumerate(capsules):
+        if i == 0:
+            continue
+        parent = (cap.get("chain") or {}).get("parent_capsule_id", "")
+        if _is_hex64(parent) and parent not in ids:
+            gaps.append(ChainGap(before_index=i - 1, after_index=i, missing_parent=parent))
+    return gaps
+
+
+@dataclass
+class RitualStage:
+    name: str    # "Integrity" | "Sequence" | "Authenticity" | "Witness"
+    status: str  # "pass" | "fail" | "skip" — "skip" means not disproven, not checked
+    detail: str
+
+
+@dataclass
+class Finding:
+    code: str    # "digest_mismatch" | "chain_gap" | "witness_invalid"
+    stage: str
+    label: str
+    text: str
+    meta: str
+
+
+@dataclass
+class RitualSummary:
+    stages: list[RitualStage] = field(default_factory=list)
+    finding: Finding | None = None
+
+
+def _check_authenticity(capsules: list[dict]) -> RitualStage:
+    """Verify any embedded signed statements for real; never trust a claimed flag.
+
+    A capsule may carry an optional ``signed_statement`` sidecar:
+    ``{"statement_b64": ..., "pubkey_pem": ...}`` — a COSE_Sign1 Signed
+    Statement over that capsule's own canonical bytes. Capsule bundles carry
+    no COSE bytes by default (the JSON travels in the URL fragment only), so
+    this stage is honestly "skip" when none is supplied — it never reports
+    "pass" for a check that did not run.
+    """
+    sidecars = [c.get("signed_statement") for c in capsules if c.get("signed_statement")]
+    if not sidecars:
+        return RitualStage(
+            "Authenticity", "skip", "not checked — no signed statement provided for this bundle"
+        )
+    import base64
+
+    from scitt_cose.statement import parse_signed_statement
+
+    for sc in sidecars:
+        try:
+            stmt_bytes = base64.b64decode(sc.get("statement_b64", ""))
+            pub = sc.get("pubkey_pem", "")
+            pub_bytes = pub.encode() if isinstance(pub, str) else pub
+            parsed = parse_signed_statement(stmt_bytes, public_key_pem=pub_bytes)
+            if parsed.get("signature_verified") is not True:
+                return RitualStage("Authenticity", "fail", "at least one signature did not verify")
+        except Exception:  # noqa: BLE001 - malformed sidecar counts as a fail, not a crash
+            return RitualStage("Authenticity", "fail", "at least one signature did not verify")
+    return RitualStage(
+        "Authenticity", "pass", "all signatures hold — verified over the original bytes"
+    )
+
+
+def _check_witness(witness: dict | None) -> RitualStage:
+    """Report declared witness state — never disproven by absence or timeout.
+
+    ``witness`` shape: ``{"held": int, "configured": int, "reachable": bool,
+    "verified": bool | None}``. Absent → "skip" (no witness data provided).
+    Unreachable → "skip" ("unreachable is never rendered as disproven").
+    An explicit ``verified: False`` (a fetched receipt that failed its
+    inclusion-proof check) is the one real "fail" path.
+    """
+    if witness is None:
+        return RitualStage("Witness", "skip", "no witness data provided")
+    if witness.get("verified") is False:
+        return RitualStage("Witness", "fail", "inclusion proof did not verify")
+    if witness.get("reachable") is False:
+        return RitualStage(
+            "Witness", "skip",
+            "independent-witness check skipped (unreachable) — everything else verified; "
+            "reconnect any time to complete it",
+        )
+    held = witness.get("held", 0)
+    configured = witness.get("configured") or held or 1
+    if held < configured:
+        return RitualStage(
+            "Witness", "skip", f"witnessed {held} of {configured} · retrying — rung held"
+        )
+    return RitualStage("Witness", "pass", f"witnessed {held} of {configured}")
+
+
+def evaluate_ritual(
+    capsules: list[dict],
+    views: list[GraphView],
+    *,
+    witness: dict | None = None,
+) -> RitualSummary:
+    """Evaluate the 4-stage ritual over an ordered bundle and its parsed views.
+
+    ``views`` must be ``parse_capsule`` results for each entry in ``capsules``,
+    in the same order (single-capsule callers pass one-element lists of each).
+    """
+    stages: list[RitualStage] = []
+    finding: Finding | None = None
+
+    # Integrity: any revealed artifact whose recomputed digest disagrees with
+    # its committed digest fails the stage. First mismatch becomes the finding.
+    mismatches = [e for v in views for e in v.privilege_log if e.match_ok is False]
+    if mismatches:
+        e = mismatches[0]
+        stages.append(RitualStage(
+            "Integrity", "fail",
+            f"record fails at stage digest_mismatch — {e.context} no longer matches its fingerprint",
+        ))
+        finding = Finding(
+            code="digest_mismatch", stage="Integrity", label="The finding",
+            text=f"{e.artifact_id} ({e.context}) is not the value that was sealed.",
+            meta=f"failed stage: digest_mismatch · field group: {e.context} · digest {e.digest[:8]}…",
+        )
+    else:
+        stages.append(RitualStage("Integrity", "pass", "every record matches its fingerprint"))
+
+    # Sequence: chain-gap detection across the bundle. Only becomes the
+    # displayed finding if Integrity did not already claim that slot.
+    gaps = find_chain_gaps(capsules)
+    if gaps:
+        g = gaps[0]
+        before_id = capsules[g.before_index].get("capsule_id", "")
+        after_id = capsules[g.after_index].get("capsule_id", "")
+        stages.append(RitualStage(
+            "Sequence", "fail",
+            f"gap between record {g.before_index + 1} and record {g.after_index + 1} "
+            f"— record {g.after_index + 1} names a parent that is not here",
+        ))
+        if finding is None:
+            finding = Finding(
+                code="chain_gap", stage="Sequence", label="The finding",
+                text=(
+                    f"Whatever sits between record {g.before_index + 1} and "
+                    f"record {g.after_index + 1} is not in this bundle. That is "
+                    "information, not just an error: the gap has a location and "
+                    "two edges you can browse from."
+                ),
+                meta=(
+                    f"failed stage: chain_gap · window: {before_id[:8]}…→{after_id[:8]}… "
+                    f"· missing parent {g.missing_parent[:8]}…"
+                ),
+            )
+    else:
+        stages.append(RitualStage(
+            "Sequence", "pass", "unbroken — every record names the one before it"
+        ))
+
+    stages.append(_check_authenticity(capsules))
+    stages.append(_check_witness(witness))
+
+    return RitualSummary(stages=stages, finding=finding)
+
+
+@dataclass
+class RecordNote:
+    index: int
+    note: str            # "verifies" | "digest_mismatch" | "cites an altered record"
+    is_altered: bool      # this record itself failed Integrity
+    cites_altered: bool   # this record chains (directly or transitively) to an altered one
+
+
+def annotate_records(capsules: list[dict], views: list[GraphView]) -> list[RecordNote]:
+    """Per-record annotation for the affected-records table.
+
+    A record that itself fails Integrity is "digest_mismatch". A record that
+    doesn't fail itself but chains — directly or transitively, via
+    ``chain.parent_capsule_id`` — to an altered record still verifies on its
+    own terms, so it is FLAGGED ("cites an altered record"), never failed.
+    """
+    altered_ids = {
+        capsules[i].get("capsule_id", "")
+        for i, v in enumerate(views)
+        if any(e.match_ok is False for e in v.privilege_log) and _is_hex64(capsules[i].get("capsule_id", ""))
+    }
+    by_id = {c.get("capsule_id", ""): c for c in capsules if _is_hex64(c.get("capsule_id", ""))}
+
+    notes: list[RecordNote] = []
+    for i, cap in enumerate(capsules):
+        cid = cap.get("capsule_id", "")
+        if cid in altered_ids:
+            notes.append(RecordNote(i, "digest_mismatch", True, False))
+            continue
+        cites = False
+        seen: set[str] = set()
+        cur = cap
+        while True:
+            parent = (cur.get("chain") or {}).get("parent_capsule_id", "")
+            if not _is_hex64(parent) or parent in seen:
+                break
+            seen.add(parent)
+            if parent in altered_ids:
+                cites = True
+                break
+            cur = by_id.get(parent)
+            if cur is None:
+                break
+        notes.append(RecordNote(i, "cites an altered record" if cites else "verifies", False, cites))
+    return notes
+
+
+# ---------------------------------------------------------------------------
 # Profile plug-point — register additional profile parsers here.
 # New profiles: add a callable ``parse(data: dict) -> GraphView`` to this dict.
 # The capsule page's detect_profile() runs through keys in order.
@@ -336,7 +568,15 @@ __all__ = [
     "GraphEdge",
     "PrivilegeLogEntry",
     "GraphView",
+    "ChainGap",
+    "RitualStage",
+    "Finding",
+    "RitualSummary",
+    "RecordNote",
     "PROFILE_PARSERS",
     "detect_profile",
     "parse_capsule",
+    "find_chain_gaps",
+    "evaluate_ritual",
+    "annotate_records",
 ]

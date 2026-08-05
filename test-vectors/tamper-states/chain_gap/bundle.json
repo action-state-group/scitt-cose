@@ -1,0 +1,60 @@
+{
+  "bundle": [
+    {
+      "action_type": "decide",
+      "capsule_id": "4075bb89ed2b3c1ab907ec993288d658ce1963a0a8645f98ec43ab497c9339e7",
+      "disposition": {
+        "decision": "accept",
+        "verdict_class": "executed"
+      },
+      "operator": "acme-research",
+      "signed_statement": {
+        "pubkey_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwHfmPgNCOw7dqvij24ZNuGit3Wd34XgfzM9dxC2Qbk8=\n-----END PUBLIC KEY-----\n",
+        "statement_b64": "0oRYaaMDcGFwcGxpY2F0aW9uL2pzb24PogFtYWNtZS1yZXNlYXJjaAJ4QDQwNzViYjg5ZWQyYjNjMWFiOTA3ZWM5OTMyODhkNjU4Y2UxOTYzYTBhODY0NWY5OGVjNDNhYjQ5N2M5MzM5ZTcBJ6BY5XsiYWN0aW9uX3R5cGUiOiJkZWNpZGUiLCJjYXBzdWxlX2lkIjoiNDA3NWJiODllZDJiM2MxYWI5MDdlYzk5MzI4OGQ2NThjZTE5NjNhMGE4NjQ1Zjk4ZWM0M2FiNDk3YzkzMzllNyIsImRpc3Bvc2l0aW9uIjp7ImRlY2lzaW9uIjoiYWNjZXB0IiwidmVyZGljdF9jbGFzcyI6ImV4ZWN1dGVkIn0sIm9wZXJhdG9yIjoiYWNtZS1yZXNlYXJjaCIsInRpbWVzdGFtcCI6IjIwMjYtMDgtMDFUMTQ6MDA6MDBaIn1YQO9ZC2GyfHiVM4xUtL9QTO70VFjSnuEdDfW5DpIf3/F9DE+n/FwM1kB8S8A4Q164sd3XuSfAPF7m6+7qDPvR/gQ="
+      },
+      "timestamp": "2026-08-01T14:00:00Z"
+    },
+    {
+      "action_type": "decide",
+      "capsule_id": "6e1d0dd86fc3cd176a0fb179005fdcf3e6b7c7c187a684f58f30533132e14bfc",
+      "chain": {
+        "parent_capsule_id": "4075bb89ed2b3c1ab907ec993288d658ce1963a0a8645f98ec43ab497c9339e7",
+        "relation": "confirms"
+      },
+      "disposition": {
+        "decision": "accept",
+        "verdict_class": "executed"
+      },
+      "operator": "acme-research",
+      "signed_statement": {
+        "pubkey_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwHfmPgNCOw7dqvij24ZNuGit3Wd34XgfzM9dxC2Qbk8=\n-----END PUBLIC KEY-----\n",
+        "statement_b64": "0oRYaaMDcGFwcGxpY2F0aW9uL2pzb24PogFtYWNtZS1yZXNlYXJjaAJ4QDZlMWQwZGQ4NmZjM2NkMTc2YTBmYjE3OTAwNWZkY2YzZTZiN2M3YzE4N2E2ODRmNThmMzA1MzMxMzJlMTRiZmMBJ6BZAVx7ImFjdGlvbl90eXBlIjoiZGVjaWRlIiwiY2Fwc3VsZV9pZCI6IjZlMWQwZGQ4NmZjM2NkMTc2YTBmYjE3OTAwNWZkY2YzZTZiN2M3YzE4N2E2ODRmNThmMzA1MzMxMzJlMTRiZmMiLCJjaGFpbiI6eyJwYXJlbnRfY2Fwc3VsZV9pZCI6IjQwNzViYjg5ZWQyYjNjMWFiOTA3ZWM5OTMyODhkNjU4Y2UxOTYzYTBhODY0NWY5OGVjNDNhYjQ5N2M5MzM5ZTciLCJyZWxhdGlvbiI6ImNvbmZpcm1zIn0sImRpc3Bvc2l0aW9uIjp7ImRlY2lzaW9uIjoiYWNjZXB0IiwidmVyZGljdF9jbGFzcyI6ImV4ZWN1dGVkIn0sIm9wZXJhdG9yIjoiYWNtZS1yZXNlYXJjaCIsInRpbWVzdGFtcCI6IjIwMjYtMDgtMDJUMTQ6MDE6MDBaIn1YQB/Cer3mvV7lIAm8zbAx8yjHL9TK4kkVRk9gw46qHa9x9bAHH4iqabWAkSbk1y2FB23L9bbo7rcfWpi6cQQGDQM="
+      },
+      "timestamp": "2026-08-02T14:01:00Z"
+    },
+    {
+      "action_type": "decide",
+      "capsule_id": "7c676c76d568bc64ebaec487b62442b887d83b86db53b63fb2b9b44ffb0cc5c1",
+      "chain": {
+        "parent_capsule_id": "12ddad375bf7377e9c305652d2daf17db74e2a789b19b266bdf77040d8f95d6e",
+        "relation": "confirms"
+      },
+      "disposition": {
+        "decision": "accept",
+        "verdict_class": "executed"
+      },
+      "operator": "acme-research",
+      "signed_statement": {
+        "pubkey_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwHfmPgNCOw7dqvij24ZNuGit3Wd34XgfzM9dxC2Qbk8=\n-----END PUBLIC KEY-----\n",
+        "statement_b64": "0oRYaaMDcGFwcGxpY2F0aW9uL2pzb24PogFtYWNtZS1yZXNlYXJjaAJ4QDdjNjc2Yzc2ZDU2OGJjNjRlYmFlYzQ4N2I2MjQ0MmI4ODdkODNiODZkYjUzYjYzZmIyYjliNDRmZmIwY2M1YzEBJ6BZAVx7ImFjdGlvbl90eXBlIjoiZGVjaWRlIiwiY2Fwc3VsZV9pZCI6IjdjNjc2Yzc2ZDU2OGJjNjRlYmFlYzQ4N2I2MjQ0MmI4ODdkODNiODZkYjUzYjYzZmIyYjliNDRmZmIwY2M1YzEiLCJjaGFpbiI6eyJwYXJlbnRfY2Fwc3VsZV9pZCI6IjEyZGRhZDM3NWJmNzM3N2U5YzMwNTY1MmQyZGFmMTdkYjc0ZTJhNzg5YjE5YjI2NmJkZjc3MDQwZDhmOTVkNmUiLCJyZWxhdGlvbiI6ImNvbmZpcm1zIn0sImRpc3Bvc2l0aW9uIjp7ImRlY2lzaW9uIjoiYWNjZXB0IiwidmVyZGljdF9jbGFzcyI6ImV4ZWN1dGVkIn0sIm9wZXJhdG9yIjoiYWNtZS1yZXNlYXJjaCIsInRpbWVzdGFtcCI6IjIwMjYtMDgtMDNUMTQ6MDI6MDBaIn1YQOUKuM1pAjFqHKtSHs0mAoM4XnFw0C6ixywfv4JFOFzzScBotru7+fR9AqAa9zNPkavJEo5Uk3K5WOw8hh8PbgI="
+      },
+      "timestamp": "2026-08-03T14:02:00Z"
+    }
+  ],
+  "witness": {
+    "configured": 1,
+    "held": 1,
+    "reachable": true,
+    "verified": true
+  }
+}
