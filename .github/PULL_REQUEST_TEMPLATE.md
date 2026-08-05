@@ -14,7 +14,7 @@
 
 - [ ] `pytest` passes locally
 - [ ] Conformance vectors unchanged (or updated with justification)
-- [ ] No private/moat/product content in this public repo
+- [ ] No private or product content in this public repo
 - [ ] DCO sign-off: `git commit -s`
 
 ## Linked issue

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Fixtures for aam-mvp-p1-verify-surface acceptance cases.
+"""Fixtures for the public capsule verification surface — acceptance cases.
 
 Acceptance cases:
 1. Live permalink — capsule page renders and anchor-status proxy returns anchored+receipt_verified.
