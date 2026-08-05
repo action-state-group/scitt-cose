@@ -451,11 +451,33 @@ _CAPSULE_CSS = """
 .anchor-banner{padding:12px 18px;border-radius:10px;font-size:13.5px;margin-bottom:20px;border:1px solid var(--line)}
 .anchor-banner.anchor-ok{background:var(--pass-soft);border-color:var(--pass);color:var(--pass)}
 .anchor-banner.anchor-none{background:var(--paper-2);color:var(--muted)}
-.anchor-banner.anchor-unknown{background:var(--fail-soft);border-color:var(--fail);color:var(--fail)}
+.anchor-banner.anchor-offline{background:var(--paper-2);color:var(--muted);border-style:dashed}
 .anchor-banner.anchor-loading{color:var(--muted);background:var(--paper-2)}
 .anchor-ok{color:var(--pass);font-weight:700}
-.anchor-err{color:var(--fail);font-weight:700}
+.anchor-offline{color:var(--muted);font-weight:600}
 .anchor-none{color:var(--muted)}
+.ritual-stages{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ritual-stage{display:flex;align-items:baseline;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:13px}
+.ritual-stage:last-child{border-bottom:none}
+.ritual-mark{width:16px;height:16px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+.ritual-pass .ritual-mark{background:var(--pass);color:#fff}
+.ritual-fail .ritual-mark{background:var(--fail);color:#fff}
+.ritual-skip .ritual-mark{background:transparent;border:1.5px solid var(--line);color:var(--muted-2)}
+.ritual-name{font-weight:600;width:110px;flex-shrink:0}
+.ritual-detail{color:var(--muted);font-weight:400}
+.ritual-fail .ritual-detail{color:var(--fail)}
+.finding-panel{margin-top:16px;border-radius:12px;padding:14px 18px;border:1px solid var(--line)}
+.finding-panel.finding-fail{background:var(--fail-soft);border-color:var(--fail)}
+.finding-panel.finding-gap{background:var(--fail-soft);border-color:var(--fail)}
+.finding-label{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--fail);margin-bottom:6px}
+.finding-text{font-size:13.5px;color:var(--ink);margin-bottom:6px}
+.finding-meta{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.records-table{border-collapse:collapse;width:100%;font-size:12.5px}
+.records-table th,.records-table td{padding:8px 10px;border:1px solid var(--line);text-align:left}
+.records-table th{background:var(--paper-2);font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.rec-row.rec-altered{background:var(--fail-soft)}
+.rec-row.rec-flagged{background:rgba(179,38,30,0.03)}
+.rec-row.rec-gap{background:var(--fail-soft);font-style:italic;color:var(--muted)}
 .g-nodes{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px}
 .gn{border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:200px;max-width:340px;background:#fff}
 .gn-capsule{border-color:var(--accent);background:var(--accent-soft)}
@@ -764,6 +786,153 @@ function renderRegPanel(data,hasReceipt){
   sec.style.display="block";
 }
 
+/* ---------- ritual evaluation (Integrity / Sequence / Authenticity / Witness) ----------
+ * Mirrors scitt_cose/aac.py's find_chain_gaps / evaluate_ritual / annotate_records —
+ * kept in JS because the capsule JSON never leaves the browser (fragment-only).
+ * A record that fails a check by name; everything that still verifies keeps its
+ * verdict. Unreachable is never rendered as disproven.
+ */
+var _bundleWitness=null;
+var _fragData=null;
+
+function _capMismatched(cap){
+  var g=parseAac(cap);
+  return g.privlog.some(function(e){return e.matchOk===false;});
+}
+
+function findChainGaps(capsules){
+  var ids={};
+  capsules.forEach(function(c){if(isH64(c.capsule_id))ids[c.capsule_id]=true;});
+  var gaps=[];
+  for(var i=1;i<capsules.length;i++){
+    var parent=((capsules[i].chain)||{}).parent_capsule_id||"";
+    if(isH64(parent)&&!ids[parent])gaps.push({beforeIdx:i-1,afterIdx:i,missingParent:parent});
+  }
+  return gaps;
+}
+
+function annotateRecords(capsules){
+  var alteredIds={};
+  capsules.forEach(function(c){if(isH64(c.capsule_id)&&_capMismatched(c))alteredIds[c.capsule_id]=true;});
+  var byId={};
+  capsules.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
+  return capsules.map(function(cap){
+    var cid=cap.capsule_id||"";
+    if(alteredIds[cid])return{note:"digest_mismatch",isAltered:true,citesAltered:false};
+    var cites=false,seen={},cur=cap;
+    while(true){
+      var parent=((cur.chain)||{}).parent_capsule_id||"";
+      if(!isH64(parent)||seen[parent])break;
+      seen[parent]=true;
+      if(alteredIds[parent]){cites=true;break;}
+      cur=byId[parent];if(!cur)break;
+    }
+    return{note:cites?"cites an altered record":"verifies",isAltered:false,citesAltered:cites};
+  });
+}
+
+/* Capsule bundles carry no COSE bytes by default (JSON in the URL fragment
+ * only) and this page ships no client-side COSE verifier — that logic runs
+ * server-side, at POST /verify. So Authenticity is honestly "not checked"
+ * here rather than a fabricated pass; verifying an embedded signed statement
+ * for real is scitt_cose.aac.evaluate_ritual's job (see tests). */
+function checkAuthenticity(capsules){
+  var has=capsules.some(function(c){return !!c.signed_statement;});
+  if(!has)return{status:"skip",detail:"not checked — no signed statement provided for this bundle"};
+  return{status:"skip",detail:"signed statement present — not verified in the browser; use the Verify a signed statement tool"};
+}
+
+function checkWitness(w){
+  if(!w)return{status:"skip",detail:"no witness data provided"};
+  if(w.verified===false)return{status:"fail",detail:"inclusion proof did not verify"};
+  if(w.reachable===false)return{status:"skip",detail:"independent-witness check skipped (unreachable) — everything else verified; reconnect any time to complete it"};
+  var held=w.held||0,configured=w.configured||held||1;
+  if(held<configured)return{status:"skip",detail:"witnessed "+held+" of "+configured+" · retrying — rung held"};
+  return{status:"pass",detail:"witnessed "+held+" of "+configured};
+}
+
+function evaluateRitual(capsules,witness){
+  var stages=[],finding=null;
+  var alteredIds={},firstMismatch=null;
+  capsules.forEach(function(c){
+    if(!isH64(c.capsule_id))return;
+    var g=parseAac(c);
+    var bad=g.privlog.filter(function(e){return e.matchOk===false;});
+    if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch)firstMismatch=bad[0];}
+  });
+  if(Object.keys(alteredIds).length){
+    stages.push({name:"Integrity",status:"fail",
+      detail:"record fails at stage digest_mismatch — "+firstMismatch.ctx+" no longer matches its fingerprint"});
+    finding={code:"digest_mismatch",label:"The finding",
+      text:firstMismatch.id+" ("+firstMismatch.ctx+") is not the value that was sealed.",
+      meta:"failed stage: digest_mismatch · field group: "+firstMismatch.ctx+" · digest "+firstMismatch.digest.slice(0,8)+"…"};
+  }else{
+    stages.push({name:"Integrity",status:"pass",detail:"every record matches its fingerprint"});
+  }
+
+  var gaps=findChainGaps(capsules);
+  if(gaps.length){
+    var g0=gaps[0];
+    var beforeId=(capsules[g0.beforeIdx]||{}).capsule_id||"",afterId=(capsules[g0.afterIdx]||{}).capsule_id||"";
+    stages.push({name:"Sequence",status:"fail",
+      detail:"gap between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" — record "+(g0.afterIdx+1)+" names a parent that is not here"});
+    if(!finding){
+      finding={code:"chain_gap",label:"The finding",
+        text:"Whatever sits between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" is not in this bundle. That is information, not just an error: the gap has a location and two edges you can browse from.",
+        meta:"failed stage: chain_gap · window: "+beforeId.slice(0,8)+"…→"+afterId.slice(0,8)+"… · missing parent "+g0.missingParent.slice(0,8)+"…"};
+    }
+  }else{
+    stages.push({name:"Sequence",status:"pass",detail:"unbroken — every record names the one before it"});
+  }
+
+  var auth=checkAuthenticity(capsules);
+  stages.push({name:"Authenticity",status:auth.status,detail:auth.detail});
+  var wit=checkWitness(witness);
+  stages.push({name:"Witness",status:wit.status,detail:wit.detail});
+
+  return{stages:stages,finding:finding};
+}
+
+function renderRitual(bundle,witness){
+  var mount=$("ritualMount");if(!mount||!bundle||!bundle.length)return;
+  var summary=evaluateRitual(bundle,witness);
+  var marks={pass:"✓",fail:"✕",skip:"–"};
+  var h="<div class='ritual-stages'>";
+  summary.stages.forEach(function(s){
+    h+="<div class='ritual-stage ritual-"+s.status+"'><span class='ritual-mark'>"+marks[s.status]+"</span>"
+      +"<span class='ritual-name'>"+safe(s.name)+"</span><span class='ritual-detail'>"+safe(s.detail)+"</span></div>";
+  });
+  h+="</div>";
+  if(summary.finding){
+    var f=summary.finding;
+    h+="<div class='finding-panel finding-"+(f.code==="chain_gap"?"gap":"fail")+"'>"
+      +"<div class='finding-label'>"+safe(f.label)+"</div>"
+      +"<p class='finding-text'>"+safe(f.text)+"</p>"
+      +"<div class='finding-meta'>"+safe(f.meta)+"</div></div>";
+  }
+  var gaps=findChainGaps(bundle),gapAt={};
+  gaps.forEach(function(g){gapAt[g.afterIdx]=g;});
+  var notes=annotateRecords(bundle);
+  var rh="<table class='records-table'><thead><tr><th>#</th><th>record</th><th>note</th></tr></thead><tbody>";
+  bundle.forEach(function(cap,i){
+    if(gapAt[i]){
+      var gp=gapAt[i];
+      rh+="<tr class='rec-row rec-gap'><td>—</td><td>gap — record "+(gp.beforeIdx+1)+" → record "+(i+1)+", missing parent <code>"+safe(gp.missingParent.slice(0,8))+"…</code></td><td>⌗ chain_gap</td></tr>";
+    }
+    var n=notes[i],s=_capSummary(cap);
+    var noteText=n.note==="digest_mismatch"?"✕ digest_mismatch"
+      :n.note==="cites an altered record"?"✓ verifies · cites an altered record"
+      :"✓ verifies";
+    rh+="<tr class='rec-row"+(n.isAltered?" rec-altered":(n.citesAltered?" rec-flagged":""))+"'>"
+      +"<td>"+(i+1)+"</td><td><code>"+safe(s.capsule_id.slice(0,12))+"…</code> "+safe(s.action_type)+"</td>"
+      +"<td>"+noteText+"</td></tr>";
+  });
+  rh+="</tbody></table>";
+  h+="<div style='margin-top:16px'>"+rh+"</div>";
+  mount.innerHTML=h;
+  $("ritualSection").style.display="block";
+}
+
 /* ---------- load + permalink ---------- */
 function loadCapsule(data){
   var profile=detectProfile(data);
@@ -785,18 +954,26 @@ function loadCapsule(data){
 var hash=location.hash.slice(1);
 if(hash){
   try{
-    var _fragData=JSON.parse(decodeURIComponent(escape(atob(hash))));
-    if(!Array.isArray(_fragData)){loadCapsule(_fragData);}
+    _fragData=JSON.parse(decodeURIComponent(escape(atob(hash))));
+    if(!Array.isArray(_fragData)){loadCapsule(_fragData);renderRitual([_fragData],_bundleWitness);}
   }catch(ex){$("parseErr").textContent="Fragment decode error: "+ex.message;}
 }
 
-/* anchor status (same-origin proxy avoids CORS) */
+/* anchor status (same-origin proxy avoids CORS). Unreachable is reported
+ * neutrally — never as a failed verification (the check merely didn't run). */
+function _ritualBundle(){return(_bundle&&_bundle.length)?_bundle:(_fragData?[_fragData]:null);}
+
 if(capsuleId){
   fetch("/anchor-status/"+capsuleId)
     .then(function(r){return r.json();})
     .then(function(s){
       var b=$("anchorBanner");
-      if(s.error){b.innerHTML="<span class='anchor-err'>Anchor unreachable: "+safe(s.error)+"</span>";b.className="anchor-banner anchor-unknown";return;}
+      if(s.error){
+        b.innerHTML="<span class='anchor-offline'>Anchor unreachable</span> — witness check skipped, not failed: "+safe(s.error);
+        b.className="anchor-banner anchor-offline";
+        var rb=_ritualBundle();if(rb)renderRitual(rb,{reachable:false});
+        return;
+      }
       if(s.anchored){
         b.innerHTML="<span class='anchor-ok'>✓ Anchored</span> log index <code>"+s.log_index+"</code>"+
           (s.receipt_verified?" · <span class='anchor-ok'>inclusion proof verified (RFC 9162)</span>":"");
@@ -804,6 +981,8 @@ if(capsuleId){
         b.className="anchor-banner anchor-ok";
         /* upgrade reg panel with tamper-evident-log rows now that receipt is confirmed */
         if(_regLastData)renderRegPanel(_regLastData,true);
+        var rb2=_ritualBundle();
+        if(rb2)renderRitual(rb2,{held:1,configured:1,reachable:true,verified:s.receipt_verified!==false});
         /* inclusion-only view: show witnessing facts when no capsule is loaded */
         if(!_capsuleLoaded){
           var _iSec=$("inclusionSection");
@@ -820,12 +999,14 @@ if(capsuleId){
       }else{
         b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
         b.className="anchor-banner anchor-none";
+        var rb3=_ritualBundle();if(rb3)renderRitual(rb3,{held:0,configured:1,reachable:true});
       }
     })
     .catch(function(ex){
       var b=$("anchorBanner");
-      b.innerHTML="Anchor unreachable: "+safe(ex.message);
-      b.className="anchor-banner anchor-unknown";
+      b.innerHTML="<span class='anchor-offline'>Anchor unreachable</span> — witness check skipped, not failed: "+safe(ex.message);
+      b.className="anchor-banner anchor-offline";
+      var rb=_ritualBundle();if(rb)renderRitual(rb,{reachable:false});
     });
 }
 
@@ -837,7 +1018,8 @@ $("loadBtn").addEventListener("click",function(){
 });
 $("linkBtn").addEventListener("click",function(){
   if(navigator.clipboard){
-    var txt=_bundle?btoa(unescape(encodeURIComponent(JSON.stringify(_bundle)))):location.hash.slice(1);
+    var payload=_bundle?(_bundleWitness?{bundle:_bundle,witness:_bundleWitness}:_bundle):null;
+    var txt=payload?btoa(unescape(encodeURIComponent(JSON.stringify(payload)))):location.hash.slice(1);
     var url=location.origin+location.pathname+"#"+txt;
     navigator.clipboard.writeText(url).then(function(){
       $("linkBtn").textContent="Copied!";
@@ -898,6 +1080,7 @@ function navigateBundle(idx){
   _bundleIdx=idx;
   renderChainTable(_bundle,idx);
   loadCapsule(_bundle[idx]);
+  renderRitual(_bundle,_bundleWitness);
 }
 
 $("chainPrevBtn")&&$("chainPrevBtn").addEventListener("click",function(){navigateBundle(_bundleIdx-1);});
@@ -929,16 +1112,23 @@ function _patchGraphPriorLinks(){
 var _origRenderGraph=renderGraph;
 renderGraph=function(g){_origRenderGraph(g);_patchGraphPriorLinks();};
 
-/* auto-load bundle from fragment (array) */
+/* auto-load bundle from fragment — either a bare array (legacy: bilateral
+ * bundles) or {bundle:[...], witness:{...}} (declares witness config for a
+ * self-contained tamper-states fixture; never a live network fetch). */
 var hash=location.hash.slice(1);
 if(hash){
   try{
     var decoded=JSON.parse(decodeURIComponent(escape(atob(hash))));
-    if(Array.isArray(decoded)&&decoded.length>0){
-      _bundle=decoded;
+    var arr=null,wit=null;
+    if(Array.isArray(decoded)&&decoded.length>0){arr=decoded;}
+    else if(decoded&&Array.isArray(decoded.bundle)&&decoded.bundle.length>0){arr=decoded.bundle;wit=decoded.witness||null;}
+    if(arr){
+      _bundle=arr;
+      _bundleWitness=wit;
       _bundleIdx=0;
-      renderChainTable(decoded,0);
-      loadCapsule(decoded[0]);
+      renderChainTable(arr,0);
+      loadCapsule(arr[0]);
+      renderRitual(arr,wit);
     }
   }catch(ex){}
 }
@@ -1196,6 +1386,18 @@ def render_capsule_page(capsule_id: str) -> str:
 <div class="wrap" style="margin-bottom:8px">
   <div class="anchor-banner anchor-loading" id="anchorBanner">Checking anchor status…</div>
 </div>
+
+<section id="ritualSection" class="band" style="display:none">
+  <div class="wrap">
+    <div class="sec-eyebrow">Verification ritual</div>
+    <h2 class="sec-title">Integrity · Sequence · Authenticity · Witness</h2>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
+      Failure is precise: the stage that failed is named, the finding has a location,
+      and everything that still verifies keeps its verdict. Unreachable is never rendered as disproven.
+    </p>
+    <div id="ritualMount"></div>
+  </div>
+</section>
 
 <section id="chainNav" class="band" style="display:none">
   <div class="wrap">
