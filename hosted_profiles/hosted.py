@@ -426,6 +426,18 @@ def _esc(s: str) -> str:
 #: Live transparency service this surface queries for inclusion proofs.
 _ANCHOR_BASE = "https://anchor.agentactioncapsule.org"
 
+#: Same vocabulary as agent_action_capsule.history's inclusion-proof visibility
+#: mapping. An inclusion response with no (or an unrecognised) visibility hint
+#: is NOT covered here on purpose — the caller defaults that case to
+#: "publicly-anchored" because _ANCHOR_BASE is itself a public transparency
+#: service, unlike the library which has no such single-anchor context and so
+#: defaults conservatively to "local-anchored" instead. See docs/ledger-grade.md §4.
+_VISIBILITY_TO_RUNG = {
+    "local": "local-anchored",
+    "counterparty": "counterparty-visible",
+    "public": "publicly-anchored",
+}
+
 #: Privacy-safe aggregate instrumentation — no content retention.
 #: Counter is list so closure mutation works without ``nonlocal``.
 _CAPSULE_VIEW_COUNTER: list[int] = [0]   # total capsule-page views
@@ -454,6 +466,11 @@ _CAPSULE_CSS = """
 .anchor-banner.anchor-offline{background:var(--paper-2);color:var(--muted);border-style:dashed}
 .anchor-banner.anchor-loading{color:var(--muted);background:var(--paper-2)}
 .anchor-banner.anchor-fail{background:var(--fail-soft);border-color:var(--fail);border-width:2px;color:var(--fail);font-weight:700}
+.anchor-banner.rung-standalone{background:var(--paper-2);color:var(--muted)}
+.anchor-banner.rung-countersigned{background:var(--paper-2);color:var(--muted)}
+.anchor-banner.rung-local-anchored{background:var(--pass-soft);border-color:var(--pass);color:var(--pass)}
+.anchor-banner.rung-counterparty-visible{background:var(--pass-soft);border-color:var(--pass);color:var(--pass)}
+.anchor-banner.rung-publicly-anchored{background:var(--pass-soft);border-color:var(--pass);color:var(--pass)}
 .anchor-ok{color:var(--pass);font-weight:700}
 .anchor-offline{color:var(--muted);font-weight:600}
 .anchor-none{color:var(--muted)}
@@ -681,6 +698,20 @@ function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
 function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function $(id){return document.getElementById(id);}
 
+/* ---------- anchoring-evidence rung (docs/ledger-grade.md §4 twin) ----------
+   Same five-value vocabulary as agent_action_capsule.history.RUNGS. This
+   surface talks to ONE anchor and reports what IT sees at that anchor — it
+   does not claim to know a capsule's full cross-party state (that is the
+   library's job). "standalone" here means "not found at this anchor", not
+   "no evidence exists anywhere". */
+var RUNG_INFO={
+  "standalone":{cls:"rung-standalone",innerCls:"anchor-none",label:"Standalone — not found at this anchor"},
+  "countersigned":{cls:"rung-countersigned",innerCls:"anchor-none",label:"Countersigned — no transparency-service receipt at this anchor"},
+  "local-anchored":{cls:"rung-local-anchored",innerCls:"anchor-ok",label:"Local-anchored"},
+  "counterparty-visible":{cls:"rung-counterparty-visible",innerCls:"anchor-ok",label:"Counterparty-visible anchor"},
+  "publicly-anchored":{cls:"rung-publicly-anchored",innerCls:"anchor-ok",label:"Publicly anchored"}
+};
+function rungInfo(rung){return RUNG_INFO[rung]||RUNG_INFO.standalone;}
 
 /* ---------- AAC graph parser ---------- */
 function parseAac(data){
@@ -1261,11 +1292,12 @@ if(capsuleId){
           var rb=_ritualBundle();if(rb)renderRitual(rb,{reachable:false});
           return;
         }
+        var _ri=rungInfo(s.rung);
         if(s.anchored){
-          b.innerHTML="<span class='anchor-ok'>✓ Anchored</span> log index <code>"+s.log_index+"</code>"+
+          b.innerHTML="<span class='"+_ri.innerCls+"'>✓ "+_ri.label+"</span> log index <code>"+s.log_index+"</code>"+
             (s.receipt_verified?" · <span class='anchor-ok'>inclusion proof verified (RFC 9162)</span>":"");
           if(s.logged_at)b.innerHTML+=" · "+safe(s.logged_at);
-          b.className="anchor-banner anchor-ok";
+          b.className="anchor-banner "+_ri.cls;
           /* upgrade reg panel with tamper-evident-log rows now that receipt is confirmed */
           if(_regLastData)renderRegPanel(_regLastData,true);
           var rb2=_ritualBundle();
@@ -1284,8 +1316,8 @@ if(capsuleId){
             }
           }
         }else{
-          b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
-          b.className="anchor-banner anchor-none";
+          b.innerHTML="<span class='"+_ri.innerCls+"'>"+_ri.label+"</span>";
+          b.className="anchor-banner "+_ri.cls;
           var rb3=_ritualBundle();if(rb3)renderRitual(rb3,{held:0,configured:1,reachable:true});
         }
       });
@@ -2348,6 +2380,13 @@ def _anchor_proxy_json(capsule_id: str) -> dict:
         "leaf_index": None,
         "tree_size": None,
         "error": None,
+        # Anchoring-evidence rung (docs/ledger-grade.md §4 twin, same five-value
+        # vocabulary as agent_action_capsule.history.RUNGS). This surface talks
+        # to ONE anchor and reports only what THAT anchor knows: "standalone"
+        # here means "not found at this anchor", never a claim about a
+        # capsule's full cross-party state. None on a real transport error —
+        # not found and unreachable are different things.
+        "rung": "standalone",
     }
 
     def _fetch_json(url: str) -> object:
@@ -2364,6 +2403,11 @@ def _anchor_proxy_json(capsule_id: str) -> dict:
         result["tree_size"] = inclusion.get("tree_size")
         # log_index == leaf_index for this log (sequential, 0-based)
         result["log_index"] = inclusion.get("leaf_index")
+        # _ANCHOR_BASE is this deployment's public transparency service, so a
+        # found entry defaults to publicly-anchored; an inclusion response MAY
+        # override with an explicit visibility hint (same vocabulary as the
+        # library's inclusion_proofs), never grading ABOVE what it states.
+        result["rung"] = _VISIBILITY_TO_RUNG.get(inclusion.get("visibility"), "publicly-anchored")
 
         receipt_b64 = inclusion.get("receipt_b64", "")
         entry_hash = inclusion.get("entry_hash", "")
@@ -2392,8 +2436,10 @@ def _anchor_proxy_json(capsule_id: str) -> dict:
             # capsule_id not found in log — not an error, just not anchored
             return result
         result["error"] = f"anchor returned HTTP {exc.code}"
+        result["rung"] = None   # unreachable/errored is not the same claim as "not found"
     except Exception as exc:  # noqa: BLE001
         result["error"] = str(exc)
+        result["rung"] = None
 
     return result
 
