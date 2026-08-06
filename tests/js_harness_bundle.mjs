@@ -54,9 +54,6 @@ async function main() {
     case "crossCheckSelfReport":
       result = await crossCheckSelfReport(op.bundle, op.records);
       break;
-    case "evaluateBundleRitual":
-      result = await evaluateBundleRitual(op.records, op.completeness, op.crossCheck);
-      break;
     case "buildBundlePrivlog":
       result = await buildBundlePrivlog(op.records);
       break;
@@ -70,7 +67,16 @@ async function main() {
       result = findChainGaps(op.capsules);
       break;
     case "annotateRecords":
-      result = annotateRecords(op.capsules);
+      result = annotateRecords(op.capsules, op.integrity);
+      break;
+    case "computeCapsuleId":
+      result = await computeCapsuleId(op.capsule);
+      break;
+    case "verifyCapsuleId":
+      result = await verifyCapsuleId(op.capsule);
+      break;
+    case "evaluateBundleRitual":
+      result = await evaluateBundleRitual(op.records, op.completeness, op.crossCheck, op.integrity);
       break;
     default:
       throw new Error("unknown fn: " + op.fn);
