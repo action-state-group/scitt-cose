@@ -1136,6 +1136,882 @@ if(hash){
 """
 
 
+#: Vanilla-JS port of capsule-ledger's ``asg_ledger.mmr.core`` (MMRIVER-draft
+#: -compatible completeness-certificate math). Served at ``/static/mmr.js``.
+#:
+#: This is a faithful, function-for-function port of the *pure* verification
+#: half of that module (``leaf_hash``, ``interior_hash``, ``root_from_peaks``,
+#: ``height_at``, ``node_count``, ``peaks``, ``leaf_index_to_pos``,
+#: ``verify_inclusion``, ``verify_consistency``) — never the mutating
+#: ``add_leaf``/proof-*building* half, because this is a read-only recipient
+#: viewer: it only ever checks a completeness certificate someone else
+#: produced, never builds one. ``tests/test_mmr_js_parity.py`` runs this file
+#: for real (via Node — see ``tests/js_harness_mmr.mjs``) against
+#: ``test-vectors/mmr/`` and asserts byte-identical output against the Python
+#: reference, so "faithful port" is a checked claim, not a comment.
+#:
+#: ``verify_inclusion``/``verify_consistency`` keep the Python original's
+#: never-raise contract: malformed input (wrong lengths, bad hex, wrong
+#: shape) resolves to ``false``, never a thrown exception — a verifier is a
+#: total function from (possibly adversarial) input to a boolean. SHA-256 is
+#: ``crypto.subtle.digest``, which is asynchronous, so both verify functions
+#: are ``async`` and resolve to a boolean rather than returning one directly.
+MMR_JS = r"""
+var MMR = (function(){
+"use strict";
+
+var DIGEST_LEN = 32;
+var MAX_MMR_SIZE = Math.pow(2, 50);
+
+function MmrError(msg){ this.message = msg; this.name = "MmrError"; }
+MmrError.prototype = Object.create(Error.prototype);
+
+function isNonNegInt(n){ return typeof n === "number" && Number.isInteger(n) && n >= 0; }
+
+function requireNonNegInt(n, what){
+  if(!isNonNegInt(n)) throw new MmrError(what + " must be a non-negative integer: " + n);
+}
+
+function hexToBytes(hex){
+  if(typeof hex !== "string" || hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)){
+    throw new MmrError("not a valid hex string");
+  }
+  var out = new Uint8Array(hex.length / 2);
+  for(var i = 0; i < out.length; i++){
+    out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+function bytesToHex(bytes){
+  var s = "";
+  for(var i = 0; i < bytes.length; i++){
+    s += bytes[i].toString(16).padStart(2, "0");
+  }
+  return s;
+}
+
+function assertDigest(b, what){
+  if(!(b instanceof Uint8Array) || b.length !== DIGEST_LEN){
+    throw new MmrError((what || "digest") + " must be " + DIGEST_LEN + " bytes");
+  }
+}
+
+function parseDigestHex(h){
+  if(typeof h !== "string") throw new MmrError("proof element is not a hex string");
+  var b = hexToBytes(h);
+  if(b.length !== DIGEST_LEN) throw new MmrError("proof element has wrong digest length: " + b.length);
+  return b;
+}
+
+function concatBytes(){
+  var total = 0;
+  for(var i = 0; i < arguments.length; i++) total += arguments[i].length;
+  var out = new Uint8Array(total);
+  var off = 0;
+  for(var j = 0; j < arguments.length; j++){
+    out.set(arguments[j], off);
+    off += arguments[j].length;
+  }
+  return out;
+}
+
+function bytesEqual(a, b){
+  if(a.length !== b.length) return false;
+  for(var i = 0; i < a.length; i++){ if(a[i] !== b[i]) return false; }
+  return true;
+}
+
+async function sha256(bytes){
+  var digest = await crypto.subtle.digest("SHA-256", bytes);
+  return new Uint8Array(digest);
+}
+
+/* be64(n) -- big-endian 8-byte encoding. n stays well within
+ * Number.MAX_SAFE_INTEGER (our domain is < MAX_MMR_SIZE = 2**50), so plain
+ * float division/modulo is exact -- no BigInt needed. */
+function beU64(n){
+  var bytes = new Uint8Array(8);
+  var v = n;
+  for(var i = 7; i >= 0; i--){
+    bytes[i] = v % 256;
+    v = Math.floor(v / 256);
+  }
+  return bytes;
+}
+
+/* leaf_hash = sha256(0x00 || body_digest) */
+async function leafHash(bodyDigest){
+  assertDigest(bodyDigest, "body_digest");
+  return sha256(concatBytes(new Uint8Array([0x00]), bodyDigest));
+}
+
+/* interior_hash = sha256(be64(position+1) || left || right) */
+async function interiorHash(left, right, position){
+  assertDigest(left, "left");
+  assertDigest(right, "right");
+  requireNonNegInt(position, "position");
+  return sha256(concatBytes(beU64(position + 1), left, right));
+}
+
+/* root = bagged peaks, right-to-left, NO domain-separator byte */
+async function rootFromPeaks(peakHashes){
+  if(!peakHashes.length) return new Uint8Array(DIGEST_LEN);
+  for(var i = 0; i < peakHashes.length; i++) assertDigest(peakHashes[i], "peak");
+  var hashes = peakHashes.slice();
+  while(hashes.length > 1){
+    var right = hashes.pop();
+    var left = hashes.pop();
+    hashes.push(await sha256(concatBytes(right, left)));
+  }
+  return hashes[0];
+}
+
+function popcount(n){
+  var c = 0;
+  while(n > 0){
+    c += (n % 2 === 1) ? 1 : 0;
+    n = Math.floor(n / 2);
+  }
+  return c;
+}
+
+function heightAt(pos){
+  requireNonNegInt(pos, "pos");
+  var pos1 = pos + 1, h = 0;
+  while(Math.pow(2, h + 1) - 1 < pos1) h += 1;
+  while(h > 0){
+    var size = Math.pow(2, h + 1) - 1;
+    if(pos1 === size) return h;
+    var leftSize = Math.pow(2, h) - 1;
+    if(pos1 > leftSize) pos1 -= leftSize;
+    h -= 1;
+  }
+  return 0;
+}
+
+function nodeCount(leafCount_){
+  requireNonNegInt(leafCount_, "leaf_count");
+  return 2 * leafCount_ - popcount(leafCount_);
+}
+
+function peaks(size){
+  if(!isNonNegInt(size) || size >= MAX_MMR_SIZE) throw new MmrError("invalid MMR size: " + size);
+  var result = [], remaining = size, offset = 0, prevHeight = Infinity;
+  while(remaining > 0){
+    var h = 0;
+    while(Math.pow(2, h + 2) - 1 <= remaining) h += 1;
+    if(h >= prevHeight) throw new MmrError("invalid MMR size (not a valid node count): " + size);
+    var mSize = Math.pow(2, h + 1) - 1;
+    offset += mSize;
+    result.push(offset - 1);
+    remaining -= mSize;
+    prevHeight = h;
+  }
+  return result;
+}
+
+function leafCountFromSize(size){
+  var pks = peaks(size), total = 0;
+  for(var i = 0; i < pks.length; i++) total += Math.pow(2, heightAt(pks[i]));
+  return total;
+}
+
+function leafIndexToPos(leafIndex){
+  requireNonNegInt(leafIndex, "leaf_index");
+  var pos = nodeCount(leafIndex);
+  if(pos >= MAX_MMR_SIZE) throw new MmrError("leaf_index too large: " + leafIndex);
+  return pos;
+}
+
+function findContainingPeak(pos, peakPositions){
+  for(var i = 0; i < peakPositions.length; i++){
+    var peakPos = peakPositions[i];
+    var h = heightAt(peakPos);
+    var mSize = Math.pow(2, h + 1) - 1;
+    var start = peakPos - mSize + 1;
+    if(start <= pos && pos <= peakPos) return i;
+  }
+  return -1;
+}
+
+/* Bottom-up sibling path from targetPos up to (but excluding) the mountain
+ * root at rootPos (height `height`). Mirrors core.py's _locate_path. */
+function locatePath(rootPos, height, targetPos){
+  var topDown = [];
+  var curRoot = rootPos, curHeight = height;
+  while(curHeight > 0 && curRoot !== targetPos){
+    var parentPos = curRoot;
+    var leftSize = Math.pow(2, curHeight) - 1;
+    var leftChildRoot = curRoot - leftSize - 1;
+    var rightChildRoot = curRoot - 1;
+    var step;
+    if(targetPos <= leftChildRoot){
+      step = {siblingPos: rightChildRoot, targetIsRight: false, parentPos: parentPos};
+      curRoot = leftChildRoot;
+    }else{
+      step = {siblingPos: leftChildRoot, targetIsRight: true, parentPos: parentPos};
+      curRoot = rightChildRoot;
+    }
+    topDown.push(step);
+    curHeight -= 1;
+  }
+  topDown.reverse();
+  return topDown;
+}
+
+/* Pure, total-order-stable inclusion verification. Never throws -- any
+ * malformed input resolves to false. */
+async function verifyInclusion(rootHex, size, leafIndex, bodyDigestHex, proof){
+  try{
+    var root = hexToBytes(rootHex);
+    var bodyDigest = hexToBytes(bodyDigestHex);
+    assertDigest(root, "root");
+    assertDigest(bodyDigest, "body_digest");
+    if(!proof || proof.v !== 1 || proof.kind !== "inclusion") return false;
+    if(proof.size !== size || proof.leaf_index !== leafIndex) return false;
+    if(!isNonNegInt(size) || size >= MAX_MMR_SIZE) return false;
+    if(!isNonNegInt(leafIndex)) return false;
+    if(!Array.isArray(proof.witness) || !Array.isArray(proof.peaks_left) || !Array.isArray(proof.peaks_right)){
+      return false;
+    }
+
+    var lc = leafCountFromSize(size);
+    if(leafIndex >= lc) return false;
+
+    var leafPos = leafIndexToPos(leafIndex);
+    var pks = peaks(size);
+    var peakIdx = findContainingPeak(leafPos, pks);
+    if(peakIdx === -1) return false;
+
+    var peakPos = pks[peakIdx];
+    var peakHeight = heightAt(peakPos);
+    var path = locatePath(peakPos, peakHeight, leafPos);
+
+    if(proof.witness.length !== path.length) return false;
+    if(proof.peaks_left.length !== peakIdx) return false;
+    if(proof.peaks_right.length !== pks.length - peakIdx - 1) return false;
+
+    var witnessBytes = proof.witness.map(parseDigestHex);
+    var peaksLeftBytes = proof.peaks_left.map(parseDigestHex);
+    var peaksRightBytes = proof.peaks_right.map(parseDigestHex);
+
+    var acc = await leafHash(bodyDigest);
+    for(var i = 0; i < path.length; i++){
+      var step = path[i], sib = witnessBytes[i];
+      acc = step.targetIsRight
+        ? await interiorHash(sib, acc, step.parentPos)
+        : await interiorHash(acc, sib, step.parentPos);
+    }
+
+    var allPeaks = peaksLeftBytes.concat([acc]).concat(peaksRightBytes);
+    var computedRoot = await rootFromPeaks(allPeaks);
+    return bytesEqual(computedRoot, root);
+  }catch(e){
+    return false;
+  }
+}
+
+/* Pure consistency verification. Never throws. */
+async function verifyConsistency(rootAHex, sizeA, rootBHex, sizeB, proof){
+  try{
+    var rootA = hexToBytes(rootAHex);
+    var rootB = hexToBytes(rootBHex);
+    assertDigest(rootA, "root_a");
+    assertDigest(rootB, "root_b");
+    if(!proof || proof.v !== 1 || proof.kind !== "consistency") return false;
+    if(proof.size_a !== sizeA || proof.size_b !== sizeB) return false;
+    if(!isNonNegInt(sizeA)) return false;
+    if(!isNonNegInt(sizeB) || sizeB < sizeA) return false;
+    if(!Array.isArray(proof.old_peaks) || !Array.isArray(proof.new_peaks) || !Array.isArray(proof.witness)){
+      return false;
+    }
+
+    var oldPeakPositions = peaks(sizeA);
+    var newPeakPositions = peaks(sizeB);
+
+    if(proof.old_peaks.length !== oldPeakPositions.length) return false;
+    if(proof.new_peaks.length !== newPeakPositions.length) return false;
+    if(proof.witness.length !== oldPeakPositions.length) return false;
+
+    var oldPeaksBytes = proof.old_peaks.map(parseDigestHex);
+    var newPeaksBytes = proof.new_peaks.map(parseDigestHex);
+
+    var computedRootA = await rootFromPeaks(oldPeaksBytes);
+    if(!bytesEqual(computedRootA, rootA)) return false;
+    var computedRootB = await rootFromPeaks(newPeaksBytes);
+    if(!bytesEqual(computedRootB, rootB)) return false;
+
+    for(var i = 0; i < oldPeakPositions.length; i++){
+      var p = oldPeakPositions[i];
+      var containingIdx = findContainingPeak(p, newPeakPositions);
+      if(containingIdx === -1) return false;
+
+      var newPeakPos = newPeakPositions[containingIdx];
+      var newPeakHeight = heightAt(newPeakPos);
+      var path = locatePath(newPeakPos, newPeakHeight, p);
+
+      var w = proof.witness[i];
+      if(!Array.isArray(w) || w.length !== path.length) return false;
+      var wBytes = w.map(parseDigestHex);
+
+      var acc = oldPeaksBytes[i];
+      for(var j = 0; j < path.length; j++){
+        var step = path[j], sib = wBytes[j];
+        acc = step.targetIsRight
+          ? await interiorHash(sib, acc, step.parentPos)
+          : await interiorHash(acc, sib, step.parentPos);
+      }
+      if(!bytesEqual(acc, newPeaksBytes[containingIdx])) return false;
+    }
+
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
+return {
+  DIGEST_LEN: DIGEST_LEN,
+  MAX_MMR_SIZE: MAX_MMR_SIZE,
+  hexToBytes: hexToBytes,
+  bytesToHex: bytesToHex,
+  leafHash: leafHash,
+  interiorHash: interiorHash,
+  rootFromPeaks: rootFromPeaks,
+  heightAt: heightAt,
+  nodeCount: nodeCount,
+  peaks: peaks,
+  leafCountFromSize: leafCountFromSize,
+  leafIndexToPos: leafIndexToPos,
+  verifyInclusion: verifyInclusion,
+  verifyConsistency: verifyConsistency
+};
+})();
+if(typeof globalThis !== "undefined"){ globalThis.MMR = MMR; }
+"""
+
+
+#: Extra CSS for the bundle page — reuses _PAGE_CSS's variables and
+#: _CAPSULE_CSS's .ritual-stages/.records-table/.pltable/.anchor-banner
+#: classes (same visual language as the single-capsule verify page).
+_BUNDLE_CSS = """
+.share-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.share-row .mono{font-size:11.5px;color:var(--muted);word-break:break-all}
+.share-row .btnrow{display:flex;gap:10px;flex-shrink:0}
+.completeness-card{border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin-bottom:20px}
+.completeness-card.status-pass{background:var(--pass-soft);border-color:var(--pass)}
+.completeness-card.status-fail{background:var(--fail-soft);border-color:var(--fail)}
+.completeness-card.status-skip{background:var(--paper-2);color:var(--muted)}
+.completeness-title{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px}
+.completeness-card.status-pass .completeness-title{color:var(--pass)}
+.completeness-card.status-fail .completeness-title{color:var(--fail)}
+.completeness-card.status-skip .completeness-title{color:var(--muted)}
+.completeness-detail{font-size:13.5px;color:var(--ink)}
+.bundle-empty{border:1px dashed var(--line);border-radius:12px;padding:28px;text-align:center;color:var(--muted);font-size:14px;margin-bottom:20px}
+"""
+
+#: Bundle-viewer client controller — served at ``/static/bundle.js``.
+#:
+#: This is the "Bundle-open page" from the task: a recipient-side viewer for
+#: ``capsule bundle`` output (capsule-ledger's ``asg_ledger/cli/bundle_cmd.py``).
+#: Bundle JSON travels in the URL fragment only (never sent to this server —
+#: see ``render_bundle_page``); the offline single-file mode inlines the same
+#: data as ``window.__BUNDLE_FRAGMENT_B64U__`` instead of a URL fragment (a
+#: downloaded file has no server to carry a fragment to, but the file itself
+#: can still embed one) — either way this script never performs a network
+#: request with bundle content in it.
+#:
+#: ``isH64``/``sh``/``safe``/``KNOWN_TYPES``/``parseAac``/``_capMismatched``/
+#: ``findChainGaps``/``annotateRecords`` below are a **verbatim port** of the
+#: same-named functions in ``CAPSULE_JS`` (the existing single-capsule verify
+#: page) — copied, not reinvented, because a ledger bundle's ``records`` are
+#: the exact same AAC capsule shape ``CAPSULE_JS`` already parses structurally
+#: (digest recompute, chain-gap detection). ``tests/test_capsule_view.py``'s
+#: ``test_bundle_js_shared_helpers_match_capsule_js`` pins byte-for-byte
+#: equality against ``CAPSULE_JS`` so this can never silently drift.
+#:
+#: The completeness certificate check (``checkCompleteness``) is new: it
+#: verifies a bundle's MMR range/consistency proof (if present) via
+#: ``MMR.verifyInclusion``/``MMR.verifyConsistency`` from ``mmr.js`` — see
+#: the completeness_certificate schema comment below.
+BUNDLE_JS = r"""
+/* === PORTED FROM CAPSULE_JS (verbatim) — see test_bundle_js_shared_helpers_match_capsule_js === */
+var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
+  "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1,
+  "agent_input":1,"agent_output":1};
+function isH64(s){return typeof s==="string"&&s.length===64&&/^[0-9a-f]+$/i.test(s);}
+function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
+function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function parseAac(data){
+  var nodes=[],edges=[],privlog=[],unk=[],seen={};
+  var isB=!!(data.buyer_capsule&&data.seller_capsule);
+
+  function addN(id,type,label,withheld,payload){
+    if(seen[id])return false;seen[id]=true;
+    var k=!!KNOWN_TYPES[type];
+    if(!k&&unk.indexOf(type)<0)unk.push(type);
+    nodes.push({id:id,type:type,label:label,digest:id,isKnown:k,withheld:withheld!==false,payload:payload||null});
+    return true;
+  }
+  function addArt(digest,type,label,ctx){
+    if(!isH64(digest)||!addN(digest,type,label,true,null))return;
+    privlog.push({id:label,type:type,digest:digest,withheld:true,isKnown:!!KNOWN_TYPES[type],matchOk:null,ctx:ctx});
+  }
+  function addEdge(f,t,lbl){
+    var k="_e_"+f+"_"+t+"_"+lbl;if(seen[k])return;seen[k]=true;
+    edges.push({from:f,to:t,label:lbl});
+  }
+  function extractCap(cap,capId,pfx){
+    var p=pfx?pfx+".":"";
+    var chain=cap.chain||{};
+    var prior=chain.parent_capsule_id||"";
+    if(isH64(prior)&&addN(prior,"capsule","prior capsule "+sh(prior),false,null))
+      addEdge(capId,prior,"chains_to");
+    var ma=cap.model_attestation||{},ca=ma.compute_attestation||{},subj=ca.subject_digest||"";
+    if(isH64(subj)){addArt(subj,"subject","subject",p+"compute_attestation.subject_digest");addEdge(capId,subj,"attests_over");}
+    var _actxW=p+"compute_attestation — payload not carried in the record";
+    var _actxR="payload carried in fragment; recomputed against committed digest";
+    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input,aiRev=aiPre!=null;
+    if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),!aiRev,aiRev?aiPre:null)){
+      privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:!aiRev,isKnown:true,matchOk:null,
+                    ctx:aiRev?_actxR:_actxW,_revPayload:aiRev?aiPre:null});addEdge(capId,ai,"attests_over");}
+    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output,aoRev=aoPre!=null;
+    if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),!aoRev,aoRev?aoPre:null)){
+      privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:!aoRev,isKnown:true,matchOk:null,
+                    ctx:aoRev?_actxR:_actxW,_revPayload:aoRev?aoPre:null});addEdge(capId,ao,"attests_over");}
+    var eff=cap.effect||{},resp=eff.response_digest||"";
+    if(isH64(resp)){addArt(resp,"response","response",p+"effect.response_digest");addEdge(capId,resp,"effect_response");}
+    (cap.constraints||[]).forEach(function(c){
+      var ev=c.evidence_digest||"",cid=c.id||"constraint";
+      if(isH64(ev)){addArt(ev,"wicket_manifest","manifest ["+cid+"]",p+"constraints["+cid+"].evidence_digest");addEdge(capId,ev,"commits_to");}
+    });
+  }
+
+  if(isB){
+    var bc=data.buyer_capsule||{},sc=data.seller_capsule||{};
+    var bid=bc.capsule_id||"",sid=sc.capsule_id||"",sth=data.sealed_terms_hash||"",terms=data.terms;
+    if(isH64(bid))addN(bid,"capsule","buyer capsule "+sh(bid),false,null);
+    if(isH64(sid))addN(sid,"capsule","seller capsule "+sh(sid),false,null);
+    if(isH64(sth)){
+      var rev=terms!=null;
+      addN(sth,"offer_terms","offer terms "+sh(sth),!rev,rev?terms:null);
+      privlog.push({id:"sealed_terms_hash",type:"offer_terms",digest:sth,withheld:!rev,
+                    isKnown:true,matchOk:null,ctx:"binding.sealed_terms_hash",_revPayload:rev?terms:null});
+      if(isH64(bid))addEdge(bid,sth,"attests_over");
+      if(isH64(sid))addEdge(sid,sth,"attests_over");
+    }
+    if(isH64(bid)&&isH64(sid))addEdge(sid,bid,"chains_to");
+    if(isH64(bid))extractCap(bc,bid,"buyer");
+    if(isH64(sid))extractCap(sc,sid,"seller");
+  }else{
+    var cid=data.capsule_id||"";
+    if(isH64(cid)){addN(cid,"capsule","capsule "+sh(cid),false,null);extractCap(data,cid,"");}
+  }
+  return{nodes:nodes,edges:edges,privlog:privlog,unk:unk,isB:isB};
+}
+
+function _capMismatched(cap){
+  var g=parseAac(cap);
+  return g.privlog.some(function(e){return e.matchOk===false;});
+}
+
+function findChainGaps(capsules){
+  var ids={};
+  capsules.forEach(function(c){if(isH64(c.capsule_id))ids[c.capsule_id]=true;});
+  var gaps=[];
+  for(var i=1;i<capsules.length;i++){
+    var parent=((capsules[i].chain)||{}).parent_capsule_id||"";
+    if(isH64(parent)&&!ids[parent])gaps.push({beforeIdx:i-1,afterIdx:i,missingParent:parent});
+  }
+  return gaps;
+}
+
+function annotateRecords(capsules){
+  var alteredIds={};
+  capsules.forEach(function(c){if(isH64(c.capsule_id)&&_capMismatched(c))alteredIds[c.capsule_id]=true;});
+  var byId={};
+  capsules.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
+  return capsules.map(function(cap){
+    var cid=cap.capsule_id||"";
+    if(alteredIds[cid])return{note:"digest_mismatch",isAltered:true,citesAltered:false};
+    var cites=false,seen={},cur=cap;
+    while(true){
+      var parent=((cur.chain)||{}).parent_capsule_id||"";
+      if(!isH64(parent)||seen[parent])break;
+      seen[parent]=true;
+      if(alteredIds[parent]){cites=true;break;}
+      cur=byId[parent];if(!cur)break;
+    }
+    return{note:cites?"cites an altered record":"verifies",isAltered:false,citesAltered:cites};
+  });
+}
+/* === END PORTED FROM CAPSULE_JS === */
+
+/* Everything from here down to the render/DOM section is pure (no
+ * document/window access) and directly callable from a Node harness --
+ * see tests/js_harness_bundle.mjs / tests/test_bundle_page.py. */
+
+/* ---------- base64url fragment codec ----------
+ * capsule-ledger's `capsule bundle` encodes the fragment as
+ * base64.urlsafe_b64encode(json.dumps(bundle, separators=(",",":"), sort_keys=True)).rstrip("=")
+ * -- URL-safe alphabet, no padding. Not the same alphabet plain atob/btoa use,
+ * so this is decoded/encoded explicitly rather than reusing capsule.js's
+ * plain-base64 helpers. */
+function b64uToStd(s){return s.replace(/-/g,"+").replace(/_/g,"/");}
+function stdToB64u(s){return s.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");}
+function decodeFragment(hash){
+  var std=b64uToStd(hash);
+  var pad=std.length%4; if(pad)std+="=".repeat(4-pad);
+  var bin=atob(std);
+  var bytes=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return JSON.parse(new TextDecoder("utf-8").decode(bytes));
+}
+function encodeFragment(obj){
+  var bytes=new TextEncoder().encode(JSON.stringify(obj));
+  var bin="";
+  for(var i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);
+  return stdToB64u(btoa(bin));
+}
+
+/* ---------- completeness certificate ----------
+ * Optional bundle field this viewer knows how to check (capsule-ledger's
+ * `capsule bundle` does not populate it yet as of this viewer shipping --
+ * a bundle without one is handled honestly as "not available", never a
+ * fabricated pass. Schema, mirroring asg_ledger.mmr.index.MmrLedger's own
+ * RangeProof/ConsistencyProof shapes 1:1 so a future capsule-ledger CLI
+ * change can populate it directly from that module's own output:
+ *
+ * completeness_certificate: {
+ *   v: 1,
+ *   range_proof: {from_seq, to_seq, size, inclusion_from: <InclusionProof>, inclusion_to: <InclusionProof>},
+ *   range_root: "<hex>",         // MMR root at `range_proof.size` (the tree as it stood right after to_seq)
+ *   checkpoint_size: <int>,      // MMR node_count(checkpoint.tree_size); omitted/equal to range_proof.size if no growth since
+ *   checkpoint_root: "<hex>",    // MMR root at checkpoint_size
+ *   consistency_proof: <ConsistencyProof> | null   // bridges range_root/size -> checkpoint_root/size; null if they coincide
+ * }
+ *
+ * Each <InclusionProof>/<ConsistencyProof> is exactly the JSON shape
+ * asg_ledger.mmr.core's dataclasses serialize to (v, kind, size, leaf_index,
+ * witness, peaks_left, peaks_right / v, kind, size_a, size_b, old_peaks,
+ * witness, new_peaks) -- see mmr.js's verifyInclusion/verifyConsistency.
+ * Boundary leaf body digests are the bundle's own first/last record
+ * capsule_id (hex) -- MmrLedger indexes leaf i's body_digest as
+ * bytes.fromhex(record.capsule_id), so no extra data is needed beyond what
+ * bundle.records already carries. */
+async function checkCompleteness(bundle){
+  var cc=bundle.completeness_certificate;
+  var records=bundle.records||[];
+  if(!records.length)return{status:"skip",detail:"empty bundle — nothing to certify"};
+  if(!cc){
+    return{status:"skip",detail:"no completeness certificate in this bundle — the claimed record "+
+      "range and checkpoint are producer-asserted only, not cryptographically proven here. "+
+      "Every capsule that IS present still verifies on its own (see Integrity, above)."};
+  }
+  try{
+    var rp=cc.range_proof;
+    if(!rp||!rp.inclusion_from||!rp.inclusion_to)return{status:"fail",detail:"malformed completeness certificate: missing range_proof"};
+    var fromRec=records[0],toRec=records[records.length-1];
+    var okFrom=await MMR.verifyInclusion(cc.range_root,rp.size,rp.inclusion_from.leaf_index,fromRec.capsule_id,rp.inclusion_from);
+    var okTo=await MMR.verifyInclusion(cc.range_root,rp.size,rp.inclusion_to.leaf_index,toRec.capsule_id,rp.inclusion_to);
+    if(!okFrom||!okTo){
+      return{status:"fail",detail:"range boundary inclusion proof did not verify — this bundle's "+
+        "claimed record range is not provably complete against its cited root"};
+    }
+    if(cc.consistency_proof){
+      var okC=await MMR.verifyConsistency(cc.range_root,rp.size,cc.checkpoint_root,cc.checkpoint_size,cc.consistency_proof);
+      if(!okC){
+        return{status:"fail",detail:"checkpoint consistency proof did not verify — the cited checkpoint "+
+          "does not provably extend this range's root"};
+      }
+    }
+    var ckpt=bundle.checkpoint||{};
+    return{status:"pass",detail:"records "+rp.from_seq+"–"+rp.to_seq+" are provably complete under root "+
+      cc.range_root.slice(0,12)+"…"+(cc.consistency_proof?(" · extends to checkpoint #"+(ckpt.tree_size!=null?ckpt.tree_size:cc.checkpoint_size)):"")};
+  }catch(e){
+    return{status:"fail",detail:"completeness certificate malformed or unverifiable: "+e.message};
+  }
+}
+
+/* ---------- authoritative digest verification (async — crypto.subtle) ----------
+ * parseAac's privlog entries carry matchOk:null until a REVEALED field's
+ * payload is actually hashed and compared against its committed digest.
+ * This is the single, awaited source of truth for that comparison — both
+ * the displayed privilege log (buildBundlePrivlog) and the verdict logic
+ * (crossCheckSelfReport, evaluateBundleRitual's Integrity stage) call this
+ * rather than each re-deriving (or worse, silently skipping) it. A prior
+ * version of this file computed the digest only inside the DOM-rendering
+ * path — after the ritual/cross-check verdicts had already been decided —
+ * so a genuine digest mismatch could never flip either verdict. Fixed here:
+ * a verification check that can't reject anything isn't a check. */
+async function verifyCapsuleDigests(cap){
+  var g=parseAac(cap);
+  if(typeof crypto==="undefined"||!crypto.subtle)return g;  // no WebCrypto: leave matchOk null (skip, not a fabricated pass)
+  for(var i=0;i<g.privlog.length;i++){
+    var e=g.privlog[i];
+    if(e.withheld||e._revPayload==null)continue;
+    var bytes=typeof e._revPayload==="string"
+      ?new TextEncoder().encode(e._revPayload)
+      :new TextEncoder().encode(JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort()));
+    var buf=await crypto.subtle.digest("SHA-256",bytes);
+    var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
+    e.matchOk=(hex===e.digest);
+  }
+  return g;
+}
+
+/* ---------- cross-check against the bundle's own self-reported verification ----------
+ * capsule-ledger's `capsule bundle` already runs each capsule through its own
+ * structural verifier (agent_action_capsule.verify) and embeds the verdict
+ * in bundle.verification[capsule_id] -- but a recipient should never just
+ * trust a producer's self-report. This cross-checks it against OUR OWN
+ * independent digest recompute (verifyCapsuleDigests, above) and flags any
+ * disagreement as its own finding, rather than silently preferring either
+ * source. */
+async function crossCheckSelfReport(bundle,records){
+  var selfReport=bundle.verification||{};
+  var disagreements=[];
+  for(var idx=0;idx<records.length;idx++){
+    var cap=records[idx];
+    var cid=cap.capsule_id;
+    if(!isH64(cid))continue;
+    var g=await verifyCapsuleDigests(cap);
+    var ours=!g.privlog.some(function(e){return e.matchOk===false;});
+    var reported=selfReport[cid];
+    if(reported&&typeof reported.ok==="boolean"&&reported.ok!==ours){
+      disagreements.push({capsule_id:cid,ours:ours,reported:reported.ok});
+    }
+  }
+  if(!disagreements.length){
+    var n=Object.keys(selfReport).length;
+    return{status:"pass",detail:n?("producer self-report agrees with independent recompute for all "+n+" record(s)"):"no producer self-report present; independent recompute is the only signal (see Integrity)"};
+  }
+  return{status:"fail",detail:disagreements.length+" record(s) where the producer's self-reported verdict "+
+    "disagrees with this viewer's own independent recompute — trust the recompute, investigate the bundle"};
+}
+
+/* ---------- ritual: Integrity / Sequence / Completeness / Cross-check ---------- */
+async function evaluateBundleRitual(records,completeness,crossCheck){
+  var stages=[],finding=null;
+  var alteredIds={},firstMismatch=null;
+  for(var idx=0;idx<records.length;idx++){
+    var c=records[idx];
+    if(!isH64(c.capsule_id))continue;
+    var g=await verifyCapsuleDigests(c);
+    var bad=g.privlog.filter(function(e){return e.matchOk===false;});
+    if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch)firstMismatch=bad[0];}
+  }
+  if(Object.keys(alteredIds).length){
+    stages.push({name:"Integrity",status:"fail",
+      detail:"record fails at stage digest_mismatch — "+firstMismatch.ctx+" no longer matches its fingerprint"});
+    finding={label:"The finding",
+      text:firstMismatch.id+" ("+firstMismatch.ctx+") is not the value that was sealed.",
+      meta:"failed stage: digest_mismatch · field group: "+firstMismatch.ctx+" · digest "+firstMismatch.digest.slice(0,8)+"…"};
+  }else{
+    stages.push({name:"Integrity",status:"pass",detail:"every record matches its fingerprint"});
+  }
+
+  var gaps=findChainGaps(records);
+  if(gaps.length){
+    var g0=gaps[0];
+    stages.push({name:"Sequence",status:"fail",
+      detail:"gap between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" — record "+(g0.afterIdx+1)+" names a parent that is not here"});
+    if(!finding){
+      finding={label:"The finding",
+        text:"Whatever sits between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" is not in this bundle.",
+        meta:"failed stage: chain_gap · missing parent "+g0.missingParent.slice(0,8)+"…"};
+    }
+  }else{
+    stages.push({name:"Sequence",status:"pass",detail:"unbroken — every record names the one before it, or nothing"});
+  }
+
+  stages.push({name:"Completeness",status:completeness.status,detail:completeness.detail});
+  stages.push({name:"Cross-check",status:crossCheck.status,detail:crossCheck.detail});
+
+  return{stages:stages,finding:finding};
+}
+
+/* ---------- privilege log (aggregated across every record) ----------
+ * Awaits verifyCapsuleDigests per record first, so every REVEALED row's
+ * matchOk is already resolved true/false by the time this returns — the
+ * displayed log and the ritual/cross-check verdicts read the same, single
+ * digest-verification pass, never two independent (and divergent) ones. */
+async function buildBundlePrivlog(records){
+  var rows=[];
+  for(var i=0;i<records.length;i++){
+    var g=await verifyCapsuleDigests(records[i]);
+    g.privlog.forEach(function(e){
+      rows.push({record_index:i,capsule_id:records[i].capsule_id||"",entry:e});
+    });
+  }
+  return rows;
+}
+
+/* ---------- render/DOM section: everything below touches document/window --------- */
+(function(){"use strict";
+
+function $(id){return document.getElementById(id);}
+
+function renderPrivlog(rows){
+  var el=$("privlogContent");if(!el)return;
+  if(!rows.length){el.innerHTML="<p style='color:var(--muted);font-size:13px'>No committed artifacts found across these records.</p>";return;}
+  var h="<table class='pltable'><thead><tr><th>#</th><th>artifact</th><th>type</th><th>digest</th><th>status</th><th>context</th></tr></thead><tbody>";
+  rows.forEach(function(r,idx){
+    var e=r.entry;
+    var st=e.withheld?"<span class='pl-withheld'>WITHHELD</span>":
+            e.matchOk===true?"<span class='pl-match'>REVEALED · ✓ match</span>":
+            e.matchOk===false?"<span class='pl-mismatch'>REVEALED · ✗ MISMATCH</span>":
+            "<span class='pl-revealed'>REVEALED</span>";
+    h+="<tr data-idx='"+idx+"' data-dig='"+safe(e.digest)+"'><td>"+(r.record_index+1)+"</td><td>"+safe(e.id)+"</td>"+
+      "<td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>"+
+      "<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td class='pl-st'>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
+  });
+  h+="</tbody></table>";
+  el.innerHTML=h;
+  $("privlogSection").style.display="block";
+  // matchOk is already resolved (buildBundlePrivlog awaits
+  // verifyCapsuleDigests before this is called) -- no second, independent
+  // digest pass here; the table above already reflects the real verdict.
+}
+
+function renderRecordsTable(records){
+  var el=$("recordsTableContent");if(!el)return;
+  var notes=annotateRecords(records);
+  var gaps=findChainGaps(records),gapAt={};
+  gaps.forEach(function(g){gapAt[g.afterIdx]=g;});
+  var h="<table class='records-table'><thead><tr><th>#</th><th>capsule_id</th><th>action_type</th><th>note</th></tr></thead><tbody>";
+  records.forEach(function(cap,i){
+    if(gapAt[i]){
+      var gp=gapAt[i];
+      h+="<tr class='rec-row rec-gap'><td>—</td><td colspan='2'>gap — missing parent <code>"+safe(gp.missingParent.slice(0,8))+"…</code></td><td>⌗ chain_gap</td></tr>";
+    }
+    var n=notes[i];
+    var noteText=n.note==="digest_mismatch"?"✕ digest_mismatch":
+      n.note==="cites an altered record"?"✓ verifies · cites an altered record":"✓ verifies";
+    h+="<tr class='rec-row"+(n.isAltered?" rec-altered":(n.citesAltered?" rec-flagged":""))+"'>"+
+      "<td>"+(i+1)+"</td><td><code>"+safe((cap.capsule_id||"").slice(0,16))+"…</code></td>"+
+      "<td><code>"+safe(cap.action_type||"")+"</code></td><td>"+noteText+"</td></tr>";
+  });
+  h+="</tbody></table>";
+  el.innerHTML=h;
+}
+
+function renderRitual(summary){
+  var mount=$("ritualMount");if(!mount)return;
+  var marks={pass:"✓",fail:"✕",skip:"–"};
+  var h="<div class='ritual-stages'>";
+  summary.stages.forEach(function(s){
+    h+="<div class='ritual-stage ritual-"+s.status+"'><span class='ritual-mark'>"+marks[s.status]+"</span>"+
+      "<span class='ritual-name'>"+safe(s.name)+"</span><span class='ritual-detail'>"+safe(s.detail)+"</span></div>";
+  });
+  h+="</div>";
+  if(summary.finding){
+    var f=summary.finding;
+    h+="<div class='finding-panel finding-fail'><div class='finding-label'>"+safe(f.label)+"</div>"+
+      "<p class='finding-text'>"+safe(f.text)+"</p><div class='finding-meta'>"+safe(f.meta)+"</div></div>";
+  }
+  mount.innerHTML=h;
+}
+
+function renderCompletenessCard(c){
+  var mount=$("completenessMount");if(!mount)return;
+  var label=c.status==="pass"?"Completeness — verified":c.status==="fail"?"Completeness — FAILED":"Completeness — not available";
+  mount.innerHTML="<div class='completeness-card status-"+c.status+"'><div class='completeness-title'>"+safe(label)+
+    "</div><div class='completeness-detail'>"+safe(c.detail)+"</div></div>";
+}
+
+/* ---------- load + permalink + offline download ---------- */
+var _bundleData=null,_fragmentB64u=null;
+
+function permalinkBase(){
+  if(location.protocol==="file:"||location.protocol==="blob:")return "https://verify.agentactioncapsule.org/bundle";
+  return location.origin+location.pathname;
+}
+
+async function loadBundle(data,fragmentB64u){
+  _bundleData=data;
+  _fragmentB64u=fragmentB64u||encodeFragment(data);
+  var records=data.records||[];
+  var range=data.range||[0,-1];
+  var ckpt=data.checkpoint||{};
+
+  $("emptyState")&&($("emptyState").style.display="none");
+  $("pasteSection")&&($("pasteSection").style.display="none");
+
+  var summaryEl=$("bundleSummary");
+  if(summaryEl){
+    summaryEl.textContent=records.length+" record(s) · range "+range[0]+"–"+range[1]+
+      " · checkpoint #"+(ckpt.tree_size!=null?ckpt.tree_size:"?");
+  }
+  var permalinkEl=$("permalinkText");
+  if(permalinkEl)permalinkEl.textContent=permalinkBase()+"#"+_fragmentB64u.slice(0,24)+"…";
+  var dl=$("downloadBtn");if(dl){dl.disabled=false;dl.style.opacity="1";}
+  var cp=$("copyLinkBtn");if(cp){cp.disabled=false;cp.style.opacity="1";}
+
+  var privlog=await buildBundlePrivlog(records);
+  renderPrivlog(privlog);
+  renderRecordsTable(records);
+
+  var completeness=await checkCompleteness(data);
+  renderCompletenessCard(completeness);
+  var crossCheck=await crossCheckSelfReport(data,records);
+  var ritual=await evaluateBundleRitual(records,completeness,crossCheck);
+  renderRitual(ritual);
+
+  try{ history.replaceState(null,"",location.pathname+location.search+"#"+_fragmentB64u); }catch(ex){}
+}
+
+function bootstrapLoad(){
+  if(typeof window!=="undefined"&&window.__BUNDLE_FRAGMENT_B64U__&&window.__BUNDLE_FRAGMENT_B64U__!=="@@BUNDLE_FRAGMENT@@"){
+    try{
+      var frag=window.__BUNDLE_FRAGMENT_B64U__;
+      loadBundle(decodeFragment(frag),frag);
+      return;
+    }catch(ex){ $("parseErr")&&($("parseErr").textContent="Embedded bundle decode error: "+ex.message); }
+  }
+  var hash=location.hash.slice(1);
+  if(hash){
+    try{ loadBundle(decodeFragment(hash),hash); return; }
+    catch(ex){ $("parseErr")&&($("parseErr").textContent="Fragment decode error: "+ex.message); }
+  }
+  $("emptyState")&&($("emptyState").style.display="block");
+}
+
+$("loadBtn")&&$("loadBtn").addEventListener("click",function(){
+  var txt=$("bundleJson").value.trim();
+  try{ loadBundle(JSON.parse(txt)); }
+  catch(ex){ $("parseErr").textContent="JSON error: "+ex.message; }
+});
+
+$("copyLinkBtn")&&$("copyLinkBtn").addEventListener("click",function(){
+  if(!_fragmentB64u||!navigator.clipboard)return;
+  navigator.clipboard.writeText(permalinkBase()+"#"+_fragmentB64u).then(function(){
+    var b=$("copyLinkBtn");var old=b.textContent;b.textContent="Copied!";setTimeout(function(){b.textContent=old;},2000);
+  });
+});
+
+$("downloadBtn")&&$("downloadBtn").addEventListener("click",function(){
+  if(!_fragmentB64u)return;
+  fetch("/bundle/offline-shell").then(function(r){return r.text();}).then(function(html){
+    var out=html.replace("@@BUNDLE_FRAGMENT@@",_fragmentB64u);
+    var blob=new Blob([out],{type:"text/html"});
+    var a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="bundle-viewer.html";
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }).catch(function(){
+    var b=$("downloadBtn");if(b){var old=b.textContent;b.textContent="Offline copy unavailable";setTimeout(function(){b.textContent=old;},2500);}
+  });
+});
+
+bootstrapLoad();
+})();
+"""
+
+
 def _referrer_domain(referer: str) -> str | None:
     """Extract eTLD+1 from Referer header; None for same-origin/missing."""
     if not referer:
@@ -1731,6 +2607,196 @@ def render_landing_page() -> str:
 """
 
 
+#: Token replaced client-side (``BUNDLE_JS``'s download button) or by a
+#: future producer-side embed (capsule-ledger's planned ``--with-viewer``
+#: flag — see the PR description) with the real base64url bundle fragment.
+#: Chosen with an ``@`` so it can never collide with real base64url content.
+_BUNDLE_FRAGMENT_PLACEHOLDER = "@@BUNDLE_FRAGMENT@@"
+
+
+def _bundle_page_body(*, embed_placeholder: bool) -> str:
+    """The DOM shared by both delivery modes of the bundle-open page —
+    ``render_bundle_page``'s hosted mode (``GET /bundle``, script src tags,
+    loads from the URL fragment) and its offline mode (``GET
+    /bundle/offline-shell``, JS inlined, loads from an embedded fragment).
+    Carries no bundle data either way — ``BUNDLE_JS`` fills everything in
+    client-side from whichever source it finds (embedded global, else
+    ``location.hash``); this function never receives or touches bundle bytes.
+    """
+    embed_script = (
+        f'<script>window.__BUNDLE_FRAGMENT_B64U__={json.dumps(_BUNDLE_FRAGMENT_PLACEHOLDER)};</script>\n'
+        if embed_placeholder
+        else ""
+    )
+    return f"""{embed_script}<nav>
+  <div class="nav-in">
+    <a class="brand" href="https://agentactioncapsule.org">
+      <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
+    </a>
+    <div class="nav-links">
+      <a href="https://agentactioncapsule.org">Standard</a>
+      <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+      <a href="/">Verifier</a>
+      <a href="/bundle" class="active">Bundle</a>
+      <a href="https://agentactioncapsule.org/docs/">Docs</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap" style="padding:32px 0 16px">
+  <div class="pill">ledger bundle · completeness certificate</div>
+  <h1 style="margin-top:12px">Ledger bundle verifier</h1>
+  <p class="mono" id="bundleSummary" style="font-size:13px;color:var(--muted);margin-top:6px">No bundle loaded yet.</p>
+</div>
+
+<div class="wrap">
+  <div class="share-row">
+    <span class="mono" id="permalinkText">(open a bundle to see its permalink)</span>
+    <span class="btnrow">
+      <button class="verify-btn" id="copyLinkBtn" disabled style="opacity:.5;padding:9px 16px;font-size:13px">Copy permalink</button>
+      <button class="verify-btn" id="downloadBtn" disabled style="opacity:.5;padding:9px 16px;font-size:13px">Download self-contained copy</button>
+    </span>
+  </div>
+</div>
+
+<div class="wrap" id="emptyState" style="display:none">
+  <div class="bundle-empty">No bundle data in this URL. Open the full shared link (the part after
+    <code class="mono">#</code>) that <code class="mono">capsule bundle</code> printed, or paste bundle
+    JSON below — this viewer never fetches bundle data from a server.</div>
+</div>
+
+<div class="wrap" id="completenessMount"></div>
+
+<section id="ritualSection" class="band" style="padding-top:16px">
+  <div class="wrap">
+    <div class="sec-eyebrow">Verification ritual</div>
+    <h2 class="sec-title">Integrity · Sequence · Completeness · Cross-check</h2>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
+      Failure is precise: the stage that failed is named, and everything that still verifies keeps its
+      verdict. A missing completeness certificate is reported honestly as unavailable, never as a pass.
+    </p>
+    <div id="ritualMount"></div>
+    <div style="margin-top:16px" id="recordsTableContent"></div>
+  </div>
+</section>
+
+<section id="privlogSection" class="band" style="display:none">
+  <div class="wrap">
+    <div class="sec-eyebrow">Privilege Log</div>
+    <h2 class="sec-title">Disclosed vs. withheld artifacts — all records</h2>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
+      WITHHELD = digest committed in the record; payload not provided here.<br>
+      REVEALED = payload provided; hash recomputed and checked against the committed digest.
+    </p>
+    <div id="privlogContent"></div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="sec-eyebrow">Bundle data</div>
+    <h2 class="sec-title">Paste bundle JSON to render</h2>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
+      The JSON goes into the URL fragment only — never sent to this server.
+    </p>
+    <div class="tool">
+      <div class="tool-body">
+        <div class="field">
+          <label>Bundle JSON <span class="opt">output of <code>capsule bundle</code></span></label>
+          <textarea id="bundleJson" style="min-height:120px"
+            placeholder='{{"bundle_version":"1","records":[...],"range":[1,4],"checkpoint":{{"tree_size":4}}}}'></textarea>
+        </div>
+        <p id="parseErr" style="color:var(--fail);font-family:var(--mono);font-size:12px;margin:8px 0;min-height:18px"></p>
+        <div class="actions">
+          <button class="verify-btn" id="loadBtn">Load bundle &#x2192;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-in">
+      <div class="foot-brand">
+        <a class="brand" href="https://agentactioncapsule.org">
+          <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
+        </a>
+        <p>Stateless public verification surface for capsule-ledger bundles.
+        Free and neutral for any capsule-ledger installation — self-hosted or hosted, no account, no gating.</p>
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <h5>Standard</h5>
+          <a href="https://agentactioncapsule.org">Overview</a>
+          <a href="https://agentactioncapsule.org/docs/">Docs</a>
+        </div>
+        <div class="foot-col">
+          <h5>Services</h5>
+          <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+          <a href="/">Verifier</a>
+        </div>
+        <div class="foot-col">
+          <h5>Privacy</h5>
+          <a href="{_esc(REPO_URL)}">Source &#x2197;</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-note">Stateless &#xb7; retains nothing &#xb7; Apache-2.0 &#xb7; Action State Group</div>
+  </div>
+</footer>"""
+
+
+def render_bundle_page(*, offline: bool = False) -> str:
+    """Return the HTML for the bundle-open page — the recipient-side viewer
+    for a ``capsule bundle`` export (capsule-ledger's
+    ``asg_ledger/cli/bundle_cmd.py``).
+
+    Two delivery modes, one codebase (this function, ``MMR_JS``, ``BUNDLE_JS``):
+
+    * ``offline=False`` — served at ``GET /bundle`` (the exact path
+      capsule-ledger's ``bundle_cmd.DEFAULT_VERIFY_BASE_URL`` points its
+      permalinks at). Scripts are ``<script src=...>`` tags so the page can
+      carry the same CSP (``script-src 'self'``, no ``unsafe-inline``) as
+      every other page this module serves. Loads bundle data from
+      ``location.hash`` only — the server never sees it (see
+      ``docs/hosted-verifier-design.md``'s stateless/payload-opaque design
+      constraints; this route reads no request body at all).
+    * ``offline=True`` — served at ``GET /bundle/offline-shell``: the exact
+      same DOM and JS, but inlined (no external requests at all, mirroring
+      capsule-ledger's own ``report/render.py`` zero-network HTML-shell
+      pattern) with a placeholder token in place of the fragment.
+      ``BUNDLE_JS``'s download button fetches this once, replaces the
+      placeholder with the currently-loaded bundle's fragment, and offers
+      it as a single self-contained downloadable file — no build step,
+      trivially embeddable by a future producer-side ``--with-viewer`` flag.
+    """
+    scripts = (
+        f"<script>{MMR_JS}</script>\n<script>{BUNDLE_JS}</script>"
+        if offline
+        else '<script src="/static/mmr.js"></script>\n<script src="/static/bundle.js"></script>'
+    )
+    body = _bundle_page_body(embed_placeholder=offline)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger bundle verifier — capsule-ledger</title>
+<style>
+{_PAGE_CSS}
+{_CAPSULE_CSS}
+{_BUNDLE_CSS}
+</style>
+</head>
+<body>
+{body}
+{scripts}
+</body>
+</html>
+"""
+
+
 def _b64(value: str) -> bytes:
     # Accept standard or URL-safe base64, with or without padding.
     s = value.strip()
@@ -1963,6 +3029,14 @@ def make_handler(verify_rpm: int | None = None):
                 self._send_js(200, VERIFY_JS)
             elif self.path == "/static/capsule.js":
                 self._send_js(200, CAPSULE_JS)
+            elif self.path == "/static/mmr.js":
+                self._send_js(200, MMR_JS)
+            elif self.path == "/static/bundle.js":
+                self._send_js(200, BUNDLE_JS)
+            elif self.path.rstrip("/") == "/bundle":
+                self._send_html(200, render_bundle_page())
+            elif self.path == "/bundle/offline-shell":
+                self._send_html(200, render_bundle_page(offline=True))
             elif self.path.rstrip("/") in ("", "/verify"):
                 # Browsers get the landing page (boundary table on the page
                 # itself); API clients get the same data as JSON.
@@ -2102,6 +3176,18 @@ def make_asgi_app(verify_rpm: int | None = None):
         if method == "GET" and path == "/static/capsule.js":
             await send_js(200, CAPSULE_JS)
             return
+        if method == "GET" and path == "/static/mmr.js":
+            await send_js(200, MMR_JS)
+            return
+        if method == "GET" and path == "/static/bundle.js":
+            await send_js(200, BUNDLE_JS)
+            return
+        if method == "GET" and path == "/bundle":
+            await send_html(200, render_bundle_page())
+            return
+        if method == "GET" and path == "/bundle/offline-shell":
+            await send_html(200, render_bundle_page(offline=True))
+            return
         if method == "GET" and path in ("/", "/verify"):
             # Browsers get the landing page (boundary table on the page itself);
             # API clients get the same data as JSON.
@@ -2174,9 +3260,12 @@ __all__ = [
     "SUMMARY",
     "VERIFY_JS",
     "CAPSULE_JS",
+    "MMR_JS",
+    "BUNDLE_JS",
     "INSTRUMENTATION_POLICY",
     "render_landing_page",
     "render_capsule_page",
+    "render_bundle_page",
     "_render_reg_panel",
     "verify_payload",
     "verify_request_bytes",

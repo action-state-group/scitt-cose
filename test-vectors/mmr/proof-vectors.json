@@ -1,0 +1,144 @@
+{
+  "_provenance": "Self-generated (not upstream) -- 12 leaves, real leaf_hash, arbitrary body digests, minted by asg_ledger.mmr.core.inclusion_proof/consistency_proof and confirmed to verify under the Python reference before export. Pins the ported verifyInclusion/verifyConsistency *behavior*, not just the hash primitives.",
+  "body_digests": [
+    "b512b2dd10a5444b38811e7eb9487baaadad0e9da59ef29a0c34c24603e349df",
+    "b7462d6ced2c15add3dbe47755277fa9618aceb17c68f507128896d622d4c5ee",
+    "7bd87ca67f07e7904cc69653a6b4b41af5951dff5eabece3ef3553a034c592a4",
+    "22dc2e6404475362e139e594e3486a24676dfe64609fca46511d4149ea9e7488",
+    "161fcc53e5674fa7b6660f0742c8e4d3eb8996bfd341b49bf57800a06b1d3e56",
+    "cd5490828d0d83401cec15212d4b1a8c9fd471c6e0a8c7c01a829fe4b8e89d4a",
+    "7681c6696c666fdc3718ff5e9e234917b66ae23bac9947c398bce5673422890c",
+    "1268d916bfefa28f636f4ad7967697fbfc8adc1f700c7d183ed310e9206a01b0",
+    "390b619fa8fe9c6ed900e214a984b05d371ff57f494c31936c2ce9191010398e",
+    "ca22a29ba4a44ed3118737f247a93383ba58e88317f50c38dc4851615f0712ed",
+    "043e842ffb2a20568883044bac36eb8c48acab176fa49fcbe4b6b2b679398363",
+    "7cc8d4f47291da2872f750d7243148bd199042d7a709b192f58326af1a42ad94"
+  ],
+  "full_size": 22,
+  "full_root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+  "inclusion_cases": [
+    {
+      "leaf_index": 0,
+      "size": 22,
+      "body_digest": "b512b2dd10a5444b38811e7eb9487baaadad0e9da59ef29a0c34c24603e349df",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 0,
+        "witness": [
+          "d133beebbee4388d5f5c715c6da1d51eac7bdc6a3f0dcf974b298f30ec91aa9f",
+          "244faaa89bac1a783ddf7eeb19c70463c055b4011edf9ca0ea47806b3ba54436",
+          "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": true
+    },
+    {
+      "leaf_index": 3,
+      "size": 22,
+      "body_digest": "22dc2e6404475362e139e594e3486a24676dfe64609fca46511d4149ea9e7488",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 3,
+        "witness": [
+          "48d1da91527e9d7f3b940f857f6eafb2e404c5a1874ad88dfbadc4d3de1caed4",
+          "ebfd449c1e91324edbd72c8960715c55917e376e8d8d1d97df16ed0010591999",
+          "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": true
+    },
+    {
+      "leaf_index": 7,
+      "size": 22,
+      "body_digest": "1268d916bfefa28f636f4ad7967697fbfc8adc1f700c7d183ed310e9206a01b0",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 7,
+        "witness": [
+          "d02cc023b5f84ecabc7c7accdbcf33cff679deb5b629d5acd0ac76bce3fb18f0",
+          "6573e9e2e6ee9ee357c25c8e46a49423ef1bb0e013f3d1eedf59aef495bcd8d5",
+          "a8e55be0fc114b75e211eb815b1dec6744972dd63b96b229e3d38ad92e53e980"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": true
+    },
+    {
+      "leaf_index": 11,
+      "size": 22,
+      "body_digest": "7cc8d4f47291da2872f750d7243148bd199042d7a709b192f58326af1a42ad94",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 11,
+        "witness": [
+          "5a1db15a1e019354173eb2fe67c3f0e7dac36f4eb2b96fa0833192ce55beecad",
+          "6f8b687be7b1efda4d151cb2a585daec3d05f1e3d6313bc4276f5a47614f1f4d"
+        ],
+        "peaks_left": [
+          "9881ce1c3c7aa7b2e427007aeafcca84d75932eceb643cb16317d070c867f278"
+        ],
+        "peaks_right": []
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": true
+    }
+  ],
+  "consistency_case": {
+    "size_a": 11,
+    "root_a": "7252b657b3ce4b37e8472c04a3f75b9faba2fd8debe845dde0d49d2f8118690e",
+    "size_b": 22,
+    "root_b": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+    "proof": {
+      "v": 1,
+      "kind": "consistency",
+      "size_a": 11,
+      "size_b": 22,
+      "old_peaks": [
+        "a8e55be0fc114b75e211eb815b1dec6744972dd63b96b229e3d38ad92e53e980",
+        "6573e9e2e6ee9ee357c25c8e46a49423ef1bb0e013f3d1eedf59aef495bcd8d5",
+        "d02cc023b5f84ecabc7c7accdbcf33cff679deb5b629d5acd0ac76bce3fb18f0"
+      ],
+      "witness": [
+        [
+          "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+        ],
+        [
+          "9d237bb5f5089b10fd74e33dd73cb53243d4918bf61ec18e34efdfd681b073c3",
+          "a8e55be0fc114b75e211eb815b1dec6744972dd63b96b229e3d38ad92e53e980"
+        ],
+        [
+          "33bfa40ea1ccf7f7ff1a7cfa208b1cd4f337115b8e5ade04dc73a85ed090891c",
+          "6573e9e2e6ee9ee357c25c8e46a49423ef1bb0e013f3d1eedf59aef495bcd8d5",
+          "a8e55be0fc114b75e211eb815b1dec6744972dd63b96b229e3d38ad92e53e980"
+        ]
+      ],
+      "new_peaks": [
+        "9881ce1c3c7aa7b2e427007aeafcca84d75932eceb643cb16317d070c867f278",
+        "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+      ]
+    },
+    "expect": true
+  }
+}
