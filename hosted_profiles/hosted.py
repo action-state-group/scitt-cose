@@ -702,7 +702,12 @@ function parseAac(data){
     var k="_e_"+f+"_"+t+"_"+lbl;if(seen[k])return;seen[k]=true;
     edges.push({from:f,to:t,label:lbl});
   }
-  function extractCap(cap,capId,pfx){
+  /* disclosures: the Disclosure Envelope's out-of-band {agent_input, agent_output}
+   * object for this capsule (draft-mih-scitt-agent-action-capsule-disclosure-envelope-00).
+   * NEVER read from cap.model_attestation.compute_attestation — that region is
+   * digest-committed, so embedding a payload there would change capsule_id. */
+  function extractCap(cap,capId,pfx,disclosures){
+    disclosures=disclosures||{};
     var p=pfx?pfx+".":"";
     var chain=cap.chain||{};
     var prior=chain.parent_capsule_id||"";
@@ -712,11 +717,11 @@ function parseAac(data){
     if(isH64(subj)){addArt(subj,"subject","subject",p+"compute_attestation.subject_digest");addEdge(capId,subj,"attests_over");}
     var _actxW=p+"compute_attestation — payload not carried in the record";
     var _actxR="payload carried in fragment; recomputed against committed digest";
-    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input,aiRev=aiPre!=null;
+    var ai=ca.agent_input_digest||"",aiPre=disclosures.agent_input,aiRev=aiPre!=null;
     if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),!aiRev,aiRev?aiPre:null)){
       privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:!aiRev,isKnown:true,matchOk:null,
                     ctx:aiRev?_actxR:_actxW,_revPayload:aiRev?aiPre:null});addEdge(capId,ai,"attests_over");}
-    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output,aoRev=aoPre!=null;
+    var ao=ca.agent_output_digest||"",aoPre=disclosures.agent_output,aoRev=aoPre!=null;
     if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),!aoRev,aoRev?aoPre:null)){
       privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:!aoRev,isKnown:true,matchOk:null,
                     ctx:aoRev?_actxR:_actxW,_revPayload:aoRev?aoPre:null});addEdge(capId,ao,"attests_over");}
@@ -731,6 +736,7 @@ function parseAac(data){
   if(isB){
     var bc=data.buyer_capsule||{},sc=data.seller_capsule||{};
     var bid=bc.capsule_id||"",sid=sc.capsule_id||"",sth=data.sealed_terms_hash||"",terms=data.terms;
+    var bDisc=(data.disclosures&&data.disclosures.buyer)||{},sDisc=(data.disclosures&&data.disclosures.seller)||{};
     if(isH64(bid))addN(bid,"capsule","buyer capsule "+sh(bid),false,null);
     if(isH64(sid))addN(sid,"capsule","seller capsule "+sh(sid),false,null);
     if(isH64(sth)){
@@ -742,11 +748,16 @@ function parseAac(data){
       if(isH64(sid))addEdge(sid,sth,"attests_over");
     }
     if(isH64(bid)&&isH64(sid))addEdge(sid,bid,"chains_to");
-    if(isH64(bid))extractCap(bc,bid,"buyer");
-    if(isH64(sid))extractCap(sc,sid,"seller");
+    if(isH64(bid))extractCap(bc,bid,"buyer",bDisc);
+    if(isH64(sid))extractCap(sc,sid,"seller",sDisc);
   }else{
-    var cid=data.capsule_id||"";
-    if(isH64(cid)){addN(cid,"capsule","capsule "+sh(cid),false,null);extractCap(data,cid,"");}
+    /* Disclosure Envelope wrapper: {"capsule":{...unmodified...},"disclosures":{...}}.
+     * A bare capsule (no "capsule" wrapper key) is the legacy/WITHHELD-only shape —
+     * still fully supported, just with no disclosures to read. */
+    var envCap=(data.capsule&&typeof data.capsule==="object")?data.capsule:data;
+    var envDisc=(data.capsule&&typeof data.capsule==="object")?(data.disclosures||{}):{};
+    var cid=envCap.capsule_id||"";
+    if(isH64(cid)){addN(cid,"capsule","capsule "+sh(cid),false,null);extractCap(envCap,cid,"",envDisc);}
   }
   return{nodes:nodes,edges:edges,privlog:privlog,unk:unk,isB:isB};
 }
@@ -1793,7 +1804,12 @@ function parseAac(data){
     var k="_e_"+f+"_"+t+"_"+lbl;if(seen[k])return;seen[k]=true;
     edges.push({from:f,to:t,label:lbl});
   }
-  function extractCap(cap,capId,pfx){
+  /* disclosures: the Disclosure Envelope's out-of-band {agent_input, agent_output}
+   * object for this capsule (draft-mih-scitt-agent-action-capsule-disclosure-envelope-00).
+   * NEVER read from cap.model_attestation.compute_attestation — that region is
+   * digest-committed, so embedding a payload there would change capsule_id. */
+  function extractCap(cap,capId,pfx,disclosures){
+    disclosures=disclosures||{};
     var p=pfx?pfx+".":"";
     var chain=cap.chain||{};
     var prior=chain.parent_capsule_id||"";
@@ -1803,11 +1819,11 @@ function parseAac(data){
     if(isH64(subj)){addArt(subj,"subject","subject",p+"compute_attestation.subject_digest");addEdge(capId,subj,"attests_over");}
     var _actxW=p+"compute_attestation — payload not carried in the record";
     var _actxR="payload carried in fragment; recomputed against committed digest";
-    var ai=ca.agent_input_digest||"",aiPre=ca.agent_input,aiRev=aiPre!=null;
+    var ai=ca.agent_input_digest||"",aiPre=disclosures.agent_input,aiRev=aiPre!=null;
     if(isH64(ai)&&addN(ai,"agent_input","agent input "+sh(ai),!aiRev,aiRev?aiPre:null)){
       privlog.push({id:"agent input",type:"agent_input",digest:ai,withheld:!aiRev,isKnown:true,matchOk:null,
                     ctx:aiRev?_actxR:_actxW,_revPayload:aiRev?aiPre:null});addEdge(capId,ai,"attests_over");}
-    var ao=ca.agent_output_digest||"",aoPre=ca.agent_output,aoRev=aoPre!=null;
+    var ao=ca.agent_output_digest||"",aoPre=disclosures.agent_output,aoRev=aoPre!=null;
     if(isH64(ao)&&addN(ao,"agent_output","agent output "+sh(ao),!aoRev,aoRev?aoPre:null)){
       privlog.push({id:"agent output",type:"agent_output",digest:ao,withheld:!aoRev,isKnown:true,matchOk:null,
                     ctx:aoRev?_actxR:_actxW,_revPayload:aoRev?aoPre:null});addEdge(capId,ao,"attests_over");}
@@ -1822,6 +1838,7 @@ function parseAac(data){
   if(isB){
     var bc=data.buyer_capsule||{},sc=data.seller_capsule||{};
     var bid=bc.capsule_id||"",sid=sc.capsule_id||"",sth=data.sealed_terms_hash||"",terms=data.terms;
+    var bDisc=(data.disclosures&&data.disclosures.buyer)||{},sDisc=(data.disclosures&&data.disclosures.seller)||{};
     if(isH64(bid))addN(bid,"capsule","buyer capsule "+sh(bid),false,null);
     if(isH64(sid))addN(sid,"capsule","seller capsule "+sh(sid),false,null);
     if(isH64(sth)){
@@ -1833,11 +1850,16 @@ function parseAac(data){
       if(isH64(sid))addEdge(sid,sth,"attests_over");
     }
     if(isH64(bid)&&isH64(sid))addEdge(sid,bid,"chains_to");
-    if(isH64(bid))extractCap(bc,bid,"buyer");
-    if(isH64(sid))extractCap(sc,sid,"seller");
+    if(isH64(bid))extractCap(bc,bid,"buyer",bDisc);
+    if(isH64(sid))extractCap(sc,sid,"seller",sDisc);
   }else{
-    var cid=data.capsule_id||"";
-    if(isH64(cid)){addN(cid,"capsule","capsule "+sh(cid),false,null);extractCap(data,cid,"");}
+    /* Disclosure Envelope wrapper: {"capsule":{...unmodified...},"disclosures":{...}}.
+     * A bare capsule (no "capsule" wrapper key) is the legacy/WITHHELD-only shape —
+     * still fully supported, just with no disclosures to read. */
+    var envCap=(data.capsule&&typeof data.capsule==="object")?data.capsule:data;
+    var envDisc=(data.capsule&&typeof data.capsule==="object")?(data.disclosures||{}):{};
+    var cid=envCap.capsule_id||"";
+    if(isH64(cid)){addN(cid,"capsule","capsule "+sh(cid),false,null);extractCap(envCap,cid,"",envDisc);}
   }
   return{nodes:nodes,edges:edges,privlog:privlog,unk:unk,isB:isB};
 }
@@ -1980,8 +2002,8 @@ async function checkCompleteness(bundle){
  * path — after the ritual/cross-check verdicts had already been decided —
  * so a genuine digest mismatch could never flip either verdict. Fixed here:
  * a verification check that can't reject anything isn't a check. */
-async function verifyCapsuleDigests(cap){
-  var g=parseAac(cap);
+async function verifyCapsuleDigests(cap,disclosures){
+  var g=parseAac(disclosures?{capsule:cap,disclosures:disclosures}:cap);
   if(typeof crypto==="undefined"||!crypto.subtle)return g;  // no WebCrypto: leave matchOk null (skip, not a fabricated pass)
   for(var i=0;i<g.privlog.length;i++){
     var e=g.privlog[i];
@@ -2006,12 +2028,13 @@ async function verifyCapsuleDigests(cap){
  * source. */
 async function crossCheckSelfReport(bundle,records){
   var selfReport=bundle.verification||{};
+  var bundleDisclosures=bundle.disclosures||{};
   var disagreements=[];
   for(var idx=0;idx<records.length;idx++){
     var cap=records[idx];
     var cid=cap.capsule_id;
     if(!isH64(cid))continue;
-    var g=await verifyCapsuleDigests(cap);
+    var g=await verifyCapsuleDigests(cap,bundleDisclosures[cid]);
     var ours=!g.privlog.some(function(e){return e.matchOk===false;});
     var reported=selfReport[cid];
     if(reported&&typeof reported.ok==="boolean"&&reported.ok!==ours){
@@ -2027,9 +2050,10 @@ async function crossCheckSelfReport(bundle,records){
 }
 
 /* ---------- ritual: Integrity / Sequence / Completeness / Cross-check ---------- */
-async function evaluateBundleRitual(records,completeness,crossCheck,integrity){
+async function evaluateBundleRitual(records,completeness,crossCheck,integrity,disclosures){
   var stages=[],finding=null;
   var alteredIds={},firstMismatch=null,firstMismatchIsBody=false;
+  disclosures=disclosures||{};
   for(var idx=0;idx<records.length;idx++){
     var c=records[idx];
     if(!isH64(c.capsule_id))continue;
@@ -2038,7 +2062,7 @@ async function evaluateBundleRitual(records,completeness,crossCheck,integrity){
       alteredIds[c.capsule_id]=true;
       if(!firstMismatch){firstMismatch=idr;firstMismatchIsBody=true;}
     }
-    var g=await verifyCapsuleDigests(c);
+    var g=await verifyCapsuleDigests(c,disclosures[c.capsule_id]);
     var bad=g.privlog.filter(function(e){return e.matchOk===false;});
     if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch){firstMismatch=bad[0];firstMismatchIsBody=false;}}
   }
@@ -2085,10 +2109,11 @@ async function evaluateBundleRitual(records,completeness,crossCheck,integrity){
  * matchOk is already resolved true/false by the time this returns — the
  * displayed log and the ritual/cross-check verdicts read the same, single
  * digest-verification pass, never two independent (and divergent) ones. */
-async function buildBundlePrivlog(records){
+async function buildBundlePrivlog(records,disclosures){
   var rows=[];
+  disclosures=disclosures||{};
   for(var i=0;i<records.length;i++){
-    var g=await verifyCapsuleDigests(records[i]);
+    var g=await verifyCapsuleDigests(records[i],disclosures[records[i].capsule_id]);
     g.privlog.forEach(function(e){
       rows.push({record_index:i,capsule_id:records[i].capsule_id||"",entry:e});
     });
@@ -2199,14 +2224,14 @@ async function loadBundle(data,fragmentB64u){
 
   var integrity=await Promise.all(records.map(verifyCapsuleId));
 
-  var privlog=await buildBundlePrivlog(records);
+  var privlog=await buildBundlePrivlog(records,data.disclosures);
   renderPrivlog(privlog);
   renderRecordsTable(records,integrity);
 
   var completeness=await checkCompleteness(data);
   renderCompletenessCard(completeness);
   var crossCheck=await crossCheckSelfReport(data,records);
-  var ritual=await evaluateBundleRitual(records,completeness,crossCheck,integrity);
+  var ritual=await evaluateBundleRitual(records,completeness,crossCheck,integrity,data.disclosures);
   renderRitual(ritual);
 
   try{ history.replaceState(null,"",location.pathname+location.search+"#"+_fragmentB64u); }catch(ex){}

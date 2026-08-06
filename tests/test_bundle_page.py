@@ -273,8 +273,8 @@ def test_revealed_field_recomputes_and_matches(js_paths):
     digest = hashlib.sha256(payload.encode()).hexdigest()
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
-    cap["model_attestation"]["compute_attestation"]["agent_input"] = payload
-    g = _run_js(js_paths, {"fn": "parseAac", "data": cap})
+    envelope = {"capsule": cap, "disclosures": {"agent_input": payload}}
+    g = _run_js(js_paths, {"fn": "parseAac", "data": envelope})
     ai_rows = [e for e in g["privlog"] if e["type"] == "agent_input"]
     assert ai_rows[0]["withheld"] is False
     assert ai_rows[0]["_revPayload"] == payload
@@ -288,8 +288,7 @@ def test_verify_capsule_digests_confirms_a_genuine_match(js_paths):
     digest = hashlib.sha256(payload.encode()).hexdigest()
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
-    cap["model_attestation"]["compute_attestation"]["agent_input"] = payload
-    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap})
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
     ai_rows = [e for e in g["privlog"] if e["type"] == "agent_input"]
     assert ai_rows[0]["matchOk"] is True
 
@@ -303,9 +302,8 @@ def test_verify_capsule_digests_catches_a_genuine_mismatch(js_paths):
     mismatch could never flip either verdict. verifyCapsuleDigests is the
     single, awaited source of truth both now read."""
     cap = json.loads(json.dumps(CAPSULE_A))
-    cap["model_attestation"]["compute_attestation"]["agent_input"] = "not the preimage"
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = "c" * 64
-    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap})
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": "not the preimage"}})
     ai_rows = [e for e in g["privlog"] if e["type"] == "agent_input"]
     assert ai_rows[0]["matchOk"] is False
 
@@ -381,9 +379,11 @@ def test_cross_check_flags_producer_disagreement(js_paths):
     # producer claims ok=True but the capsule's own committed digest doesn't match --
     # our independent recompute must catch this and flag the disagreement.
     tampered = json.loads(json.dumps(CAPSULE_A))
-    tampered["model_attestation"]["compute_attestation"]["agent_input"] = "not the preimage"
     tampered["model_attestation"]["compute_attestation"]["agent_input_digest"] = "c" * 64
-    bundle = {"verification": {tampered["capsule_id"]: {"ok": True, "findings": []}}}
+    bundle = {
+        "verification": {tampered["capsule_id"]: {"ok": True, "findings": []}},
+        "disclosures": {tampered["capsule_id"]: {"agent_input": "not the preimage"}},
+    }
     got = _run_js(js_paths, {"fn": "crossCheckSelfReport", "bundle": bundle, "records": [tampered]})
     assert got["status"] == "fail"
 
@@ -401,13 +401,13 @@ def test_ritual_integrity_stage_fails_on_a_genuine_digest_mismatch(js_paths):
     unit): a real mismatch must flip the Integrity stage to fail and produce
     a finding naming the field — the ritual banner a recipient actually reads."""
     tampered = json.loads(json.dumps(CAPSULE_A))
-    tampered["model_attestation"]["compute_attestation"]["agent_input"] = "not the preimage"
     tampered["model_attestation"]["compute_attestation"]["agent_input_digest"] = "c" * 64
     completeness = {"status": "skip", "detail": "n/a"}
     cross_check = {"status": "pass", "detail": "n/a"}
+    disclosures = {tampered["capsule_id"]: {"agent_input": "not the preimage"}}
     got = _run_js(js_paths, {
         "fn": "evaluateBundleRitual", "records": [tampered],
-        "completeness": completeness, "crossCheck": cross_check,
+        "completeness": completeness, "crossCheck": cross_check, "disclosures": disclosures,
     })
     integrity = next(s for s in got["stages"] if s["name"] == "Integrity")
     assert integrity["status"] == "fail"
@@ -426,3 +426,32 @@ def test_ritual_integrity_stage_passes_on_genuine_records(js_paths):
     integrity = next(s for s in got["stages"] if s["name"] == "Integrity")
     assert integrity["status"] == "pass"
     assert got["finding"] is None
+
+
+@pytestmark_node
+def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
+    """Disclosure Envelope acceptance: capsule_id is identical across
+    withheld/match/mismatch — a disclosure never touches the anchored bytes."""
+    import hashlib
+
+    payload = "hello agent input"
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+
+    withheld = _run_js(js_paths, {"fn": "parseAac", "data": cap})
+    matching = _run_js(js_paths, {"fn": "parseAac", "data": {"capsule": cap, "disclosures": {"agent_input": payload}}})
+    mismatching = _run_js(js_paths, {"fn": "parseAac", "data": {"capsule": cap, "disclosures": {"agent_input": "not the preimage"}}})
+
+    for g in (withheld, matching, mismatching):
+        cap_node = next(n for n in g["nodes"] if n["type"] == "capsule")
+        assert cap_node["digest"] == cap["capsule_id"]
+
+    w = next(e for e in withheld["privlog"] if e["type"] == "agent_input")
+    m = next(e for e in matching["privlog"] if e["type"] == "agent_input")
+    assert w["withheld"] is True
+    assert m["withheld"] is False and m["_revPayload"] == payload
+
+    mismatch_verified = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": "not the preimage"}})
+    mm_entry = next(e for e in mismatch_verified["privlog"] if e["type"] == "agent_input")
+    assert mm_entry["matchOk"] is False

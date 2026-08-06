@@ -54,11 +54,14 @@ async function main() {
     case "crossCheckSelfReport":
       result = await crossCheckSelfReport(op.bundle, op.records);
       break;
+    case "evaluateBundleRitual":
+      result = await evaluateBundleRitual(op.records, op.completeness, op.crossCheck, op.integrity, op.disclosures);
+      break;
     case "buildBundlePrivlog":
-      result = await buildBundlePrivlog(op.records);
+      result = await buildBundlePrivlog(op.records, op.disclosures);
       break;
     case "verifyCapsuleDigests":
-      result = await verifyCapsuleDigests(op.data);
+      result = await verifyCapsuleDigests(op.data, op.disclosures);
       break;
     case "parseAac":
       result = parseAac(op.data);

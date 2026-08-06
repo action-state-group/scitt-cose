@@ -1,9 +1,9 @@
 {
   "finding": {
     "code": "digest_mismatch",
-    "meta": "failed stage: digest_mismatch \u00b7 field group: compute_attestation \u2014 payload not carried in the record \u00b7 digest 185c8d76\u2026",
+    "meta": "failed stage: digest_mismatch \u00b7 field group: payload carried in fragment; recomputed against committed digest \u00b7 digest 185c8d76\u2026",
     "stage": "Integrity",
-    "text": "agent input (compute_attestation \u2014 payload not carried in the record) is not the value that was sealed."
+    "text": "agent input (payload carried in fragment; recomputed against committed digest) is not the value that was sealed."
   },
   "gaps": [],
   "records": [
@@ -28,7 +28,7 @@
   ],
   "stages": [
     {
-      "detail": "record fails at stage digest_mismatch \u2014 compute_attestation \u2014 payload not carried in the record no longer matches its fingerprint",
+      "detail": "record fails at stage digest_mismatch \u2014 payload carried in fragment; recomputed against committed digest no longer matches its fingerprint",
       "name": "Integrity",
       "status": "fail"
     },
