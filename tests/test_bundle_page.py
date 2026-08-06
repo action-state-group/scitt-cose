@@ -1,0 +1,421 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The bundle-open page — the recipient-side viewer for capsule-ledger's
+``capsule bundle`` export.
+
+Acceptance cases (see the task brief):
+1. Privilege log: withheld fields render as a provable commitment (digest),
+   never as if the field silently doesn't exist.
+2. Completeness certificate: absent -> honest "skip", never a fabricated
+   pass; present+genuine -> "pass"; present+corrupted -> "fail" (mutant test).
+3. Every record's own structural integrity is checked independently of the
+   bundle producer's self-reported ``verification`` field (cross-check).
+4. Both delivery modes (hosted route, offline self-contained file) render
+   from the exact same ``BUNDLE_JS``/``MMR_JS`` — checked by asserting the
+   offline shell inlines the identical script bodies the hosted routes serve.
+5. Ported AAC helpers (``isH64``/``sh``/``safe``/``KNOWN_TYPES``/``parseAac``/
+   ``_capMismatched``/``findChainGaps``/``annotateRecords``) are byte-for-byte
+   identical to their originals in ``CAPSULE_JS`` — a pinned drift guard, not
+   an inspection-time claim.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import tempfile
+import threading
+from http.server import HTTPServer
+from pathlib import Path
+from urllib.request import Request, urlopen
+
+import pytest
+
+from hosted_profiles.hosted import (
+    BUNDLE_JS,
+    CAPSULE_JS,
+    MMR_JS,
+    REPO_URL,
+    make_asgi_app,
+    make_handler,
+    render_bundle_page,
+)
+
+HERE = Path(__file__).parent
+HARNESS = HERE / "js_harness_bundle.mjs"
+
+pytestmark_node = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+
+
+# ---------------------------------------------------------------------------
+# Drift guard: ported AAC helpers stay byte-identical to CAPSULE_JS
+# ---------------------------------------------------------------------------
+
+
+def _slice_between(src: str, start: str, end: str) -> str:
+    i = src.index(start)
+    j = src.index(end, i) + len(end)
+    return src[i:j]
+
+
+def _line_from(src: str, start: str) -> str:
+    i = src.index(start)
+    j = src.index("\n", i)
+    return src[i:j]
+
+
+def test_bundle_js_shared_helpers_match_capsule_js():
+    for name, start in (("isH64", "function isH64("), ("sh", "function sh("), ("safe", "function safe(")):
+        assert _line_from(CAPSULE_JS, start) == _line_from(BUNDLE_JS, start), name
+
+    assert _slice_between(CAPSULE_JS, "var KNOWN_TYPES={", "};") == _slice_between(
+        BUNDLE_JS, "var KNOWN_TYPES={", "};"
+    )
+
+    parse_aac_end = "return{nodes:nodes,edges:edges,privlog:privlog,unk:unk,isB:isB};\n}"
+    assert _slice_between(CAPSULE_JS, "function parseAac(data){", parse_aac_end) == _slice_between(
+        BUNDLE_JS, "function parseAac(data){", parse_aac_end
+    )
+
+    chain_end = 'return{note:cites?"cites an altered record":"verifies",isAltered:false,citesAltered:cites};\n  });\n}'
+    assert _slice_between(CAPSULE_JS, "function _capMismatched(cap){", chain_end) == _slice_between(
+        BUNDLE_JS, "function _capMismatched(cap){", chain_end
+    )
+
+
+# ---------------------------------------------------------------------------
+# render_bundle_page: routes, CSP, offline self-containment
+# ---------------------------------------------------------------------------
+
+
+def test_hosted_bundle_page_is_csp_safe():
+    import re
+
+    html = render_bundle_page()
+    assert '<script src="/static/mmr.js">' in html
+    assert '<script src="/static/bundle.js">' in html
+    assert not re.search(r"<script[^>]*>[^<]", html)  # no inline script bodies
+    assert "<link" not in html
+    assert "@import" not in html
+    hrefs = re.findall(r'href="([^"]*)"', html)
+    external = {h for h in hrefs if h.startswith("http")}
+    allowed = {
+        REPO_URL,
+        "https://agentactioncapsule.org",
+        "https://agentactioncapsule.org/docs/",
+        "https://anchor.agentactioncapsule.org",
+    }
+    assert not (external - allowed), external - allowed
+
+
+def test_offline_bundle_shell_is_self_contained_and_reusable_template():
+    html = render_bundle_page(offline=True)
+    assert "<script src=" not in html  # nothing external — fully inlined
+    assert MMR_JS in html
+    assert BUNDLE_JS in html
+    # 3 occurrences: 1 embed point (first in document order) + 2 internal
+    # BUNDLE_JS references (the sentinel check + the download button's own
+    # replace() call) -- BUNDLE_JS itself only ever replaces the first
+    # (single-argument String.replace semantics), so a future embedder
+    # (this viewer's own download button, or capsule-ledger's planned
+    # --with-viewer flag) can safely do the same single substitution.
+    assert html.count("@@BUNDLE_FRAGMENT@@") == 3
+    fragment = "eyJoZWxsbyI6MX0"
+    spliced = html.replace("@@BUNDLE_FRAGMENT@@", fragment, 1)
+    assert spliced.count(fragment) == 1
+    assert spliced.count("@@BUNDLE_FRAGMENT@@") == 2  # BUNDLE_JS's own internal literals untouched
+
+
+def test_hosted_and_offline_pages_share_identical_dom_ids():
+    """Both delivery modes must render the same page — checked by requiring
+    every data/id hook the offline page's JS looks for is present in the
+    hosted page's DOM (and vice versa isn't needed since both bodies come
+    from the same ``_bundle_page_body`` helper)."""
+    hosted = render_bundle_page()
+    offline = render_bundle_page(offline=True)
+    for hook in ("bundleSummary", "permalinkText", "downloadBtn", "copyLinkBtn",
+                 "completenessMount", "ritualMount", "recordsTableContent",
+                 "privlogSection", "privlogContent", "bundleJson", "loadBtn", "emptyState"):
+        assert f'id="{hook}"' in hosted, hook
+        assert f'id="{hook}"' in offline, hook
+
+
+def _get(url: str):
+    with urlopen(Request(url), timeout=10) as resp:
+        return resp.headers.get("Content-Type", ""), resp.read()
+
+
+def test_stdlib_routes_wired():
+    httpd = HTTPServer(("127.0.0.1", 0), make_handler())
+    host, port = httpd.server_address
+    try:
+        for path, needle in (
+            ("/bundle", "Ledger bundle verifier"),
+            ("/bundle/offline-shell", "Ledger bundle verifier"),
+            ("/static/mmr.js", "verifyInclusion"),
+            ("/static/bundle.js", "checkCompleteness"),
+        ):
+            t = threading.Thread(target=httpd.handle_request)
+            t.start()
+            ctype, body = _get(f"http://{host}:{port}{path}")
+            t.join(timeout=10)
+            assert needle in body.decode()
+    finally:
+        httpd.server_close()
+
+
+def _drive_asgi(app, path):
+    import asyncio
+
+    async def run():
+        scope = {"type": "http", "method": "GET", "path": path, "root_path": "", "headers": []}
+        sent = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        await app(scope, receive, send)
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        return start["status"], body
+
+    return asyncio.run(run())
+
+
+def test_asgi_routes_wired():
+    app = make_asgi_app()
+    status, body = _drive_asgi(app, "/bundle")
+    assert status == 200 and "Ledger bundle verifier" in body.decode()
+    status, body = _drive_asgi(app, "/bundle/offline-shell")
+    assert status == 200 and "@@BUNDLE_FRAGMENT@@" in body.decode()
+    status, body = _drive_asgi(app, "/static/mmr.js")
+    assert status == 200 and "verifyInclusion" in body.decode()
+    status, body = _drive_asgi(app, "/static/bundle.js")
+    assert status == 200 and "checkCompleteness" in body.decode()
+
+
+def test_bundle_route_matches_capsule_ledger_default_permalink_base():
+    """capsule-ledger's asg_ledger/cli/bundle_cmd.py hardcodes
+    DEFAULT_VERIFY_BASE_URL = "https://verify.agentactioncapsule.org/bundle" --
+    confirm the path this module serves at is exactly "/bundle", no trailing
+    segment, so that permalink resolves here unmodified."""
+    app = make_asgi_app()
+    status, _ = _drive_asgi(app, "/bundle")
+    assert status == 200
+
+
+# ---------------------------------------------------------------------------
+# Node-level behavioral tests: privilege log, completeness cert, cross-check
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def js_paths():
+    mmr_f = tempfile.NamedTemporaryFile("w", suffix=".js", delete=False)
+    mmr_f.write(MMR_JS)
+    mmr_f.close()
+    bundle_f = tempfile.NamedTemporaryFile("w", suffix=".js", delete=False)
+    bundle_f.write(BUNDLE_JS)
+    bundle_f.close()
+    yield Path(mmr_f.name), Path(bundle_f.name)
+    Path(mmr_f.name).unlink(missing_ok=True)
+    Path(bundle_f.name).unlink(missing_ok=True)
+
+
+def _run_js(js_paths, op: dict):
+    mmr_path, bundle_path = js_paths
+    result = subprocess.run(
+        ["node", str(HARNESS), str(mmr_path), str(bundle_path)],
+        input=json.dumps(op),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+CAPSULE_A = {
+    "capsule_id": "a" * 64,
+    "chain": {},
+    "model_attestation": {"compute_attestation": {
+        "subject_digest": "b" * 64,
+        "agent_input_digest": "c" * 64,  # withheld: no agent_input payload alongside
+    }},
+}
+
+
+@pytestmark_node
+def test_withheld_field_renders_as_provable_commitment_never_absent(js_paths):
+    """A withheld field must show up in the privilege log as a WITHHELD
+    commitment (digest present) -- never simply missing from the log."""
+    g = _run_js(js_paths, {"fn": "parseAac", "data": CAPSULE_A})
+    ai_rows = [e for e in g["privlog"] if e["type"] == "agent_input"]
+    assert len(ai_rows) == 1
+    assert ai_rows[0]["withheld"] is True
+    assert ai_rows[0]["digest"] == "c" * 64  # the commitment survives even though withheld
+
+
+@pytestmark_node
+def test_revealed_field_recomputes_and_matches(js_paths):
+    import hashlib
+
+    payload = "hello agent input"
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+    cap["model_attestation"]["compute_attestation"]["agent_input"] = payload
+    g = _run_js(js_paths, {"fn": "parseAac", "data": cap})
+    ai_rows = [e for e in g["privlog"] if e["type"] == "agent_input"]
+    assert ai_rows[0]["withheld"] is False
+    assert ai_rows[0]["_revPayload"] == payload
+
+
+@pytestmark_node
+def test_verify_capsule_digests_confirms_a_genuine_match(js_paths):
+    import hashlib
+
+    payload = "hello agent input"
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+    cap["model_attestation"]["compute_attestation"]["agent_input"] = payload
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap})
+    ai_rows = [e for e in g["privlog"] if e["type"] == "agent_input"]
+    assert ai_rows[0]["matchOk"] is True
+
+
+@pytestmark_node
+def test_verify_capsule_digests_catches_a_genuine_mismatch(js_paths):
+    """The bug this locks in: an earlier version only ever computed the
+    revealed-payload digest inside the DOM-rendering path, *after* the
+    ritual/cross-check verdicts had already been decided from privlog
+    entries whose matchOk was still unconditionally null -- so a real
+    mismatch could never flip either verdict. verifyCapsuleDigests is the
+    single, awaited source of truth both now read."""
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input"] = "not the preimage"
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = "c" * 64
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap})
+    ai_rows = [e for e in g["privlog"] if e["type"] == "agent_input"]
+    assert ai_rows[0]["matchOk"] is False
+
+
+@pytestmark_node
+def test_completeness_skip_when_certificate_absent(js_paths):
+    bundle = {"records": [CAPSULE_A], "checkpoint": {"tree_size": 1}}
+    got = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "skip"
+    assert "no completeness certificate" in got["detail"]
+
+
+@pytestmark_node
+def test_completeness_pass_with_genuine_certificate(js_paths):
+    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "proof-vectors.json").read_text())
+    c0, c1 = vectors["inclusion_cases"][0], vectors["inclusion_cases"][-1]
+    records = [
+        {"capsule_id": c0["body_digest"], "chain": {}},
+        {"capsule_id": c1["body_digest"], "chain": {}},
+    ]
+    bundle = {
+        "records": records,
+        "checkpoint": {"tree_size": vectors["full_size"]},
+        "completeness_certificate": {
+            "v": 1,
+            "range_proof": {
+                "from_seq": 1, "to_seq": 2, "size": vectors["full_size"],
+                "inclusion_from": c0["proof"], "inclusion_to": c1["proof"],
+            },
+            "range_root": vectors["full_root"],
+            "checkpoint_size": vectors["full_size"],
+            "checkpoint_root": vectors["full_root"],
+            "consistency_proof": None,
+        },
+    }
+    got = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "pass", got
+
+
+@pytestmark_node
+def test_completeness_fails_on_corrupted_certificate_byte(js_paths):
+    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "proof-vectors.json").read_text())
+    c0, c1 = vectors["inclusion_cases"][0], vectors["inclusion_cases"][-1]
+    records = [
+        {"capsule_id": c0["body_digest"], "chain": {}},
+        {"capsule_id": c1["body_digest"], "chain": {}},
+    ]
+    tampered_proof = json.loads(json.dumps(c0["proof"]))
+    b = bytearray(bytes.fromhex(tampered_proof["witness"][0]))
+    b[0] ^= 0xFF
+    tampered_proof["witness"][0] = b.hex()
+    bundle = {
+        "records": records,
+        "checkpoint": {"tree_size": vectors["full_size"]},
+        "completeness_certificate": {
+            "v": 1,
+            "range_proof": {
+                "from_seq": 1, "to_seq": 2, "size": vectors["full_size"],
+                "inclusion_from": tampered_proof, "inclusion_to": c1["proof"],
+            },
+            "range_root": vectors["full_root"],
+            "checkpoint_size": vectors["full_size"],
+            "checkpoint_root": vectors["full_root"],
+            "consistency_proof": None,
+        },
+    }
+    got = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "fail", got
+
+
+@pytestmark_node
+def test_cross_check_flags_producer_disagreement(js_paths):
+    # producer claims ok=True but the capsule's own committed digest doesn't match --
+    # our independent recompute must catch this and flag the disagreement.
+    tampered = json.loads(json.dumps(CAPSULE_A))
+    tampered["model_attestation"]["compute_attestation"]["agent_input"] = "not the preimage"
+    tampered["model_attestation"]["compute_attestation"]["agent_input_digest"] = "c" * 64
+    bundle = {"verification": {tampered["capsule_id"]: {"ok": True, "findings": []}}}
+    got = _run_js(js_paths, {"fn": "crossCheckSelfReport", "bundle": bundle, "records": [tampered]})
+    assert got["status"] == "fail"
+
+
+@pytestmark_node
+def test_cross_check_passes_when_no_self_report_present(js_paths):
+    bundle = {}
+    got = _run_js(js_paths, {"fn": "crossCheckSelfReport", "bundle": bundle, "records": [CAPSULE_A]})
+    assert got["status"] == "pass"
+
+
+@pytestmark_node
+def test_ritual_integrity_stage_fails_on_a_genuine_digest_mismatch(js_paths):
+    """End-to-end mutant test at the ritual layer (not just the digest-verify
+    unit): a real mismatch must flip the Integrity stage to fail and produce
+    a finding naming the field — the ritual banner a recipient actually reads."""
+    tampered = json.loads(json.dumps(CAPSULE_A))
+    tampered["model_attestation"]["compute_attestation"]["agent_input"] = "not the preimage"
+    tampered["model_attestation"]["compute_attestation"]["agent_input_digest"] = "c" * 64
+    completeness = {"status": "skip", "detail": "n/a"}
+    cross_check = {"status": "pass", "detail": "n/a"}
+    got = _run_js(js_paths, {
+        "fn": "evaluateBundleRitual", "records": [tampered],
+        "completeness": completeness, "crossCheck": cross_check,
+    })
+    integrity = next(s for s in got["stages"] if s["name"] == "Integrity")
+    assert integrity["status"] == "fail"
+    assert got["finding"] is not None
+    assert "agent input" in got["finding"]["text"]
+
+
+@pytestmark_node
+def test_ritual_integrity_stage_passes_on_genuine_records(js_paths):
+    completeness = {"status": "skip", "detail": "n/a"}
+    cross_check = {"status": "pass", "detail": "n/a"}
+    got = _run_js(js_paths, {
+        "fn": "evaluateBundleRitual", "records": [CAPSULE_A],
+        "completeness": completeness, "crossCheck": cross_check,
+    })
+    integrity = next(s for s in got["stages"] if s["name"] == "Integrity")
+    assert integrity["status"] == "pass"
+    assert got["finding"] is None
