@@ -665,7 +665,7 @@ function _mmIsPinnedAepOrEar(d){
   return false;
 }
 function detectProfile(d){
-  if(d&&(d.capsule_id||d.buyer_capsule))return"aac";
+  if(d&&(d.capsule_id||d.buyer_capsule||(d.capsule&&typeof d.capsule==="object"&&d.capsule.capsule_id)))return"aac";
   /* MachineMandate: owner-controlled VCT URI (run credential or mint record) */
   if(d&&d.vct==="https://vocab.tyche.institute/vct/machine-mandate")return"machine-mandate";
   /* MachineMandate: mint record has credential_claims.vct */
@@ -1092,7 +1092,14 @@ var hash=location.hash.slice(1);
 if(hash){
   try{
     _fragData=JSON.parse(decodeURIComponent(escape(atob(hash))));
-    if(!Array.isArray(_fragData)){loadCapsule(_fragData);renderRitual([_fragData],_bundleWitness);}
+    if(!Array.isArray(_fragData)){
+      loadCapsule(_fragData);
+      /* evaluateRitual reads capsule_id directly off each array item, so it always
+       * gets the bare capsule — a Disclosure Envelope wrapper is unwrapped here,
+       * same as detectProfile/parseAac already do for the graph/privilege-log path. */
+      var _ritCap=(_fragData&&_fragData.capsule&&typeof _fragData.capsule==="object")?_fragData.capsule:_fragData;
+      renderRitual([_ritCap],_bundleWitness);
+    }
   }catch(ex){$("parseErr").textContent="Fragment decode error: "+ex.message;}
 }
 

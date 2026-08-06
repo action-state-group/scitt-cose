@@ -559,7 +559,7 @@ def detect_profile(data: dict) -> str:
     New profiles: register in PROFILE_PARSERS and add detection here.
     """
     if isinstance(data, dict):
-        if "capsule_id" in data or "buyer_capsule" in data:
+        if "capsule_id" in data or "buyer_capsule" in data or isinstance(data.get("capsule"), dict):
             return "aac"
         # MachineMandate: vct, eat_profile, or action_hash marker
         from .machine_mandate import is_machine_mandate  # lazy to avoid circular

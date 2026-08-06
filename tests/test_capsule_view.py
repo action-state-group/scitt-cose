@@ -320,6 +320,16 @@ def test_aac_profile_detected():
     assert _aac.detect_profile(unknown) == "unknown"
 
 
+def test_aac_profile_detected_for_disclosure_envelope_wrapper():
+    """A Disclosure Envelope has no top-level capsule_id (it's nested under
+    .capsule) — detect_profile must still recognize it as "aac", or the
+    fragment auto-load path silently falls through to the empty paste-JSON
+    state instead of rendering. (Caught via live browser verification, not
+    unit tests calling parse_capsule directly — those bypass detect_profile.)"""
+    envelope = {"capsule": {"capsule_id": "a" * 64}, "disclosures": {"agent_input": {}}}
+    assert _aac.detect_profile(envelope) == "aac"
+
+
 def test_profile_parsers_dict_extensible():
     """PROFILE_PARSERS is a mutable dict — additional profiles can be registered."""
     original_keys = set(_aac.PROFILE_PARSERS.keys())
@@ -916,3 +926,12 @@ def test_bare_capsule_fragment_still_supported_no_wrapper():
     assert not view.parse_error
     entry = next(e for e in view.privilege_log if e.artifact_type == "agent_input")
     assert entry.is_withheld and entry.match_ok is None
+
+
+def test_capsule_js_detect_profile_recognizes_envelope_wrapper():
+    """CAPSULE_JS's client-side detectProfile() must recognize the
+    {"capsule": {...}} wrapper too — verified live in a browser (not just
+    unit-tested against the Python mirror) after this exact gap made a
+    matching/mismatching envelope fall through to the empty paste-JSON state
+    instead of rendering at all."""
+    assert 'd.capsule&&typeof d.capsule==="object"&&d.capsule.capsule_id' in CAPSULE_JS
