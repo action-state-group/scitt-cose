@@ -320,6 +320,16 @@ def test_aac_profile_detected():
     assert _aac.detect_profile(unknown) == "unknown"
 
 
+def test_aac_profile_detected_for_disclosure_envelope_wrapper():
+    """A Disclosure Envelope has no top-level capsule_id (it's nested under
+    .capsule) — detect_profile must still recognize it as "aac", or the
+    fragment auto-load path silently falls through to the empty paste-JSON
+    state instead of rendering. (Caught via live browser verification, not
+    unit tests calling parse_capsule directly — those bypass detect_profile.)"""
+    envelope = {"capsule": {"capsule_id": "a" * 64}, "disclosures": {"agent_input": {}}}
+    assert _aac.detect_profile(envelope) == "aac"
+
+
 def test_profile_parsers_dict_extensible():
     """PROFILE_PARSERS is a mutable dict — additional profiles can be registered."""
     original_keys = set(_aac.PROFILE_PARSERS.keys())
@@ -651,14 +661,16 @@ def test_goose_compute_attestation_reveal_path():
         "model_attestation": {
             "compute_attestation": {
                 "agent_input_digest": ai_digest,
-                "agent_input": ai_preimage,
                 "agent_output_digest": ao_digest,
-                "agent_output": ao_preimage,
             }
         },
         "disposition": {"decision": "accept"},
     }
-    view = _aac.parse_capsule(cap_with_preimage)
+    envelope = {
+        "capsule": cap_with_preimage,
+        "disclosures": {"agent_input": ai_preimage, "agent_output": ao_preimage},
+    }
+    view = _aac.parse_capsule(envelope)
     assert not view.parse_error
     ai_node = next(n for n in view.nodes if n.node_type == "agent_input")
     ao_node = next(n for n in view.nodes if n.node_type == "agent_output")
@@ -766,14 +778,13 @@ def test_agent_digest_reveal_string_payload_match():
         "model_attestation": {
             "compute_attestation": {
                 "agent_input_digest": ai_digest,
-                "agent_input": ai_str,
                 "agent_output_digest": ao_digest,
-                "agent_output": ao_str,
             }
         },
         "disposition": {"decision": "accept"},
     }
-    view = _aac.parse_capsule(cap)
+    envelope = {"capsule": cap, "disclosures": {"agent_input": ai_str, "agent_output": ao_str}}
+    view = _aac.parse_capsule(envelope)
     assert not view.parse_error
 
     ai_entry = next(e for e in view.privilege_log if e.artifact_type == "agent_input")
@@ -799,13 +810,14 @@ def test_agent_digest_reveal_context_string_switches():
     cap_revealed = {
         "capsule_id": _fake_hex64("62"),
         "model_attestation": {
-            "compute_attestation": {"agent_input_digest": d, "agent_input": s}
+            "compute_attestation": {"agent_input_digest": d}
         },
         "disposition": {"decision": "accept"},
     }
+    envelope_revealed = {"capsule": cap_revealed, "disclosures": {"agent_input": s}}
 
     view_w = _aac.parse_capsule(cap_withheld)
-    view_r = _aac.parse_capsule(cap_revealed)
+    view_r = _aac.parse_capsule(envelope_revealed)
 
     entry_w = next(e for e in view_w.privilege_log if e.artifact_type == "agent_input")
     entry_r = next(e for e in view_r.privilege_log if e.artifact_type == "agent_input")
@@ -863,3 +875,63 @@ def test_capsule_page_inclusion_section_hidden_by_default():
     # Check that display:none appears on the inclusionSection tag (within 100 chars)
     tag_region = html[idx - 50:idx + 100]
     assert "display:none" in tag_region
+
+
+# ---------------------------------------------------------------------------
+# Disclosure Envelope acceptance (draft-mih-scitt-agent-action-capsule-
+# disclosure-envelope-00): a matching envelope renders REVEALED · ✓ match; a
+# non-matching envelope renders REVEALED · ✗ MISMATCH; the wrapped capsule's
+# own capsule_id is identical across withheld/match/mismatch — a disclosure
+# never touches the anchored bytes.
+# ---------------------------------------------------------------------------
+
+def test_disclosure_envelope_match_and_mismatch_never_change_capsule_id():
+    payload = {"amount": "500.00"}
+    ai_digest = _aac._json_digest(payload)
+    capsule = {
+        "capsule_id": _fake_hex64("99"),
+        "model_attestation": {"compute_attestation": {"agent_input_digest": ai_digest}},
+        "disposition": {"decision": "accept"},
+    }
+
+    withheld = _aac.parse_capsule({"capsule": capsule})
+    matching = _aac.parse_capsule({"capsule": capsule, "disclosures": {"agent_input": payload}})
+    mismatching = _aac.parse_capsule(
+        {"capsule": capsule, "disclosures": {"agent_input": {"amount": "999.00"}}}
+    )
+
+    for view in (withheld, matching, mismatching):
+        assert not view.parse_error
+        assert view.raw_capsules[0]["capsule_id"] == capsule["capsule_id"]
+
+    w_entry = next(e for e in withheld.privilege_log if e.artifact_type == "agent_input")
+    m_entry = next(e for e in matching.privilege_log if e.artifact_type == "agent_input")
+    x_entry = next(e for e in mismatching.privilege_log if e.artifact_type == "agent_input")
+
+    assert w_entry.is_withheld and w_entry.match_ok is None
+    assert not m_entry.is_withheld and m_entry.match_ok is True
+    assert not x_entry.is_withheld and x_entry.match_ok is False
+
+
+def test_bare_capsule_fragment_still_supported_no_wrapper():
+    """A bare capsule (today's existing link shape, no "capsule" wrapper key)
+    keeps working — WITHHELD only, since there is nowhere for a disclosure to
+    live without the envelope wrapper."""
+    capsule = {
+        "capsule_id": _fake_hex64("88"),
+        "model_attestation": {"compute_attestation": {"agent_input_digest": "a" * 64}},
+        "disposition": {"decision": "accept"},
+    }
+    view = _aac.parse_capsule(capsule)
+    assert not view.parse_error
+    entry = next(e for e in view.privilege_log if e.artifact_type == "agent_input")
+    assert entry.is_withheld and entry.match_ok is None
+
+
+def test_capsule_js_detect_profile_recognizes_envelope_wrapper():
+    """CAPSULE_JS's client-side detectProfile() must recognize the
+    {"capsule": {...}} wrapper too — verified live in a browser (not just
+    unit-tested against the Python mirror) after this exact gap made a
+    matching/mismatching envelope fall through to the empty paste-JSON state
+    instead of rendering at all."""
+    assert 'd.capsule&&typeof d.capsule==="object"&&d.capsule.capsule_id' in CAPSULE_JS

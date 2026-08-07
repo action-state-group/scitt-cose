@@ -21,19 +21,25 @@ from hosted_profiles import aac
 VECTORS_DIR = Path(__file__).resolve().parents[1] / "test-vectors" / "tamper-states"
 
 
-def _load(name: str) -> tuple[list[dict], dict | None, dict]:
+def _load(name: str) -> tuple[list[dict], dict | None, dict, dict]:
     vec_dir = VECTORS_DIR / name
     bundle_doc = json.loads((vec_dir / "bundle.json").read_text())
     expected = json.loads((vec_dir / "expected.json").read_text())
-    return bundle_doc["bundle"], bundle_doc.get("witness"), expected
+    return bundle_doc["bundle"], bundle_doc.get("witness"), expected, bundle_doc.get("disclosures") or {}
 
 
 def _stage(summary_stages, name):
     return next(s for s in summary_stages if s.name == name)
 
 
-def _run(bundle, witness):
-    views = [aac.parse_capsule(c) for c in bundle]
+def _run(bundle, witness, disclosures=None):
+    disclosures = disclosures or {}
+    views = [
+        aac.parse_capsule({"capsule": c, "disclosures": disclosures[c["capsule_id"]]})
+        if c.get("capsule_id") in disclosures
+        else aac.parse_capsule(c)
+        for c in bundle
+    ]
     return aac.evaluate_ritual(bundle, views, witness=witness), views
 
 
@@ -42,8 +48,8 @@ def _run(bundle, witness):
 # ---------------------------------------------------------------------------
 
 def test_digest_mismatch_integrity_fails_and_is_the_finding():
-    bundle, witness, expected = _load("digest_mismatch")
-    summary, _ = _run(bundle, witness)
+    bundle, witness, expected, disclosures = _load("digest_mismatch")
+    summary, _ = _run(bundle, witness, disclosures)
     assert _stage(summary.stages, "Integrity").status == "fail"
     assert _stage(summary.stages, "Sequence").status == "pass"
     assert summary.finding is not None
@@ -52,8 +58,8 @@ def test_digest_mismatch_integrity_fails_and_is_the_finding():
 
 
 def test_digest_mismatch_downstream_record_flagged_not_failed():
-    bundle, witness, _ = _load("digest_mismatch")
-    views = [aac.parse_capsule(c) for c in bundle]
+    bundle, witness, _, disclosures = _load("digest_mismatch")
+    _, views = _run(bundle, witness, disclosures)
     notes = aac.annotate_records(bundle, views)
     assert notes[1].note == "digest_mismatch"
     assert notes[1].is_altered is True
@@ -64,12 +70,12 @@ def test_digest_mismatch_downstream_record_flagged_not_failed():
 
 
 def test_digest_mismatch_mutant_check():
-    """The check must FAIL its mutant: un-tamper the payload and Integrity flips to pass."""
-    bundle, witness, _ = _load("digest_mismatch")
-    fixed = json.loads(json.dumps(bundle))  # deep copy
-    ca = fixed[1]["model_attestation"]["compute_attestation"]
-    ca["agent_input"] = {"tool": "refund", "amount_usd": 1180}  # matches the committed digest
-    summary, _ = _run(fixed, witness)
+    """The check must FAIL its mutant: un-tamper the disclosed payload and Integrity flips to pass."""
+    bundle, witness, _, disclosures = _load("digest_mismatch")
+    fixed_disclosures = json.loads(json.dumps(disclosures))  # deep copy
+    capsule_id = bundle[1]["capsule_id"]
+    fixed_disclosures[capsule_id]["agent_input"] = {"tool": "refund", "amount_usd": 1180}  # matches the committed digest
+    summary, _ = _run(bundle, witness, fixed_disclosures)
     assert _stage(summary.stages, "Integrity").status == "pass"
     assert summary.finding is None
 
@@ -79,7 +85,7 @@ def test_digest_mismatch_mutant_check():
 # ---------------------------------------------------------------------------
 
 def test_chain_gap_sequence_fails_and_is_the_finding():
-    bundle, witness, expected = _load("chain_gap")
+    bundle, witness, expected, _ = _load("chain_gap")
     summary, _ = _run(bundle, witness)
     assert _stage(summary.stages, "Integrity").status == "pass"
     assert _stage(summary.stages, "Sequence").status == "fail"
@@ -92,7 +98,7 @@ def test_chain_gap_sequence_fails_and_is_the_finding():
 
 def test_chain_gap_mutant_check():
     """Un-break the chain (point at the real prior capsule) and Sequence flips to pass."""
-    bundle, witness, _ = _load("chain_gap")
+    bundle, witness, _, _ = _load("chain_gap")
     fixed = json.loads(json.dumps(bundle))
     fixed[2]["chain"]["parent_capsule_id"] = fixed[1]["capsule_id"]
     summary, _ = _run(fixed, witness)
@@ -105,7 +111,7 @@ def test_chain_gap_mutant_check():
 # ---------------------------------------------------------------------------
 
 def test_witness_downgrade_is_skip_not_fail():
-    bundle, witness, _ = _load("witness_downgrade")
+    bundle, witness, _, _ = _load("witness_downgrade")
     summary, _ = _run(bundle, witness)
     for name in ("Integrity", "Sequence", "Authenticity"):
         assert _stage(summary.stages, name).status == "pass"
@@ -116,7 +122,7 @@ def test_witness_downgrade_is_skip_not_fail():
 
 
 def test_witness_downgrade_upgrades_to_pass_when_all_report():
-    bundle, _, _ = _load("witness_downgrade")
+    bundle, _, _, _ = _load("witness_downgrade")
     summary, _ = _run(bundle, {"held": 3, "configured": 3, "reachable": True})
     assert _stage(summary.stages, "Witness").status == "pass"
 
@@ -126,7 +132,7 @@ def test_witness_downgrade_upgrades_to_pass_when_all_report():
 # ---------------------------------------------------------------------------
 
 def test_offline_pass_verifies_locally_witness_skipped_not_failed():
-    bundle, witness, _ = _load("offline_pass")
+    bundle, witness, _, _ = _load("offline_pass")
     summary, _ = _run(bundle, witness)
     for name in ("Integrity", "Sequence", "Authenticity"):
         assert _stage(summary.stages, name).status == "pass"
@@ -145,7 +151,7 @@ def test_authenticity_mutant_check_flips_to_fail():
     import base64
 
     for name in ("digest_mismatch", "chain_gap", "witness_downgrade", "offline_pass"):
-        bundle, _, _ = _load(name)
+        bundle, _, _, _ = _load(name)
         tampered = json.loads(json.dumps(bundle))
         raw = bytearray(base64.b64decode(tampered[0]["signed_statement"]["statement_b64"]))
         raw[-1] ^= 0xFF  # flip the last byte — corrupts the COSE signature

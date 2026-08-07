@@ -123,12 +123,18 @@ def parse_capsule(data: dict) -> GraphView:
         return GraphView(profile="aac", is_binding=False, parse_error="not a JSON object")
     if "buyer_capsule" in data and "seller_capsule" in data:
         return _parse_binding(data)
+    if isinstance(data.get("capsule"), dict):
+        # Disclosure Envelope (draft-mih-scitt-agent-action-capsule-disclosure-envelope-00):
+        # {"capsule": {...unmodified...}, "disclosures": {"agent_input": ..., "agent_output": ...}}.
+        # A bare capsule (no "capsule" wrapper key) is the legacy/WITHHELD-only shape below.
+        disclosures = data.get("disclosures")
+        return _parse_single(data["capsule"], disclosures if isinstance(disclosures, dict) else None)
     if "capsule_id" in data:
         return _parse_single(data)
     return GraphView(profile="aac", is_binding=False, parse_error="not an AAC capsule or binding")
 
 
-def _parse_single(cap: dict) -> GraphView:
+def _parse_single(cap: dict, disclosures: dict | None = None) -> GraphView:
     view = GraphView(profile="aac", is_binding=False)
     view.raw_capsules = [cap]
     capsule_id = cap.get("capsule_id", "")
@@ -140,7 +146,7 @@ def _parse_single(cap: dict) -> GraphView:
         label=f"capsule {_short(capsule_id)}", is_known_type=True,
     )
     view.nodes.append(cap_node)
-    _extract_refs(view, cap, capsule_id, prefix="")
+    _extract_refs(view, cap, capsule_id, prefix="", disclosures=disclosures)
     return view
 
 
@@ -187,15 +193,26 @@ def _parse_binding(data: dict) -> GraphView:
     if _is_hex64(buyer_id) and _is_hex64(seller_id):
         view.edges.append(GraphEdge(seller_id, buyer_id, "chains_to", "chains_to"))
 
+    envelope_disclosures = data.get("disclosures") if isinstance(data.get("disclosures"), dict) else {}
+    buyer_disclosures = envelope_disclosures.get("buyer") if isinstance(envelope_disclosures.get("buyer"), dict) else None
+    seller_disclosures = envelope_disclosures.get("seller") if isinstance(envelope_disclosures.get("seller"), dict) else None
     if _is_hex64(buyer_id):
-        _extract_refs(view, buyer_cap, buyer_id, prefix="buyer")
+        _extract_refs(view, buyer_cap, buyer_id, prefix="buyer", disclosures=buyer_disclosures)
     if _is_hex64(seller_id):
-        _extract_refs(view, seller_cap, seller_id, prefix="seller")
+        _extract_refs(view, seller_cap, seller_id, prefix="seller", disclosures=seller_disclosures)
     return view
 
 
-def _extract_refs(view: GraphView, cap: dict, capsule_id: str, prefix: str) -> None:
-    """Extract digest-typed fields from cap into view.nodes/edges/privilege_log."""
+def _extract_refs(
+    view: GraphView, cap: dict, capsule_id: str, prefix: str, disclosures: dict | None = None
+) -> None:
+    """Extract digest-typed fields from cap into view.nodes/edges/privilege_log.
+
+    ``disclosures`` is the Disclosure Envelope's out-of-band {agent_input, agent_output}
+    object for this capsule — NEVER read from cap["model_attestation"]["compute_attestation"],
+    which is digest-committed (embedding a payload there would change capsule_id).
+    """
+    disclosures = disclosures or {}
     seen = {n.id for n in view.nodes}
     pfx = f"{prefix}." if prefix else ""
 
@@ -244,7 +261,7 @@ def _extract_refs(view: GraphView, cap: dict, capsule_id: str, prefix: str) -> N
         _digest = ca.get(_key, "")
         if not _is_hex64(_digest) or _digest in seen:
             continue
-        _pre = ca.get(_key.replace("_digest", ""))
+        _pre = disclosures.get(_type)
         _revealed = _pre is not None
         if _revealed:
             # String payloads are hashed as raw UTF-8 bytes; objects use canonical JSON.
@@ -542,7 +559,7 @@ def detect_profile(data: dict) -> str:
     New profiles: register in PROFILE_PARSERS and add detection here.
     """
     if isinstance(data, dict):
-        if "capsule_id" in data or "buyer_capsule" in data:
+        if "capsule_id" in data or "buyer_capsule" in data or isinstance(data.get("capsule"), dict):
             return "aac"
         # MachineMandate: vct, eat_profile, or action_hash marker
         from .machine_mandate import is_machine_mandate  # lazy to avoid circular

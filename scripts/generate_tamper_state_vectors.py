@@ -93,9 +93,22 @@ def _base_capsule(vector: str, i: int, *, parent: str | None) -> dict:
     return cap
 
 
-def _summarize(bundle: list[dict], witness: dict | None) -> dict:
-    """Run the real evaluator — expected.json is derived, never hand-typed."""
-    views = [aac.parse_capsule(c) for c in bundle]
+def _summarize(bundle: list[dict], witness: dict | None, disclosures: dict | None = None) -> dict:
+    """Run the real evaluator — expected.json is derived, never hand-typed.
+
+    ``disclosures`` (optional) maps a bundle record's own capsule_id to its
+    Disclosure Envelope {"agent_input": ..., "agent_output": ...} object —
+    bundle records themselves always stay bare capsules (chain-gap/MMR-leaf
+    code reads capsule_id off them directly), so a revealed field is passed
+    in via this out-of-band map, never embedded in the record's own bytes.
+    """
+    disclosures = disclosures or {}
+    views = [
+        aac.parse_capsule({"capsule": c, "disclosures": disclosures[c["capsule_id"]]})
+        if c.get("capsule_id") in disclosures
+        else aac.parse_capsule(c)
+        for c in bundle
+    ]
     summary = aac.evaluate_ritual(bundle, views, witness=witness)
     notes = aac.annotate_records(bundle, views)
     gaps = aac.find_chain_gaps(bundle)
@@ -122,25 +135,24 @@ def _summarize(bundle: list[dict], witness: dict | None) -> dict:
     }
 
 
-def build_digest_mismatch() -> tuple[list[dict], dict | None]:
+def build_digest_mismatch() -> tuple[list[dict], dict | None, dict]:
     v = "digest_mismatch"
     c0 = _base_capsule(v, 0, parent=None)
     c1 = _base_capsule(v, 1, parent=c0["capsule_id"])
     committed = _digest({"tool": "refund", "amount_usd": 1180})
-    c1["model_attestation"] = {
-        "compute_attestation": {
-            "agent_input_digest": committed,
-            # tampered: revealed preimage does not hash to the committed digest
-            "agent_input": {"tool": "refund", "amount_usd": 9999},
-        }
-    }
+    # agent_input_digest is committed inside the signed capsule, as always; the
+    # preimage is disclosed out-of-band (Disclosure Envelope) — see `disclosures`
+    # below — never embedded here, or it would change this capsule's own capsule_id.
+    c1["model_attestation"] = {"compute_attestation": {"agent_input_digest": committed}}
     c2 = _base_capsule(v, 2, parent=c1["capsule_id"])  # cites the altered record
     for cap in (c0, c1, c2):
         cap["signed_statement"] = _sign(cap, issuer="acme-research")
-    return [c0, c1, c2], {"held": 1, "configured": 1, "reachable": True, "verified": True}
+    # tampered: the disclosed preimage does not hash to the committed digest
+    disclosures = {c1["capsule_id"]: {"agent_input": {"tool": "refund", "amount_usd": 9999}}}
+    return [c0, c1, c2], {"held": 1, "configured": 1, "reachable": True, "verified": True}, disclosures
 
 
-def build_chain_gap() -> tuple[list[dict], dict | None]:
+def build_chain_gap() -> tuple[list[dict], dict | None, dict]:
     v = "chain_gap"
     c0 = _base_capsule(v, 0, parent=None)
     c1 = _base_capsule(v, 1, parent=c0["capsule_id"])
@@ -148,10 +160,10 @@ def build_chain_gap() -> tuple[list[dict], dict | None]:
     c2 = _base_capsule(v, 2, parent=missing_parent)  # names a parent not in this bundle
     for cap in (c0, c1, c2):
         cap["signed_statement"] = _sign(cap, issuer="acme-research")
-    return [c0, c1, c2], {"held": 1, "configured": 1, "reachable": True, "verified": True}
+    return [c0, c1, c2], {"held": 1, "configured": 1, "reachable": True, "verified": True}, {}
 
 
-def build_witness_downgrade() -> tuple[list[dict], dict | None]:
+def build_witness_downgrade() -> tuple[list[dict], dict | None, dict]:
     v = "witness_downgrade"
     c0 = _base_capsule(v, 0, parent=None)
     c1 = _base_capsule(v, 1, parent=c0["capsule_id"])
@@ -162,10 +174,10 @@ def build_witness_downgrade() -> tuple[list[dict], dict | None]:
     # independent witnesses, only 1 has reported in so far. This is
     # fixture-declared data, illustrating an async multi-witness deployment
     # shape — the live anchor.agentactioncapsule.org is single-witness today.
-    return [c0, c1, c2], {"held": 1, "configured": 3, "reachable": True}
+    return [c0, c1, c2], {"held": 1, "configured": 3, "reachable": True}, {}
 
 
-def build_offline_pass() -> tuple[list[dict], dict | None]:
+def build_offline_pass() -> tuple[list[dict], dict | None, dict]:
     v = "offline_pass"
     c0 = _base_capsule(v, 0, parent=None)
     c1 = _base_capsule(v, 1, parent=c0["capsule_id"])
@@ -173,7 +185,7 @@ def build_offline_pass() -> tuple[list[dict], dict | None]:
     for cap in (c0, c1, c2):
         cap["signed_statement"] = _sign(cap, issuer="acme-research")
     # No witness data — network unreachable; everything else verified locally.
-    return [c0, c1, c2], {"reachable": False}
+    return [c0, c1, c2], {"reachable": False}, {}
 
 
 VECTORS = {
@@ -192,9 +204,11 @@ def main() -> None:
             print(f"refusing to overwrite already-published vector: {vec_dir}", file=sys.stderr)
             continue
         vec_dir.mkdir(parents=True)
-        bundle, witness = builder()
+        bundle, witness, disclosures = builder()
         bundle_doc = {"bundle": bundle, "witness": witness}
-        expected = _summarize(bundle, witness)
+        if disclosures:
+            bundle_doc["disclosures"] = disclosures
+        expected = _summarize(bundle, witness, disclosures)
         (vec_dir / "bundle.json").write_text(json.dumps(bundle_doc, indent=2, sort_keys=True) + "\n")
         (vec_dir / "expected.json").write_text(json.dumps(expected, indent=2, sort_keys=True) + "\n")
         print(f"wrote {vec_dir}")
