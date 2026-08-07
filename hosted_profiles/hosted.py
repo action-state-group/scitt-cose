@@ -557,7 +557,7 @@ var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
  * be integer-valued (e.g. 1.0) parses in JS as the Number 1, indistinguishable
  * from the JSON integer 1 -- the reference Python implementation instead
  * rejects ANY float in a digest-bearing field (S5.1 forbids floats there
- * entirely), so a compliant capsule never contains one. Out of scope here.
+ * entirely), so a capsule that follows the spec never contains one. Out of scope here.
  * NOTE: this lives in the file's raw Python string segment deliberately --
  * everything after the _MM_RENDER_JS splice below is a NON-raw Python
  * string, which silently halves literal backslashes. Do not move this block
