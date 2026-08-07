@@ -1,0 +1,5 @@
+include tests/conftest.py
+exclude tests/test_capsule_view.py
+exclude tests/test_hosted_page.py
+exclude tests/test_hosted_parity.py
+exclude tests/test_machine_mandate.py

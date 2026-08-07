@@ -30,7 +30,13 @@ Issues = "https://github.com/action-state-group/scitt-cose/issues"
 [project.optional-dependencies]
 # pycose is a THIRD-PARTY COSE library used ONLY in tests as an independent
 # conformance oracle (test_thirdparty_cose.py); never imported at runtime.
-dev = ["pytest>=7.0", "ruff>=0.4,<0.16", "pycose>=1.1"]
+# build (+ its setuptools/wheel build backend) is used ONLY by
+# test_packaging.py to build a real sdist artifact and assert on its
+# contents; never imported at runtime. Pinned explicitly rather than relying
+# on the base Python image to ship setuptools ambiently -- it doesn't on
+# every image (e.g. CI's 3.12 runner vs. 3.9), which left `build --no-isolation`
+# without a backend and failed CI.
+dev = ["pytest>=7.0", "ruff>=0.4,<0.16", "pycose>=1.1", "build>=1.0", "setuptools>=68", "wheel"]
 # serve: pulls in a production ASGI server for running the hosted verify
 # surface (hosted_profiles/hosted.py) from a full repo checkout — see the
 # Dockerfile. hosted_profiles/ is NOT part of this package (excluded from the
