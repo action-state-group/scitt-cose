@@ -1,0 +1,22 @@
+{
+  "capsule-1": {
+    "ok": true,
+    "recomputed": "b823aa8f5be968084235043d1b0d7dd3a66cb60d16f724ddcfc8d54a5ca5e978",
+    "stated": "b823aa8f5be968084235043d1b0d7dd3a66cb60d16f724ddcfc8d54a5ca5e978"
+  },
+  "capsule-2": {
+    "ok": true,
+    "recomputed": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd",
+    "stated": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd"
+  },
+  "capsule-2-tampered": {
+    "ok": false,
+    "recomputed": "47812907a4e9135be259e811c261c081a0ff322f9837cc9d9ad3b872fbda37b8",
+    "stated": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd"
+  },
+  "capsule-3": {
+    "ok": true,
+    "recomputed": "ff507525ececb1d1c6bdb1de7348ef7673dbe7a9d36ed5002d597ae447c6d710",
+    "stated": "ff507525ececb1d1c6bdb1de7348ef7673dbe7a9d36ed5002d597ae447c6d710"
+  }
+}

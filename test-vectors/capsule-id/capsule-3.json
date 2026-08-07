@@ -1,0 +1,43 @@
+{
+  "action_id": "escalate_to_manager/19434954-460d-4d53-9570-b98e5b060b05",
+  "action_type": "fyi",
+  "assurance": {
+    "attestation_mode": "self_attested",
+    "effect_mode": "dispatched_unconfirmed",
+    "ledger_mode": "chained"
+  },
+  "capsule_id": "ff507525ececb1d1c6bdb1de7348ef7673dbe7a9d36ed5002d597ae447c6d710",
+  "chain": {
+    "parent_capsule_id": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd",
+    "relation": "confirms"
+  },
+  "developer": "invoice-agent@v1",
+  "disposition": {
+    "approver": "policy",
+    "decision": "accept",
+    "human_disposed": false,
+    "verdict_class": "executed"
+  },
+  "effect": {
+    "effect_attestation": "runtime_claimed",
+    "status": "dispatched",
+    "type": "escalate_to_manager"
+  },
+  "format_version": "2",
+  "model_attestation": {
+    "compute_attestation": {
+      "agent_input_digest": "f80b20558478bc817c343e014e93e3077f7384e7cd8e4b2c7f2cf7e27083198a",
+      "agent_output_digest": "b13f8ba4bf84deb0e77b27a7b57820591cc8e603a2ef1452b006ce58e37817bf",
+      "dapr_agents": {
+        "agent_name": "invoice-checker",
+        "app_id": "invoice-app",
+        "tool_name": "escalate_to_manager",
+        "workflow_instance_id": "wf-demo-2026-07-30"
+      },
+      "runtime": "dapr_agents"
+    }
+  },
+  "operator": "acme-co",
+  "spec_version": "draft-mih-scitt-agent-action-capsule-02",
+  "timestamp": "2026-08-03T00:32:42.443846Z"
+}

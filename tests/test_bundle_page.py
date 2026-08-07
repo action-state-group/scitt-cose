@@ -81,6 +81,13 @@ def test_bundle_js_shared_helpers_match_capsule_js():
         BUNDLE_JS, "function _capMismatched(cap){", chain_end
     )
 
+    # capsule_id recompute (RFC 8785 JCS + SHA-256) — same drift-guard: both
+    # files carry a byte-identical hand-port of agent_action_capsule.canonical.
+    capid_end = "return{ok:false,stated:stated,recomputed:null,error:ex.message};\n  }\n}"
+    assert _slice_between(CAPSULE_JS, "var CHAIN_LINKAGE_FIELDS=", capid_end) == _slice_between(
+        BUNDLE_JS, "var CHAIN_LINKAGE_FIELDS=", capid_end
+    )
+
 
 # ---------------------------------------------------------------------------
 # render_bundle_page: routes, CSP, offline self-containment

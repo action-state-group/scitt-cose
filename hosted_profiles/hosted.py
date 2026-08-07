@@ -453,9 +453,12 @@ _CAPSULE_CSS = """
 .anchor-banner.anchor-none{background:var(--paper-2);color:var(--muted)}
 .anchor-banner.anchor-offline{background:var(--paper-2);color:var(--muted);border-style:dashed}
 .anchor-banner.anchor-loading{color:var(--muted);background:var(--paper-2)}
+.anchor-banner.anchor-fail{background:var(--fail-soft);border-color:var(--fail);border-width:2px;color:var(--fail);font-weight:700}
 .anchor-ok{color:var(--pass);font-weight:700}
 .anchor-offline{color:var(--muted);font-weight:600}
 .anchor-none{color:var(--muted)}
+.anchor-fail{color:var(--fail);font-weight:700}
+.anchor-fail-detail{font-family:var(--mono);font-size:11.5px;color:var(--fail);margin-top:6px;word-break:break-all;font-weight:400}
 .ritual-stages{border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .ritual-stage{display:flex;align-items:baseline;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:13px}
 .ritual-stage:last-child{border-bottom:none}
@@ -536,9 +539,109 @@ CAPSULE_JS = r"""
 (function(){"use strict";
 var capsuleId=document.body.getAttribute("data-capsule-id");
 var _capsuleLoaded=false;
+var _activeIntegrityPromise=Promise.resolve(null);
 var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
   "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1,
   "agent_input":1,"agent_output":1};
+
+/* ---------- capsule_id recompute (RFC 8785 JCS + SHA-256) ----------
+ * Faithful port of agent-action-capsule's
+ * python/agent_action_capsule/canonical.py (normalize / jcs / json_digest /
+ * compute_capsule_id -- draft-mih-scitt-agent-action-capsule S2, S5.1). The
+ * capsule JSON never leaves the browser (URL-fragment-only), so this is the
+ * only place capsule_id<->body integrity is ever checked for what this page
+ * actually renders. A capsule whose body does not hash to its own stated
+ * capsule_id has been altered after the id was assigned; see
+ * verifyCapsuleId, below, and its callers.
+ * Known, accepted gap (matches upstream docs): a JSON float that happens to
+ * be integer-valued (e.g. 1.0) parses in JS as the Number 1, indistinguishable
+ * from the JSON integer 1 -- the reference Python implementation instead
+ * rejects ANY float in a digest-bearing field (S5.1 forbids floats there
+ * entirely), so a compliant capsule never contains one. Out of scope here.
+ * NOTE: this lives in the file's raw Python string segment deliberately --
+ * everything after the _MM_RENDER_JS splice below is a NON-raw Python
+ * string, which silently halves literal backslashes. Do not move this block
+ * past that splice point. */
+var CHAIN_LINKAGE_FIELDS={"capsule_id":1,"chain":1};
+
+function CapsuleIdError(msg){this.message=msg;this.name="CapsuleIdError";}
+
+function _capIdNormalize(v){
+  if(Array.isArray(v))return v.map(_capIdNormalize);
+  if(v&&typeof v==="object"){
+    var out={};
+    Object.keys(v).forEach(function(k){
+      var nv=_capIdNormalize(v[k]);
+      if(nv===null||nv===undefined)return;
+      if(Array.isArray(nv)&&nv.length===0)return;
+      if(nv&&typeof nv==="object"&&!Array.isArray(nv)&&Object.keys(nv).length===0)return;
+      out[k]=nv;
+    });
+    return out;
+  }
+  return v;
+}
+
+function _capIdJcsString(s){
+  var out=['"'];
+  for(var ch of s){
+    var o=ch.codePointAt(0);
+    if(ch==='"')out.push('\\"');
+    else if(ch==="\\")out.push("\\\\");
+    else if(o===0x08)out.push("\\b");
+    else if(o===0x09)out.push("\\t");
+    else if(o===0x0A)out.push("\\n");
+    else if(o===0x0C)out.push("\\f");
+    else if(o===0x0D)out.push("\\r");
+    else if(o<0x20)out.push("\\u"+o.toString(16).padStart(4,"0"));
+    else out.push(ch);
+  }
+  out.push('"');
+  return out.join("");
+}
+
+function _capIdJcsValue(v){
+  if(v===null||v===undefined)return"null";
+  if(v===true)return"true";
+  if(v===false)return"false";
+  if(typeof v==="string")return _capIdJcsString(v);
+  if(typeof v==="number"){
+    if(!Number.isInteger(v))throw new CapsuleIdError("float in digest-bearing field");
+    if(v>Number.MAX_SAFE_INTEGER||v<-Number.MAX_SAFE_INTEGER)throw new CapsuleIdError("integer outside safe range");
+    return String(v);
+  }
+  if(Array.isArray(v))return"["+v.map(_capIdJcsValue).join(",")+"]";
+  if(typeof v==="object"){
+    var keys=Object.keys(v).sort();
+    return"{"+keys.map(function(k){return _capIdJcsString(k)+":"+_capIdJcsValue(v[k]);}).join(",")+"}";
+  }
+  throw new CapsuleIdError("value not JSON-serializable: "+typeof v);
+}
+
+async function _capIdSha256Hex(bytes){
+  var buf=await crypto.subtle.digest("SHA-256",bytes);
+  return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
+}
+
+async function computeCapsuleId(capsule){
+  if(!capsule||typeof capsule!=="object"||Array.isArray(capsule))throw new CapsuleIdError("capsule must be a JSON object");
+  var canonical={};
+  Object.keys(capsule).forEach(function(k){if(!CHAIN_LINKAGE_FIELDS[k])canonical[k]=capsule[k];});
+  var jcsStr=_capIdJcsValue(_capIdNormalize(canonical));
+  return await _capIdSha256Hex(new TextEncoder().encode(jcsStr));
+}
+
+async function verifyCapsuleId(cap){
+  var stated=(cap&&cap.capsule_id)||"";
+  if(!isH64(stated))return{ok:null,stated:stated,recomputed:null};
+  if(typeof crypto==="undefined"||!crypto.subtle)return{ok:null,stated:stated,recomputed:null};
+  try{
+    var recomputed=await computeCapsuleId(cap);
+    return{ok:recomputed===stated,stated:stated,recomputed:recomputed};
+  }catch(ex){
+    return{ok:false,stated:stated,recomputed:null,error:ex.message};
+  }
+}
 
 /* ---------- profile renderers plug-point ---------- */
 /* MachineMandate renderer inserted here — Tyche Institute vocabulary only.
@@ -577,6 +680,7 @@ function isH64(s){return typeof s==="string"&&s.length===64&&/^[0-9a-f]+$/i.test
 function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
 function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function $(id){return document.getElementById(id);}
+
 
 /* ---------- AAC graph parser ---------- */
 function parseAac(data){
@@ -811,9 +915,13 @@ function findChainGaps(capsules){
   return gaps;
 }
 
-function annotateRecords(capsules){
+function annotateRecords(capsules,integrity){
   var alteredIds={};
-  capsules.forEach(function(c){if(isH64(c.capsule_id)&&_capMismatched(c))alteredIds[c.capsule_id]=true;});
+  capsules.forEach(function(c,i){
+    if(!isH64(c.capsule_id))return;
+    var idr=integrity&&integrity[i];
+    if((idr&&idr.ok===false)||_capMismatched(c))alteredIds[c.capsule_id]=true;
+  });
   var byId={};
   capsules.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
   return capsules.map(function(cap){
@@ -851,21 +959,34 @@ function checkWitness(w){
   return{status:"pass",detail:"witnessed "+held+" of "+configured};
 }
 
-function evaluateRitual(capsules,witness){
+function evaluateRitual(capsules,witness,integrity){
   var stages=[],finding=null;
-  var alteredIds={},firstMismatch=null;
-  capsules.forEach(function(c){
+  var alteredIds={},firstMismatch=null,firstMismatchIsBody=false;
+  capsules.forEach(function(c,i){
     if(!isH64(c.capsule_id))return;
+    var idr=integrity&&integrity[i];
+    if(idr&&idr.ok===false){
+      alteredIds[c.capsule_id]=true;
+      if(!firstMismatch){firstMismatch=idr;firstMismatchIsBody=true;}
+    }
     var g=parseAac(c);
     var bad=g.privlog.filter(function(e){return e.matchOk===false;});
-    if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch)firstMismatch=bad[0];}
+    if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch){firstMismatch=bad[0];firstMismatchIsBody=false;}}
   });
   if(Object.keys(alteredIds).length){
-    stages.push({name:"Integrity",status:"fail",
-      detail:"record fails at stage digest_mismatch — "+firstMismatch.ctx+" no longer matches its fingerprint"});
-    finding={code:"digest_mismatch",label:"The finding",
-      text:firstMismatch.id+" ("+firstMismatch.ctx+") is not the value that was sealed.",
-      meta:"failed stage: digest_mismatch · field group: "+firstMismatch.ctx+" · digest "+firstMismatch.digest.slice(0,8)+"…"};
+    if(firstMismatchIsBody){
+      stages.push({name:"Integrity",status:"fail",
+        detail:"capsule_id does not match the recomputed digest of its own body — stated "+sh(firstMismatch.stated)+", recomputed "+(firstMismatch.recomputed?sh(firstMismatch.recomputed):"(could not be computed)")});
+      finding={code:"capsule_id_mismatch",label:"The finding",
+        text:"This capsule's content does not hash to its stated capsule_id. The body has been altered after the id was assigned — they no longer content-address to each other.",
+        meta:"failed stage: capsule_id_mismatch · stated capsule_id "+firstMismatch.stated+" · recomputed "+(firstMismatch.recomputed||"(error)")};
+    }else{
+      stages.push({name:"Integrity",status:"fail",
+        detail:"record fails at stage digest_mismatch — "+firstMismatch.ctx+" no longer matches its fingerprint"});
+      finding={code:"digest_mismatch",label:"The finding",
+        text:firstMismatch.id+" ("+firstMismatch.ctx+") is not the value that was sealed.",
+        meta:"failed stage: digest_mismatch · field group: "+firstMismatch.ctx+" · digest "+firstMismatch.digest.slice(0,8)+"…"};
+    }
   }else{
     stages.push({name:"Integrity",status:"pass",detail:"every record matches its fingerprint"});
   }
@@ -893,9 +1014,13 @@ function evaluateRitual(capsules,witness){
   return{stages:stages,finding:finding};
 }
 
-function renderRitual(bundle,witness){
+async function renderRitual(bundle,witness){
   var mount=$("ritualMount");if(!mount||!bundle||!bundle.length)return;
-  var summary=evaluateRitual(bundle,witness);
+  var integrity=null;
+  if(typeof crypto!=="undefined"&&crypto.subtle){
+    integrity=await Promise.all(bundle.map(verifyCapsuleId));
+  }
+  var summary=evaluateRitual(bundle,witness,integrity);
   var marks={pass:"✓",fail:"✕",skip:"–"};
   var h="<div class='ritual-stages'>";
   summary.stages.forEach(function(s){
@@ -912,7 +1037,7 @@ function renderRitual(bundle,witness){
   }
   var gaps=findChainGaps(bundle),gapAt={};
   gaps.forEach(function(g){gapAt[g.afterIdx]=g;});
-  var notes=annotateRecords(bundle);
+  var notes=annotateRecords(bundle,integrity);
   var rh="<table class='records-table'><thead><tr><th>#</th><th>record</th><th>note</th></tr></thead><tbody>";
   bundle.forEach(function(cap,i){
     if(gapAt[i]){
@@ -935,6 +1060,7 @@ function renderRitual(bundle,witness){
 
 /* ---------- load + permalink ---------- */
 function loadCapsule(data){
+  _activeIntegrityPromise=verifyCapsuleId(data);
   var profile=detectProfile(data);
   var renderer=PROFILE_RENDERERS[profile];
   if(!renderer){$("parseErr").textContent="Profile not recognised: "+profile;return;}
@@ -960,55 +1086,11 @@ if(hash){
 }
 
 /* anchor status (same-origin proxy avoids CORS). Unreachable is reported
- * neutrally — never as a failed verification (the check merely didn't run). */
+ * neutrally — never as a failed verification (the check merely didn't run).
+ * The fetch and its handling are wired up at the bottom of this file, after
+ * the bundle-array fragment (if any) is parsed too -- see the capsule-body
+ * integrity gate there for why. */
 function _ritualBundle(){return(_bundle&&_bundle.length)?_bundle:(_fragData?[_fragData]:null);}
-
-if(capsuleId){
-  fetch("/anchor-status/"+capsuleId)
-    .then(function(r){return r.json();})
-    .then(function(s){
-      var b=$("anchorBanner");
-      if(s.error){
-        b.innerHTML="<span class='anchor-offline'>Anchor unreachable</span> — witness check skipped, not failed: "+safe(s.error);
-        b.className="anchor-banner anchor-offline";
-        var rb=_ritualBundle();if(rb)renderRitual(rb,{reachable:false});
-        return;
-      }
-      if(s.anchored){
-        b.innerHTML="<span class='anchor-ok'>✓ Anchored</span> log index <code>"+s.log_index+"</code>"+
-          (s.receipt_verified?" · <span class='anchor-ok'>inclusion proof verified (RFC 9162)</span>":"");
-        if(s.logged_at)b.innerHTML+=" · "+safe(s.logged_at);
-        b.className="anchor-banner anchor-ok";
-        /* upgrade reg panel with tamper-evident-log rows now that receipt is confirmed */
-        if(_regLastData)renderRegPanel(_regLastData,true);
-        var rb2=_ritualBundle();
-        if(rb2)renderRitual(rb2,{held:1,configured:1,reachable:true,verified:s.receipt_verified!==false});
-        /* inclusion-only view: show witnessing facts when no capsule is loaded */
-        if(!_capsuleLoaded){
-          var _iSec=$("inclusionSection");
-          if(_iSec){
-            $("inclDigest").textContent=capsuleId;
-            $("inclLeaf").textContent=s.leaf_index!=null?s.leaf_index:"—";
-            $("inclTree").textContent=s.tree_size!=null?s.tree_size:"—";
-            var _rv=s.receipt_verified;
-            $("inclReceipt").innerHTML=_rv?"<span class='anchor-ok'>✓ verified (RFC 9162 SHA-256)</span>":"<span class='anchor-none'>unverified</span>";
-            _iSec.style.display="block";
-            if(document.title)document.title="Entry "+capsuleId.slice(0,8)+"\u2026 \u2014 Witnessed";
-          }
-        }
-      }else{
-        b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
-        b.className="anchor-banner anchor-none";
-        var rb3=_ritualBundle();if(rb3)renderRitual(rb3,{held:0,configured:1,reachable:true});
-      }
-    })
-    .catch(function(ex){
-      var b=$("anchorBanner");
-      b.innerHTML="<span class='anchor-offline'>Anchor unreachable</span> — witness check skipped, not failed: "+safe(ex.message);
-      b.className="anchor-banner anchor-offline";
-      var rb=_ritualBundle();if(rb)renderRitual(rb,{reachable:false});
-    });
-}
 
 /* paste form */
 $("loadBtn").addEventListener("click",function(){
@@ -1131,6 +1213,71 @@ if(hash){
       renderRitual(arr,wit);
     }
   }catch(ex){}
+}
+
+/* anchor status fetch, deferred to here (after both the single-fragment and
+ * bundle-array autoload blocks above) so _activeIntegrityPromise already
+ * reflects whichever capsule ended up focal by the time this Promise chain
+ * reads it. Gated on capsule-body integrity: a capsule_id that does not
+ * recompute from its own fragment body must never show the green "anchored"
+ * banner, no matter what the anchor log says about that id -- the id being
+ * logged proves nothing about the (possibly altered) body sitting in this
+ * fragment. */
+if(capsuleId){
+  fetch("/anchor-status/"+capsuleId)
+    .then(function(r){return r.json();})
+    .catch(function(ex){return{error:ex.message};})
+    .then(function(s){
+      return Promise.resolve(_activeIntegrityPromise).then(function(integrity){
+        var b=$("anchorBanner");
+        if(integrity&&integrity.ok===false){
+          b.innerHTML="<span class='anchor-fail'>✕ CAPSULE ID MISMATCH</span> — this body does not hash to its stated <code>capsule_id</code>"
+            +"<div class='anchor-fail-detail'>stated&nbsp;&nbsp;<code>"+safe(integrity.stated)+"</code><br>recomputed <code>"+safe(integrity.recomputed||"(could not be computed)")+"</code></div>";
+          b.className="anchor-banner anchor-fail";
+          var rbf=_ritualBundle();if(rbf)renderRitual(rbf,{reachable:true});
+          return;
+        }
+        if(s.error){
+          b.innerHTML="<span class='anchor-offline'>Anchor unreachable</span> — witness check skipped, not failed: "+safe(s.error);
+          b.className="anchor-banner anchor-offline";
+          var rb=_ritualBundle();if(rb)renderRitual(rb,{reachable:false});
+          return;
+        }
+        if(s.anchored){
+          b.innerHTML="<span class='anchor-ok'>✓ Anchored</span> log index <code>"+s.log_index+"</code>"+
+            (s.receipt_verified?" · <span class='anchor-ok'>inclusion proof verified (RFC 9162)</span>":"");
+          if(s.logged_at)b.innerHTML+=" · "+safe(s.logged_at);
+          b.className="anchor-banner anchor-ok";
+          /* upgrade reg panel with tamper-evident-log rows now that receipt is confirmed */
+          if(_regLastData)renderRegPanel(_regLastData,true);
+          var rb2=_ritualBundle();
+          if(rb2)renderRitual(rb2,{held:1,configured:1,reachable:true,verified:s.receipt_verified!==false});
+          /* inclusion-only view: show witnessing facts when no capsule is loaded */
+          if(!_capsuleLoaded){
+            var _iSec=$("inclusionSection");
+            if(_iSec){
+              $("inclDigest").textContent=capsuleId;
+              $("inclLeaf").textContent=s.leaf_index!=null?s.leaf_index:"—";
+              $("inclTree").textContent=s.tree_size!=null?s.tree_size:"—";
+              var _rv=s.receipt_verified;
+              $("inclReceipt").innerHTML=_rv?"<span class='anchor-ok'>✓ verified (RFC 9162 SHA-256)</span>":"<span class='anchor-none'>unverified</span>";
+              _iSec.style.display="block";
+              if(document.title)document.title="Entry "+capsuleId.slice(0,8)+"… — Witnessed";
+            }
+          }
+        }else{
+          b.innerHTML="<span class='anchor-none'>Not found in anchor transparency log</span>";
+          b.className="anchor-banner anchor-none";
+          var rb3=_ritualBundle();if(rb3)renderRitual(rb3,{held:0,configured:1,reachable:true});
+        }
+      });
+    })
+    .catch(function(ex){
+      var b=$("anchorBanner");
+      b.innerHTML="<span class='anchor-offline'>Anchor unreachable</span> — witness check skipped, not failed: "+safe(ex.message);
+      b.className="anchor-banner anchor-offline";
+      var rb=_ritualBundle();if(rb)renderRitual(rb,{reachable:false});
+    });
 }
 })();
 """
@@ -1544,6 +1691,89 @@ function isH64(s){return typeof s==="string"&&s.length===64&&/^[0-9a-f]+$/i.test
 function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
 function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
+/* === PORTED FROM CAPSULE_JS (verbatim) — capsule_id recompute (RFC 8785 JCS
+ * + SHA-256), see test_bundle_js_shared_helpers_match_capsule_js === */
+var CHAIN_LINKAGE_FIELDS={"capsule_id":1,"chain":1};
+
+function CapsuleIdError(msg){this.message=msg;this.name="CapsuleIdError";}
+
+function _capIdNormalize(v){
+  if(Array.isArray(v))return v.map(_capIdNormalize);
+  if(v&&typeof v==="object"){
+    var out={};
+    Object.keys(v).forEach(function(k){
+      var nv=_capIdNormalize(v[k]);
+      if(nv===null||nv===undefined)return;
+      if(Array.isArray(nv)&&nv.length===0)return;
+      if(nv&&typeof nv==="object"&&!Array.isArray(nv)&&Object.keys(nv).length===0)return;
+      out[k]=nv;
+    });
+    return out;
+  }
+  return v;
+}
+
+function _capIdJcsString(s){
+  var out=['"'];
+  for(var ch of s){
+    var o=ch.codePointAt(0);
+    if(ch==='"')out.push('\\"');
+    else if(ch==="\\")out.push("\\\\");
+    else if(o===0x08)out.push("\\b");
+    else if(o===0x09)out.push("\\t");
+    else if(o===0x0A)out.push("\\n");
+    else if(o===0x0C)out.push("\\f");
+    else if(o===0x0D)out.push("\\r");
+    else if(o<0x20)out.push("\\u"+o.toString(16).padStart(4,"0"));
+    else out.push(ch);
+  }
+  out.push('"');
+  return out.join("");
+}
+
+function _capIdJcsValue(v){
+  if(v===null||v===undefined)return"null";
+  if(v===true)return"true";
+  if(v===false)return"false";
+  if(typeof v==="string")return _capIdJcsString(v);
+  if(typeof v==="number"){
+    if(!Number.isInteger(v))throw new CapsuleIdError("float in digest-bearing field");
+    if(v>Number.MAX_SAFE_INTEGER||v<-Number.MAX_SAFE_INTEGER)throw new CapsuleIdError("integer outside safe range");
+    return String(v);
+  }
+  if(Array.isArray(v))return"["+v.map(_capIdJcsValue).join(",")+"]";
+  if(typeof v==="object"){
+    var keys=Object.keys(v).sort();
+    return"{"+keys.map(function(k){return _capIdJcsString(k)+":"+_capIdJcsValue(v[k]);}).join(",")+"}";
+  }
+  throw new CapsuleIdError("value not JSON-serializable: "+typeof v);
+}
+
+async function _capIdSha256Hex(bytes){
+  var buf=await crypto.subtle.digest("SHA-256",bytes);
+  return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
+}
+
+async function computeCapsuleId(capsule){
+  if(!capsule||typeof capsule!=="object"||Array.isArray(capsule))throw new CapsuleIdError("capsule must be a JSON object");
+  var canonical={};
+  Object.keys(capsule).forEach(function(k){if(!CHAIN_LINKAGE_FIELDS[k])canonical[k]=capsule[k];});
+  var jcsStr=_capIdJcsValue(_capIdNormalize(canonical));
+  return await _capIdSha256Hex(new TextEncoder().encode(jcsStr));
+}
+
+async function verifyCapsuleId(cap){
+  var stated=(cap&&cap.capsule_id)||"";
+  if(!isH64(stated))return{ok:null,stated:stated,recomputed:null};
+  if(typeof crypto==="undefined"||!crypto.subtle)return{ok:null,stated:stated,recomputed:null};
+  try{
+    var recomputed=await computeCapsuleId(cap);
+    return{ok:recomputed===stated,stated:stated,recomputed:recomputed};
+  }catch(ex){
+    return{ok:false,stated:stated,recomputed:null,error:ex.message};
+  }
+}
+
 function parseAac(data){
   var nodes=[],edges=[],privlog=[],unk=[],seen={};
   var isB=!!(data.buyer_capsule&&data.seller_capsule);
@@ -1628,9 +1858,13 @@ function findChainGaps(capsules){
   return gaps;
 }
 
-function annotateRecords(capsules){
+function annotateRecords(capsules,integrity){
   var alteredIds={};
-  capsules.forEach(function(c){if(isH64(c.capsule_id)&&_capMismatched(c))alteredIds[c.capsule_id]=true;});
+  capsules.forEach(function(c,i){
+    if(!isH64(c.capsule_id))return;
+    var idr=integrity&&integrity[i];
+    if((idr&&idr.ok===false)||_capMismatched(c))alteredIds[c.capsule_id]=true;
+  });
   var byId={};
   capsules.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
   return capsules.map(function(cap){
@@ -1793,22 +2027,35 @@ async function crossCheckSelfReport(bundle,records){
 }
 
 /* ---------- ritual: Integrity / Sequence / Completeness / Cross-check ---------- */
-async function evaluateBundleRitual(records,completeness,crossCheck){
+async function evaluateBundleRitual(records,completeness,crossCheck,integrity){
   var stages=[],finding=null;
-  var alteredIds={},firstMismatch=null;
+  var alteredIds={},firstMismatch=null,firstMismatchIsBody=false;
   for(var idx=0;idx<records.length;idx++){
     var c=records[idx];
     if(!isH64(c.capsule_id))continue;
+    var idr=integrity&&integrity[idx];
+    if(idr&&idr.ok===false){
+      alteredIds[c.capsule_id]=true;
+      if(!firstMismatch){firstMismatch=idr;firstMismatchIsBody=true;}
+    }
     var g=await verifyCapsuleDigests(c);
     var bad=g.privlog.filter(function(e){return e.matchOk===false;});
-    if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch)firstMismatch=bad[0];}
+    if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch){firstMismatch=bad[0];firstMismatchIsBody=false;}}
   }
   if(Object.keys(alteredIds).length){
-    stages.push({name:"Integrity",status:"fail",
-      detail:"record fails at stage digest_mismatch — "+firstMismatch.ctx+" no longer matches its fingerprint"});
-    finding={label:"The finding",
-      text:firstMismatch.id+" ("+firstMismatch.ctx+") is not the value that was sealed.",
-      meta:"failed stage: digest_mismatch · field group: "+firstMismatch.ctx+" · digest "+firstMismatch.digest.slice(0,8)+"…"};
+    if(firstMismatchIsBody){
+      stages.push({name:"Integrity",status:"fail",
+        detail:"capsule_id does not match the recomputed digest of its own body — stated "+sh(firstMismatch.stated)+", recomputed "+(firstMismatch.recomputed?sh(firstMismatch.recomputed):"(could not be computed)")});
+      finding={label:"The finding",
+        text:"This capsule's content does not hash to its stated capsule_id. The body has been altered after the id was assigned — they no longer content-address to each other.",
+        meta:"failed stage: capsule_id_mismatch · stated capsule_id "+firstMismatch.stated+" · recomputed "+(firstMismatch.recomputed||"(error)")};
+    }else{
+      stages.push({name:"Integrity",status:"fail",
+        detail:"record fails at stage digest_mismatch — "+firstMismatch.ctx+" no longer matches its fingerprint"});
+      finding={label:"The finding",
+        text:firstMismatch.id+" ("+firstMismatch.ctx+") is not the value that was sealed.",
+        meta:"failed stage: digest_mismatch · field group: "+firstMismatch.ctx+" · digest "+firstMismatch.digest.slice(0,8)+"…"};
+    }
   }else{
     stages.push({name:"Integrity",status:"pass",detail:"every record matches its fingerprint"});
   }
@@ -1876,9 +2123,9 @@ function renderPrivlog(rows){
   // digest pass here; the table above already reflects the real verdict.
 }
 
-function renderRecordsTable(records){
+function renderRecordsTable(records,integrity){
   var el=$("recordsTableContent");if(!el)return;
-  var notes=annotateRecords(records);
+  var notes=annotateRecords(records,integrity);
   var gaps=findChainGaps(records),gapAt={};
   gaps.forEach(function(g){gapAt[g.afterIdx]=g;});
   var h="<table class='records-table'><thead><tr><th>#</th><th>capsule_id</th><th>action_type</th><th>note</th></tr></thead><tbody>";
@@ -1950,14 +2197,16 @@ async function loadBundle(data,fragmentB64u){
   var dl=$("downloadBtn");if(dl){dl.disabled=false;dl.style.opacity="1";}
   var cp=$("copyLinkBtn");if(cp){cp.disabled=false;cp.style.opacity="1";}
 
+  var integrity=await Promise.all(records.map(verifyCapsuleId));
+
   var privlog=await buildBundlePrivlog(records);
   renderPrivlog(privlog);
-  renderRecordsTable(records);
+  renderRecordsTable(records,integrity);
 
   var completeness=await checkCompleteness(data);
   renderCompletenessCard(completeness);
   var crossCheck=await crossCheckSelfReport(data,records);
-  var ritual=await evaluateBundleRitual(records,completeness,crossCheck);
+  var ritual=await evaluateBundleRitual(records,completeness,crossCheck,integrity);
   renderRitual(ritual);
 
   try{ history.replaceState(null,"",location.pathname+location.search+"#"+_fragmentB64u); }catch(ex){}

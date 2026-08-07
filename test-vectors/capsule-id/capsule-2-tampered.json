@@ -1,0 +1,43 @@
+{
+  "action_id": "approve_payment/cf9593f0-e37c-4544-a1f9-25bc728ae2a5",
+  "action_type": "decide",
+  "assurance": {
+    "attestation_mode": "self_attested",
+    "effect_mode": "not_applicable",
+    "ledger_mode": "chained"
+  },
+  "capsule_id": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd",
+  "chain": {
+    "parent_capsule_id": "b823aa8f5be968084235043d1b0d7dd3a66cb60d16f724ddcfc8d54a5ca5e978",
+    "relation": "confirms"
+  },
+  "developer": "invoice-agent@v1",
+  "disposition": {
+    "approver": "human",
+    "decision": "accept",
+    "human_disposed": true,
+    "verdict_class": "executed"
+  },
+  "effect": {
+    "status": "planned",
+    "type": "approve_payment"
+  },
+  "format_version": "2",
+  "model_attestation": {
+    "compute_attestation": {
+      "agent_input_digest": "8718f624d6197bed7746b066e8fa4e9adabec47cd8ac63e5e74230be285f358f",
+      "agent_output_digest": "dcf8bae7ac5848c3b1f95e701a261b5630172124f3aa06a925b9ad286d179412",
+      "dapr_agents": {
+        "agent_name": "invoice-checker",
+        "app_id": "invoice-app",
+        "approver_id": "bob@acme.com",
+        "tool_name": "approve_payment",
+        "workflow_instance_id": "wf-demo-2026-07-30"
+      },
+      "runtime": "dapr_agents"
+    }
+  },
+  "operator": "acme-co",
+  "spec_version": "draft-mih-scitt-agent-action-capsule-02",
+  "timestamp": "2026-08-03T00:32:41.449932Z"
+}
