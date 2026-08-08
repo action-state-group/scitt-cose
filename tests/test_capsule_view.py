@@ -758,6 +758,119 @@ def test_anchor_proxy_404_returns_not_anchored_no_error():
     assert result["anchored"] is False
     assert result["error"] is None
     assert result["capsule_id"] == _UNKNOWN_ID
+    assert result["rung"] == "standalone", (
+        "not found at THIS anchor -> standalone, from this surface's perspective"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Anchoring-evidence rung (docs/ledger-grade.md §4 twin) — one fixture per
+# rung value the anchor-status proxy can observe. Same five-value vocabulary
+# as agent_action_capsule.history.RUNGS; "countersigned" is not reachable via
+# this endpoint (a TS inclusion lookup cannot see countersignatures) and is
+# covered on the JS renderer side instead, below.
+# ---------------------------------------------------------------------------
+
+def _mock_inclusion_response(extra_fields: dict):
+    from unittest.mock import MagicMock
+
+    body = json.dumps({
+        "capsule_id": _LEAF_199_CAPSULE_ID,
+        "entry_hash": "a" * 64,
+        "leaf_index": 199,
+        "tree_size": 200,
+        "leaf_hash": "b" * 64,
+        "audit_path": [],
+        "root_hash": "c" * 64,
+        "receipt_b64": "",
+        **extra_fields,
+    }).encode()
+    mock_resp = MagicMock()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.read.return_value = body
+    return mock_resp
+
+
+def test_anchor_proxy_rung_publicly_anchored_default():
+    """No visibility hint on a found entry -> publicly-anchored: _ANCHOR_BASE
+    IS this deployment's public transparency service."""
+    from unittest.mock import patch
+
+    with patch("urllib.request.urlopen", return_value=_mock_inclusion_response({})):
+        result = _anchor_proxy_json(_LEAF_199_CAPSULE_ID)
+    assert result["anchored"] is True
+    assert result["rung"] == "publicly-anchored"
+
+
+def test_anchor_proxy_rung_publicly_anchored_explicit():
+    from unittest.mock import patch
+
+    with patch(
+        "urllib.request.urlopen",
+        return_value=_mock_inclusion_response({"visibility": "public"}),
+    ):
+        result = _anchor_proxy_json(_LEAF_199_CAPSULE_ID)
+    assert result["rung"] == "publicly-anchored"
+
+
+def test_anchor_proxy_rung_counterparty_visible():
+    from unittest.mock import patch
+
+    with patch(
+        "urllib.request.urlopen",
+        return_value=_mock_inclusion_response({"visibility": "counterparty"}),
+    ):
+        result = _anchor_proxy_json(_LEAF_199_CAPSULE_ID)
+    assert result["rung"] == "counterparty-visible"
+
+
+def test_anchor_proxy_rung_local_anchored():
+    from unittest.mock import patch
+
+    with patch(
+        "urllib.request.urlopen",
+        return_value=_mock_inclusion_response({"visibility": "local"}),
+    ):
+        result = _anchor_proxy_json(_LEAF_199_CAPSULE_ID)
+    assert result["rung"] == "local-anchored"
+
+
+def test_anchor_proxy_rung_standalone_on_404():
+    """Duplicate of the assertion added to test_anchor_proxy_404_returns_not_anchored_no_error,
+    named for the rung-fixture set so all five values have a directly-findable case."""
+    import urllib.error
+    from unittest.mock import patch
+
+    def _raise_404(req, **_kw):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    with patch("urllib.request.urlopen", side_effect=_raise_404):
+        result = _anchor_proxy_json("e" * 64)
+    assert result["rung"] == "standalone"
+
+
+def test_anchor_proxy_rung_none_on_transport_error():
+    """A real transport error is NOT the same claim as 'standalone' — the
+    surface does not know, so it must not assert a rung at all."""
+    from unittest.mock import patch
+
+    with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
+        result = _anchor_proxy_json("f" * 64)
+    assert result["error"] is not None
+    assert result["rung"] is None
+
+
+def test_capsule_js_rung_renderer_covers_all_five_values():
+    """The banner's JS renderer supports the full five-value vocabulary, even
+    though this endpoint can only naturally emit standalone/local-anchored/
+    counterparty-visible/publicly-anchored — 'countersigned' is future-proofed
+    so the shared vocabulary never contradicts the library."""
+    for rung in ("standalone", "countersigned", "local-anchored", "counterparty-visible", "publicly-anchored"):
+        assert f'"{rung}"' in CAPSULE_JS, f"RUNG_INFO missing entry for {rung!r}"
+    assert "rungInfo" in CAPSULE_JS
+    assert "RUNG_INFO" in CAPSULE_JS
+    assert "s.rung" in CAPSULE_JS
 
 
 # ---------------------------------------------------------------------------
