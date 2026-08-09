@@ -37,8 +37,11 @@ def go_binary(tmp_path_factory: pytest.TempPathFactory) -> str:
     if go is None:
         _skip_or_fail("go is not on PATH")
     out = tmp_path_factory.mktemp("gv") / "scitt-cose-go-verify"
-    proc = subprocess.run([go, "build", "-o", str(out), "."], cwd=str(GO_DIR),
-                          capture_output=True, text=True, timeout=300)
+    try:
+        proc = subprocess.run([go, "build", "-o", str(out), "."], cwd=str(GO_DIR),
+                              capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - env
+        _skip_or_fail(f"could not run `go build`: {exc}")
     if proc.returncode != 0:  # pragma: no cover - env
         _skip_or_fail(f"go build failed: {proc.stderr}")
     return str(out)

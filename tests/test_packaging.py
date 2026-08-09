@@ -26,6 +26,11 @@ _FORBIDDEN_TEST_FILENAMES = {
     "test_hosted_page.py",
     "test_hosted_parity.py",
     "test_machine_mandate.py",
+    "test_bundle_e2e_capsule_ledger.py",
+    "test_bundle_page.py",
+    "test_capsule_id_recompute.py",
+    "test_mmr_js_parity.py",
+    "test_tamper_states.py",
 }
 
 
