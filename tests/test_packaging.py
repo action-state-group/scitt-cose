@@ -53,3 +53,8 @@ def test_no_application_profile_content_in_sdist(tmp_path):
         f"repository-oriented tests that import hosted_profiles must be excluded "
         f"from the sdist (see MANIFEST.in): {sorted(offenders)}"
     )
+
+    # The exclusion assertions above don't guard the `include tests/conftest.py`
+    # line in MANIFEST.in: removing it silently drops conftest from the sdist
+    # (no forbidden filename to trip on) while every other assertion still passes.
+    assert any(n.endswith("/tests/conftest.py") for n in names)
