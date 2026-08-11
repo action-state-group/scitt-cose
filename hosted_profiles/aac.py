@@ -59,6 +59,14 @@ def _short(digest: str) -> str:
     return digest[:8] + "…" + digest[-4:]
 
 
+def _unwrap(cap: dict) -> dict:
+    """Unwrap a Disclosure Envelope (``{"capsule": {...}, "disclosures": {...}}``)
+    to the underlying capsule. A bare capsule (no "capsule" key) passes through
+    unchanged. Mirrors ``CAPSULE_JS``'s ``unwrapEnvelope()``."""
+    inner = cap.get("capsule") if isinstance(cap, dict) else None
+    return inner if isinstance(inner, dict) else cap
+
+
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -328,10 +336,13 @@ def find_chain_gaps(capsules: list[dict]) -> list[ChainGap]:
     A gap exists when a capsule names a well-formed parent digest that does
     not match any other capsule_id present in the bundle. Order in ``capsules``
     is assumed to be the display/chain order (as loaded from a bundle array).
+    Each item is unwrapped first — a Disclosure-Envelope-wrapped bundle item
+    carries capsule_id/chain nested under "capsule", not at the top level.
     """
-    ids = {c.get("capsule_id") for c in capsules if _is_hex64(c.get("capsule_id", ""))}
+    caps = [_unwrap(c) for c in capsules]
+    ids = {c.get("capsule_id") for c in caps if _is_hex64(c.get("capsule_id", ""))}
     gaps: list[ChainGap] = []
-    for i, cap in enumerate(capsules):
+    for i, cap in enumerate(caps):
         if i == 0:
             continue
         parent = (cap.get("chain") or {}).get("parent_capsule_id", "")
@@ -460,8 +471,8 @@ def evaluate_ritual(
     gaps = find_chain_gaps(capsules)
     if gaps:
         g = gaps[0]
-        before_id = capsules[g.before_index].get("capsule_id", "")
-        after_id = capsules[g.after_index].get("capsule_id", "")
+        before_id = _unwrap(capsules[g.before_index]).get("capsule_id", "")
+        after_id = _unwrap(capsules[g.after_index]).get("capsule_id", "")
         stages.append(RitualStage(
             "Sequence", "fail",
             f"gap between record {g.before_index + 1} and record {g.after_index + 1} "
@@ -507,16 +518,18 @@ def annotate_records(capsules: list[dict], views: list[GraphView]) -> list[Recor
     doesn't fail itself but chains — directly or transitively, via
     ``chain.parent_capsule_id`` — to an altered record still verifies on its
     own terms, so it is FLAGGED ("cites an altered record"), never failed.
+    Each item is unwrapped first — see ``find_chain_gaps``.
     """
+    caps = [_unwrap(c) for c in capsules]
     altered_ids = {
-        capsules[i].get("capsule_id", "")
+        caps[i].get("capsule_id", "")
         for i, v in enumerate(views)
-        if any(e.match_ok is False for e in v.privilege_log) and _is_hex64(capsules[i].get("capsule_id", ""))
+        if any(e.match_ok is False for e in v.privilege_log) and _is_hex64(caps[i].get("capsule_id", ""))
     }
-    by_id = {c.get("capsule_id", ""): c for c in capsules if _is_hex64(c.get("capsule_id", ""))}
+    by_id = {c.get("capsule_id", ""): c for c in caps if _is_hex64(c.get("capsule_id", ""))}
 
     notes: list[RecordNote] = []
-    for i, cap in enumerate(capsules):
+    for i, cap in enumerate(caps):
         cid = cap.get("capsule_id", "")
         if cid in altered_ids:
             notes.append(RecordNote(i, "digest_mismatch", True, False))
