@@ -28,6 +28,7 @@ from hosted_profiles.hosted import (
     CAPSULE_JS,
     INSTRUMENTATION_POLICY,
     _anchor_proxy_json,
+    _capsule_has_hitl,
     _capsule_id_from_path,
     _instrument_capsule_view,
     _render_reg_panel,
@@ -554,6 +555,61 @@ def test_reg_panel_links_to_crosswalk():
     html = _render_reg_panel(has_receipt=True, has_hitl=False, has_withheld=False)
     assert "regulatory-crosswalk.md" in html
     assert "full crosswalk" in html
+
+
+def test_capsule_has_hitl_nested_disposition_flag():
+    """(a) disposition.human_disposed=True lights human-oversight-record.
+
+    §5.4/5.5 places human_disposed INSIDE the disposition block.
+    """
+    cap = {"disposition": {"human_disposed": True, "approver": "human"}}
+    assert _capsule_has_hitl(cap) is True
+    html = _render_reg_panel(has_receipt=False, has_hitl=_capsule_has_hitl(cap), has_withheld=False)
+    assert "human-oversight-record" in html
+
+
+def test_capsule_has_hitl_ignores_top_level_field():
+    """(b) regression pin: a TOP-LEVEL human_disposed=True with a policy
+    approver must NOT light the panel — this is the exact shape of the bug
+    where checkHitl() read cap.human_disposed instead of
+    cap.disposition.human_disposed.
+    """
+    cap = {"human_disposed": True, "disposition": {"approver": "policy"}}
+    assert _capsule_has_hitl(cap) is False
+    html = _render_reg_panel(has_receipt=False, has_hitl=_capsule_has_hitl(cap), has_withheld=False)
+    assert "human-oversight-record" not in html
+
+
+def test_capsule_has_hitl_fires_on_human_approver_alone():
+    """(c) disposition.approver="human" with human_disposed=False still lights
+    the panel — the crosswalk (docs/regulatory-crosswalk.md, EU AI Act Art
+    50(2)/(3) row) cites disposition.approver as an independent property
+    alongside human_disposed for human-oversight-record.
+    """
+    cap = {"disposition": {"approver": "human", "human_disposed": False}}
+    assert _capsule_has_hitl(cap) is True
+    html = _render_reg_panel(has_receipt=False, has_hitl=_capsule_has_hitl(cap), has_withheld=False)
+    assert "human-oversight-record" in html
+
+
+def test_reg_panel_open_by_default():
+    """(d) the reg panel <details> renders with the open attribute — expanded
+    by default, still collapsible (Steven's ruling)."""
+    html = _render_reg_panel(has_receipt=False, has_hitl=False, has_withheld=False)
+    assert '<details class="reg-panel" open>' in html
+
+
+def test_capsule_js_checkhitl_reads_nested_disposition():
+    """Source-level pin on CAPSULE_JS's checkHitl(): must read
+    cap.disposition.human_disposed, and must NOT contain the bare top-level
+    cap.human_disposed read that was the bug."""
+    assert "cap.disposition.human_disposed===true" in CAPSULE_JS
+    assert "cap.human_disposed===true" not in CAPSULE_JS
+
+
+def test_capsule_js_reg_panel_open_by_default():
+    """CAPSULE_JS's client-rendered reg panel also opens by default."""
+    assert "<details class='reg-panel' id='regPanelDetails' open>" in CAPSULE_JS
 
 
 def test_capsule_page_has_reg_panel_mount():
