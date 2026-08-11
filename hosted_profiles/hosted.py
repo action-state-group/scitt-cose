@@ -897,9 +897,10 @@ function renderRegPanel(data,hasReceipt){
   /* detect properties from capsule data */
   var activeProps={"per-action-attribution":1};
   if(hasReceipt)activeProps["tamper-evident-log"]=1;
-  /* human-oversight: disposition + human_disposed on any capsule */
+  /* human-oversight: disposition.human_disposed on any capsule (§5.4/5.5 —
+     the flag lives INSIDE the disposition block, not at the capsule top level) */
   function checkHitl(cap){
-    return cap&&cap.disposition&&(cap.human_disposed===true||(cap.disposition&&cap.disposition.approver==="human"));
+    return cap&&cap.disposition&&(cap.disposition.human_disposed===true||cap.disposition.approver==="human");
   }
   if(checkHitl(data)||checkHitl(data&&data.buyer_capsule)||checkHitl(data&&data.seller_capsule))
     activeProps["human-oversight-record"]=1;
@@ -920,7 +921,7 @@ function renderRegPanel(data,hasReceipt){
     rows+="<tr><td>"+safe(r[0])+"</td><td>"+safe(r[1])+"</td><td><span class='reg-prop'>"+safe(r[2])+"</span></td></tr>";
   });
 
-  mount.innerHTML="<details class='reg-panel' id='regPanelDetails'>"
+  mount.innerHTML="<details class='reg-panel' id='regPanelDetails' open>"
     +"<summary>Regulatory context (informational) "
     +"<span style='font-weight:400;font-size:12px;color:var(--muted);margin-left:8px'>properties detected: "+safe(propsShown)+"</span></summary>"
     +"<div class='reg-panel-body'>"
@@ -2499,6 +2500,20 @@ _PROP_LABELS: dict[str, str] = {
 }
 
 
+def _capsule_has_hitl(cap: dict) -> bool:
+    """Python mirror of ``CAPSULE_JS``'s ``checkHitl()`` — kept in parity by tests.
+
+    §5.4/5.5: ``human_disposed`` lives INSIDE the ``disposition`` block, not at
+    the capsule top level; ``disposition.approver == "human"`` independently
+    signals human-oversight per the regulatory crosswalk (both cited for
+    ``human-oversight-record``).
+    """
+    disposition = cap.get("disposition") if isinstance(cap, dict) else None
+    if not disposition:
+        return False
+    return disposition.get("human_disposed") is True or disposition.get("approver") == "human"
+
+
 def _render_reg_panel(has_receipt: bool, has_hitl: bool, has_withheld: bool) -> str:
     """Return HTML for the regulatory-context collapsible panel.
 
@@ -2532,7 +2547,7 @@ def _render_reg_panel(has_receipt: bool, has_hitl: bool, has_withheld: bool) -> 
     props_shown = ", ".join(sorted(active_props))
     crosswalk_url = _esc(_REG_CROSSWALK_URL)
 
-    return f"""<details class="reg-panel">
+    return f"""<details class="reg-panel" open>
   <summary>Regulatory context (informational) <span style="font-weight:400;font-size:12px;color:var(--muted);margin-left:8px">properties detected: {_esc(props_shown)}</span></summary>
   <div class="reg-panel-body">
     <p class="reg-disclaimer">This panel identifies structural properties of this record. It is not legal advice. Consult the <a href="{crosswalk_url}" target="_blank" rel="noopener noreferrer">full crosswalk</a> for instrument citations and limits.</p>
@@ -3593,6 +3608,7 @@ __all__ = [
     "render_landing_page",
     "render_capsule_page",
     "render_bundle_page",
+    "_capsule_has_hitl",
     "_render_reg_panel",
     "verify_payload",
     "verify_request_bytes",
