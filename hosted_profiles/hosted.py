@@ -649,11 +649,12 @@ async function computeCapsuleId(capsule){
 }
 
 async function verifyCapsuleId(cap){
-  var stated=(cap&&cap.capsule_id)||"";
+  var c=unwrapEnvelope(cap);
+  var stated=(c&&c.capsule_id)||"";
   if(!isH64(stated))return{ok:null,stated:stated,recomputed:null};
   if(typeof crypto==="undefined"||!crypto.subtle)return{ok:null,stated:stated,recomputed:null};
   try{
-    var recomputed=await computeCapsuleId(cap);
+    var recomputed=await computeCapsuleId(c);
     return{ok:recomputed===stated,stated:stated,recomputed:recomputed};
   }catch(ex){
     return{ok:false,stated:stated,recomputed:null,error:ex.message};
@@ -694,6 +695,10 @@ function detectProfile(d){
 
 /* ---------- helpers ---------- */
 function isH64(s){return typeof s==="string"&&s.length===64&&/^[0-9a-f]+$/i.test(s);}
+/* Disclosure Envelope unwrap: {"capsule":{...unmodified...},"disclosures":{...}} ->
+ * the unmodified capsule. A bare capsule (no "capsule" wrapper key, or a
+ * bilateral binding with buyer_capsule/seller_capsule) passes through unchanged. */
+function unwrapEnvelope(item){return(item&&typeof item==="object"&&item.capsule&&typeof item.capsule==="object")?item.capsule:item;}
 function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
 function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function $(id){return document.getElementById(id);}
@@ -894,6 +899,15 @@ function renderRegPanel(data,hasReceipt){
   var sec=$("regPanelSection");var mount=$("regPanelMount");
   if(!sec||!mount)return;
 
+  /* Disclosure Envelope unwrap: for a {"capsule":{...},"disclosures":{...}}
+     fragment, disposition/model_attestation/sealed_terms_hash/etc. live at
+     data.capsule.*, not at the top level — same unwrap parseAac already does
+     for the graph/privilege-log path. Without this, every property detector
+     below silently undercounts on a disclosed capsule (data is the envelope,
+     not the capsule, so data.disposition is undefined even though the
+     underlying capsule has one). */
+  var envCap=unwrapEnvelope(data);
+
   /* detect properties from capsule data */
   var activeProps={"per-action-attribution":1};
   if(hasReceipt)activeProps["tamper-evident-log"]=1;
@@ -902,7 +916,7 @@ function renderRegPanel(data,hasReceipt){
   function checkHitl(cap){
     return cap&&cap.disposition&&(cap.disposition.human_disposed===true||cap.disposition.approver==="human");
   }
-  if(checkHitl(data)||checkHitl(data&&data.buyer_capsule)||checkHitl(data&&data.seller_capsule))
+  if(checkHitl(envCap)||checkHitl(envCap&&envCap.buyer_capsule)||checkHitl(envCap&&envCap.seller_capsule))
     activeProps["human-oversight-record"]=1;
   /* disclosure: withheld_commitments or sealed_terms_hash with no terms */
   function checkSd(cap){
@@ -911,7 +925,7 @@ function renderRegPanel(data,hasReceipt){
       ||(cap.constraints&&cap.constraints.some(function(c){return c.evidence_digest;}))
       ||isH64(_ca.agent_input_digest)||isH64(_ca.agent_output_digest));
   }
-  if((data&&data.sealed_terms_hash&&!data.terms)||checkSd(data)||checkSd(data&&data.buyer_capsule)||checkSd(data&&data.seller_capsule))
+  if((envCap&&envCap.sealed_terms_hash&&!envCap.terms)||checkSd(envCap)||checkSd(envCap&&envCap.buyer_capsule)||checkSd(envCap&&envCap.seller_capsule))
     activeProps["disclosure-transparency-record"]=1;
 
   var propsShown=Object.keys(activeProps).sort().join(", ");
@@ -948,26 +962,35 @@ function _capMismatched(cap){
 }
 
 function findChainGaps(capsules){
+  /* Unwrap first: a Disclosure-Envelope-wrapped bundle item carries capsule_id
+   * and chain nested under "capsule", not at the top level — without this,
+   * every envelope-wrapped item is invisible to gap detection. */
+  var caps=capsules.map(unwrapEnvelope);
   var ids={};
-  capsules.forEach(function(c){if(isH64(c.capsule_id))ids[c.capsule_id]=true;});
+  caps.forEach(function(c){if(isH64(c.capsule_id))ids[c.capsule_id]=true;});
   var gaps=[];
-  for(var i=1;i<capsules.length;i++){
-    var parent=((capsules[i].chain)||{}).parent_capsule_id||"";
+  for(var i=1;i<caps.length;i++){
+    var parent=((caps[i].chain)||{}).parent_capsule_id||"";
     if(isH64(parent)&&!ids[parent])gaps.push({beforeIdx:i-1,afterIdx:i,missingParent:parent});
   }
   return gaps;
 }
 
 function annotateRecords(capsules,integrity){
+  /* Same unwrap as findChainGaps — _capMismatched still receives the raw
+   * (possibly enveloped) item, since parseAac needs the sibling "disclosures"
+   * key to check revealed-payload digests. */
+  var caps=capsules.map(unwrapEnvelope);
   var alteredIds={};
   capsules.forEach(function(c,i){
-    if(!isH64(c.capsule_id))return;
+    var cid=caps[i].capsule_id||"";
+    if(!isH64(cid))return;
     var idr=integrity&&integrity[i];
-    if((idr&&idr.ok===false)||_capMismatched(c))alteredIds[c.capsule_id]=true;
+    if((idr&&idr.ok===false)||_capMismatched(c))alteredIds[cid]=true;
   });
   var byId={};
-  capsules.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
-  return capsules.map(function(cap){
+  caps.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
+  return caps.map(function(cap){
     var cid=cap.capsule_id||"";
     if(alteredIds[cid])return{note:"digest_mismatch",isAltered:true,citesAltered:false};
     var cites=false,seen={},cur=cap;
@@ -1006,15 +1029,19 @@ function evaluateRitual(capsules,witness,integrity){
   var stages=[],finding=null;
   var alteredIds={},firstMismatch=null,firstMismatchIsBody=false;
   capsules.forEach(function(c,i){
-    if(!isH64(c.capsule_id))return;
+    /* Unwrap for the capsule_id/alteration bookkeeping only — parseAac(c)
+     * below still gets the raw (possibly enveloped) item, since it needs the
+     * sibling "disclosures" key to check revealed-payload digests itself. */
+    var cu=unwrapEnvelope(c);
+    if(!isH64(cu.capsule_id))return;
     var idr=integrity&&integrity[i];
     if(idr&&idr.ok===false){
-      alteredIds[c.capsule_id]=true;
+      alteredIds[cu.capsule_id]=true;
       if(!firstMismatch){firstMismatch=idr;firstMismatchIsBody=true;}
     }
     var g=parseAac(c);
     var bad=g.privlog.filter(function(e){return e.matchOk===false;});
-    if(bad.length){alteredIds[c.capsule_id]=true;if(!firstMismatch){firstMismatch=bad[0];firstMismatchIsBody=false;}}
+    if(bad.length){alteredIds[cu.capsule_id]=true;if(!firstMismatch){firstMismatch=bad[0];firstMismatchIsBody=false;}}
   });
   if(Object.keys(alteredIds).length){
     if(firstMismatchIsBody){
@@ -1126,11 +1153,10 @@ if(hash){
     _fragData=JSON.parse(decodeURIComponent(escape(atob(hash))));
     if(!Array.isArray(_fragData)){
       loadCapsule(_fragData);
-      /* evaluateRitual reads capsule_id directly off each array item, so it always
-       * gets the bare capsule — a Disclosure Envelope wrapper is unwrapped here,
-       * same as detectProfile/parseAac already do for the graph/privilege-log path. */
-      var _ritCap=(_fragData&&_fragData.capsule&&typeof _fragData.capsule==="object")?_fragData.capsule:_fragData;
-      renderRitual([_ritCap],_bundleWitness);
+      /* renderRitual's own helpers (verifyCapsuleId/findChainGaps/annotateRecords/
+       * _capSummary) unwrap a Disclosure Envelope internally now, so passing the
+       * raw fragment straight through is safe for both bare and enveloped shapes. */
+      renderRitual([_fragData],_bundleWitness);
     }
   }catch(ex){$("parseErr").textContent="Fragment decode error: "+ex.message;}
 }
@@ -1164,6 +1190,7 @@ $("linkBtn").addEventListener("click",function(){
 var _bundle=null,_bundleIdx=0;
 
 function _capSummary(cap){
+  cap=unwrapEnvelope(cap);
   var d=cap.disposition||{};
   return{
     capsule_id:cap.capsule_id||"",
@@ -1222,7 +1249,7 @@ $("chainNextBtn")&&$("chainNextBtn").addEventListener("click",function(){navigat
 function _patchGraphPriorLinks(){
   if(!_bundle)return;
   var byId={};
-  _bundle.forEach(function(cap,i){if(cap.capsule_id)byId[cap.capsule_id]=i;});
+  _bundle.forEach(function(cap,i){var u=unwrapEnvelope(cap);if(u.capsule_id)byId[u.capsule_id]=i;});
   document.querySelectorAll(".gn-capsule").forEach(function(node){
     var codeEl=node.querySelector(".gn-digest");
     if(!codeEl)return;
@@ -1739,6 +1766,10 @@ var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
   "gate_checks":1,"subject":1,"bilateral_subject":1,"compute_attestation":1,
   "agent_input":1,"agent_output":1};
 function isH64(s){return typeof s==="string"&&s.length===64&&/^[0-9a-f]+$/i.test(s);}
+/* Disclosure Envelope unwrap: {"capsule":{...unmodified...},"disclosures":{...}} ->
+ * the unmodified capsule. A bare capsule (no "capsule" wrapper key, or a
+ * bilateral binding with buyer_capsule/seller_capsule) passes through unchanged. */
+function unwrapEnvelope(item){return(item&&typeof item==="object"&&item.capsule&&typeof item.capsule==="object")?item.capsule:item;}
 function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
 function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
@@ -1814,11 +1845,12 @@ async function computeCapsuleId(capsule){
 }
 
 async function verifyCapsuleId(cap){
-  var stated=(cap&&cap.capsule_id)||"";
+  var c=unwrapEnvelope(cap);
+  var stated=(c&&c.capsule_id)||"";
   if(!isH64(stated))return{ok:null,stated:stated,recomputed:null};
   if(typeof crypto==="undefined"||!crypto.subtle)return{ok:null,stated:stated,recomputed:null};
   try{
-    var recomputed=await computeCapsuleId(cap);
+    var recomputed=await computeCapsuleId(c);
     return{ok:recomputed===stated,stated:stated,recomputed:recomputed};
   }catch(ex){
     return{ok:false,stated:stated,recomputed:null,error:ex.message};
@@ -1910,26 +1942,35 @@ function _capMismatched(cap){
 }
 
 function findChainGaps(capsules){
+  /* Unwrap first: a Disclosure-Envelope-wrapped bundle item carries capsule_id
+   * and chain nested under "capsule", not at the top level — without this,
+   * every envelope-wrapped item is invisible to gap detection. */
+  var caps=capsules.map(unwrapEnvelope);
   var ids={};
-  capsules.forEach(function(c){if(isH64(c.capsule_id))ids[c.capsule_id]=true;});
+  caps.forEach(function(c){if(isH64(c.capsule_id))ids[c.capsule_id]=true;});
   var gaps=[];
-  for(var i=1;i<capsules.length;i++){
-    var parent=((capsules[i].chain)||{}).parent_capsule_id||"";
+  for(var i=1;i<caps.length;i++){
+    var parent=((caps[i].chain)||{}).parent_capsule_id||"";
     if(isH64(parent)&&!ids[parent])gaps.push({beforeIdx:i-1,afterIdx:i,missingParent:parent});
   }
   return gaps;
 }
 
 function annotateRecords(capsules,integrity){
+  /* Same unwrap as findChainGaps — _capMismatched still receives the raw
+   * (possibly enveloped) item, since parseAac needs the sibling "disclosures"
+   * key to check revealed-payload digests. */
+  var caps=capsules.map(unwrapEnvelope);
   var alteredIds={};
   capsules.forEach(function(c,i){
-    if(!isH64(c.capsule_id))return;
+    var cid=caps[i].capsule_id||"";
+    if(!isH64(cid))return;
     var idr=integrity&&integrity[i];
-    if((idr&&idr.ok===false)||_capMismatched(c))alteredIds[c.capsule_id]=true;
+    if((idr&&idr.ok===false)||_capMismatched(c))alteredIds[cid]=true;
   });
   var byId={};
-  capsules.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
-  return capsules.map(function(cap){
+  caps.forEach(function(c){if(isH64(c.capsule_id))byId[c.capsule_id]=c;});
+  return caps.map(function(cap){
     var cid=cap.capsule_id||"";
     if(alteredIds[cid])return{note:"digest_mismatch",isAltered:true,citesAltered:false};
     var cites=false,seen={},cur=cap;
@@ -2500,18 +2541,55 @@ _PROP_LABELS: dict[str, str] = {
 }
 
 
+def _is_hex64(s: object) -> bool:
+    return isinstance(s, str) and len(s) == 64 and all(c in "0123456789abcdefABCDEF" for c in s)
+
+
+def _unwrap_envelope(data: dict) -> dict:
+    """Python mirror of ``CAPSULE_JS``'s ``unwrapEnvelope()``.
+
+    Unwraps a Disclosure Envelope (``{"capsule": {...}, "disclosures": {...}}``)
+    to the underlying capsule. A bare capsule (no "capsule" key) passes through
+    unchanged.
+    """
+    inner = data.get("capsule") if isinstance(data, dict) else None
+    return inner if isinstance(inner, dict) else data
+
+
 def _capsule_has_hitl(cap: dict) -> bool:
     """Python mirror of ``CAPSULE_JS``'s ``checkHitl()`` — kept in parity by tests.
 
     §5.4/5.5: ``human_disposed`` lives INSIDE the ``disposition`` block, not at
     the capsule top level; ``disposition.approver == "human"`` independently
     signals human-oversight per the regulatory crosswalk (both cited for
-    ``human-oversight-record``).
+    ``human-oversight-record``). Unwraps a Disclosure Envelope first — for
+    ``{"capsule": {...}, "disclosures": {...}}``, disposition lives at
+    ``data.capsule.disposition``, not at the top level.
     """
+    cap = _unwrap_envelope(cap)
     disposition = cap.get("disposition") if isinstance(cap, dict) else None
     if not disposition:
         return False
     return disposition.get("human_disposed") is True or disposition.get("approver") == "human"
+
+
+def _capsule_has_sd(cap: dict) -> bool:
+    """Python mirror of ``CAPSULE_JS``'s ``checkSd()`` — kept in parity by tests.
+
+    Same envelope-unwrap as ``_capsule_has_hitl``: a Disclosure-Envelope-wrapped
+    fragment carries ``model_attestation``/``constraints``/``withheld_commitments``
+    at ``data.capsule.*``, not at the top level.
+    """
+    cap = _unwrap_envelope(cap)
+    if not isinstance(cap, dict):
+        return False
+    ca = ((cap.get("model_attestation") or {}).get("compute_attestation")) or {}
+    return bool(
+        cap.get("withheld_commitments")
+        or any(c.get("evidence_digest") for c in (cap.get("constraints") or []))
+        or _is_hex64(ca.get("agent_input_digest", ""))
+        or _is_hex64(ca.get("agent_output_digest", ""))
+    )
 
 
 def _render_reg_panel(has_receipt: bool, has_hitl: bool, has_withheld: bool) -> str:
@@ -3609,6 +3687,8 @@ __all__ = [
     "render_capsule_page",
     "render_bundle_page",
     "_capsule_has_hitl",
+    "_capsule_has_sd",
+    "_unwrap_envelope",
     "_render_reg_panel",
     "verify_payload",
     "verify_request_bytes",
