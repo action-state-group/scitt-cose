@@ -3,17 +3,29 @@
 
 setuptools' sdist command adds `tests/test*.py` to every source distribution by
 default, independent of MANIFEST.in (see distutils.command.sdist._add_defaults_optional).
-Without an explicit exclusion, that default silently pulls the four
-hosted_profiles-dependent tests (and would, if anyone "fixed" the resulting
-collection errors by widening the sdist instead) back into the released source
-artifact -- undoing the neutrality separation the wheel-level test above pins.
+Without an explicit exclusion, that default silently pulls hosted_profiles-dependent
+tests (and would, if anyone "fixed" the resulting collection errors by widening the
+sdist instead) back into the released source artifact -- undoing the neutrality
+separation the wheel-level test above pins.
 
 This builds a REAL sdist and inspects the actual tarball, not a reimplementation
 of setuptools' inclusion rules, so a regression in the packaging config is what
 trips this test, not a drift between two independent descriptions of the rule.
+
+The forbidden-filename set below is computed from the repo's own tests/ tree
+(via AST, not a hand-maintained list) -- round 2 caught five hosted_profiles-
+dependent test files and hand-listed them in MANIFEST.in + here; round 3 found
+a sixth (test_envelope_unwrap.py) had landed via an unrelated merge without
+either list being updated, so this test silently passed while the file itself
+still broke sdist collection. A hardcoded list can only ever be as current as
+the last person who remembered to edit it; scanning the source tree for
+`import hosted_profiles` / `from hosted_profiles import ...` closes that gap
+structurally -- any future hosted_profiles-dependent test is forbidden
+automatically, on the day it's added, whether or not anyone remembers this file.
 """
 from __future__ import annotations
 
+import ast
 import pathlib
 import subprocess
 import sys
@@ -21,17 +33,29 @@ import tarfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-_FORBIDDEN_TEST_FILENAMES = {
-    "test_capsule_view.py",
-    "test_hosted_page.py",
-    "test_hosted_parity.py",
-    "test_machine_mandate.py",
-    "test_bundle_e2e_capsule_ledger.py",
-    "test_bundle_page.py",
-    "test_capsule_id_recompute.py",
-    "test_mmr_js_parity.py",
-    "test_tamper_states.py",
-}
+
+def _hosted_profiles_dependent_test_filenames() -> set[str]:
+    """Filenames under tests/ whose module imports hosted_profiles (or a
+    submodule of it), determined by parsing the actual source -- not a
+    hand-maintained list that can silently fall behind the tree.
+    """
+    forbidden: set[str] = set()
+    for path in sorted(REPO_ROOT.joinpath("tests").glob("test_*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import) and any(
+                alias.name.split(".")[0] == "hosted_profiles" for alias in node.names
+            ):
+                forbidden.add(path.name)
+                break
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.split(".")[0] == "hosted_profiles"
+            ):
+                forbidden.add(path.name)
+                break
+    return forbidden
 
 
 def test_no_application_profile_content_in_sdist(tmp_path):
@@ -53,7 +77,7 @@ def test_no_application_profile_content_in_sdist(tmp_path):
     )
 
     shipped_test_filenames = {pathlib.Path(n).name for n in names if "/tests/" in n}
-    offenders = _FORBIDDEN_TEST_FILENAMES & shipped_test_filenames
+    offenders = _hosted_profiles_dependent_test_filenames() & shipped_test_filenames
     assert not offenders, (
         f"repository-oriented tests that import hosted_profiles must be excluded "
         f"from the sdist (see MANIFEST.in): {sorted(offenders)}"

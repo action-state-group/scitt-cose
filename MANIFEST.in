@@ -9,3 +9,4 @@ exclude tests/test_bundle_page.py
 exclude tests/test_capsule_id_recompute.py
 exclude tests/test_mmr_js_parity.py
 exclude tests/test_tamper_states.py
+exclude tests/test_envelope_unwrap.py
