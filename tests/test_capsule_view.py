@@ -630,6 +630,28 @@ def test_capsule_js_has_reg_panel_logic():
 
 
 # ---------------------------------------------------------------------------
+# [ldg-viewer-disclosed-payload-render]: privilege log renders the disclosed
+# payload, gated on a genuine digest match, with the same canonicalization
+# the digest recompute uses.
+# ---------------------------------------------------------------------------
+
+
+def test_capsule_js_has_disclosed_payload_rendering():
+    """CAPSULE_JS renders a collapsed/expandable payload cell in the privilege
+    log, gated on matchOk===true, using the same canonicalization helper the
+    digest recompute calls -- never a second, independently-serialized copy."""
+    assert "function payloadCellHtml(" in CAPSULE_JS
+    assert "function canonicalPayloadText(" in CAPSULE_JS
+    assert "entry.matchOk!==true" in CAPSULE_JS  # withheld/mismatch never render the payload
+    assert "canonicalPayloadText(e._revPayload)" in CAPSULE_JS  # the hash path calls the shared helper
+    assert "<th>payload</th>" in CAPSULE_JS
+    assert "pl-payload-truncated" in CAPSULE_JS
+    assert "truncated for display, full payload is in the URL fragment" in CAPSULE_JS
+    assert "PAYLOAD_TRUNCATE_BYTES" in CAPSULE_JS
+    assert "e.matchOk=(hex===e.digest)" in CAPSULE_JS  # matchOk is persisted onto the entry, not just a local var
+
+
+# ---------------------------------------------------------------------------
 # compute_attestation agent_input / agent_output digest parsing (Goose fixture)
 # ---------------------------------------------------------------------------
 
