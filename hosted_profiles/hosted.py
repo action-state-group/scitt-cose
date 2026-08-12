@@ -525,6 +525,14 @@ _CAPSULE_CSS = """
 .pl-match{color:var(--pass);font-weight:700;font-family:var(--mono);font-size:12px}
 .pl-mismatch{color:var(--fail);font-weight:700;font-family:var(--mono);font-size:12px}
 .pl-ctx{color:var(--muted);font-family:var(--mono);font-size:11px}
+.pl-payload{max-width:340px}
+.pl-payload-details summary{cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:11.5px}
+.pl-payload-details summary code{color:var(--ink)}
+.pl-payload-full{margin-top:6px}
+.pl-payload-full pre{white-space:pre-wrap;word-break:break-word;background:var(--paper-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11.5px;max-height:280px;overflow:auto;margin:0}
+.pl-payload-truncated{color:#f59e0b;font-size:11px;margin:6px 0 0}
+.pl-payload-digests{display:flex;flex-direction:column;gap:2px;margin-top:6px;font-size:11px;color:var(--muted);font-family:var(--mono)}
+.pl-payload-digests code{color:var(--ink)}
 .chain-table{border-collapse:collapse;width:100%;font-size:13px;margin-bottom:16px}
 .chain-table th,.chain-table td{padding:8px 12px;border:1px solid var(--line);text-align:left;vertical-align:middle}
 .chain-table th{background:var(--paper-2);font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
@@ -701,6 +709,36 @@ function isH64(s){return typeof s==="string"&&s.length===64&&/^[0-9a-f]+$/i.test
 function unwrapEnvelope(item){return(item&&typeof item==="object"&&item.capsule&&typeof item.capsule==="object")?item.capsule:item;}
 function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
 function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+/* ---------- disclosed-payload rendering (shared helper — same canonicalization as
+ * the digest recompute; see test_bundle_js_shared_helpers_match_capsule_js). The
+ * bytes hashed against the committed digest and the bytes shown to the reader MUST
+ * come from the same function -- a display that re-serializes by a different rule
+ * than JSON.stringify(p, Object.keys(p).sort()) could show content that doesn't
+ * match what was actually verified. */
+var PAYLOAD_TRUNCATE_BYTES=8192;
+function canonicalPayloadText(payload){
+  return typeof payload==="string"?payload:JSON.stringify(payload,Object.keys(payload).sort());
+}
+function payloadPreview(payload){
+  var t=canonicalPayloadText(payload);
+  return t.length>80?t.slice(0,80)+"…":t;
+}
+function payloadCellHtml(entry,recomputedDigest){
+  if(entry.withheld||entry._revPayload==null||entry.matchOk!==true)return"";
+  var full=typeof entry._revPayload==="string"
+    ?entry._revPayload
+    :JSON.stringify(entry._revPayload,Object.keys(entry._revPayload).sort(),2);
+  var bytes=new TextEncoder().encode(full);
+  var truncated=bytes.length>PAYLOAD_TRUNCATE_BYTES;
+  var shown=truncated?new TextDecoder("utf-8").decode(bytes.slice(0,PAYLOAD_TRUNCATE_BYTES)):full;
+  var note=truncated?"<p class='pl-payload-truncated'>truncated for display, full payload is in the URL fragment</p>":"";
+  return"<details class='pl-payload-details'><summary><code>"+safe(payloadPreview(entry._revPayload))+"</code></summary>"
+    +"<div class='pl-payload-full'><pre>"+safe(shown)+"</pre>"+note
+    +"<div class='pl-payload-digests'><div>committed <code>"+safe(entry.digest)+"</code></div>"
+    +"<div>recomputed <code>"+safe(recomputedDigest||"")+"</code></div></div></div></details>";
+}
+
 function $(id){return document.getElementById(id);}
 
 /* ---------- anchoring-evidence rung (docs/ledger-grade.md §4 twin) ----------
@@ -825,31 +863,37 @@ function renderGraph(g){
 
 function renderPrivlog(g){
   var el=$("privlogContent");if(!el)return;
-  var h="<table class='pltable'><thead><tr><th>artifact</th><th>type</th><th>digest</th><th>status</th><th>context</th></tr></thead><tbody>";
+  var h="<table class='pltable'><thead><tr><th>artifact</th><th>type</th><th>digest</th><th>status</th><th>payload</th><th>context</th></tr></thead><tbody>";
   g.privlog.forEach(function(e){
     var st=e.withheld?"<span class='pl-withheld'>WITHHELD</span>":
             e.matchOk===true?"<span class='pl-match'>REVEALED · ✓ match</span>":
             e.matchOk===false?"<span class='pl-mismatch'>REVEALED · ✗ MISMATCH</span>":
             "<span class='pl-revealed'>REVEALED</span>";
     h+="<tr data-dig='"+safe(e.digest)+"'><td>"+safe(e.id)+"</td><td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>";
-    h+="<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td class='pl-st'>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
+    h+="<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td class='pl-st'>"+st+"</td>";
+    h+="<td class='pl-payload'>"+payloadCellHtml(e,null)+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
   });
   h+="</tbody></table>";
   if(g.unk.length)h+="<p class='opaque-note' style='margin-top:12px'>Unknown types (verified-but-opaque): "+g.unk.map(safe).join(", ")+"</p>";
   el.innerHTML=h;$("privlogSection").style.display="block";
-  /* async SHA-256 recompute for revealed rows (objects: canonical JSON; strings: raw UTF-8) */
+  /* async SHA-256 recompute for revealed rows -- canonicalPayloadText is the SAME
+   * helper payloadCellHtml (above) uses for display, so the bytes that get hashed
+   * and the bytes that get shown can never diverge. e.matchOk is persisted here
+   * (not just a local var) so the payload cell can gate on it once resolved. */
   if(crypto&&crypto.subtle){
     g.privlog.forEach(function(e){
       if(!e._revPayload||e.withheld)return;
-      var _bytes=typeof e._revPayload==="string"
-        ?new TextEncoder().encode(e._revPayload)
-        :new TextEncoder().encode(JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort()));
+      var _bytes=new TextEncoder().encode(canonicalPayloadText(e._revPayload));
       crypto.subtle.digest("SHA-256",_bytes).then(function(buf){
         var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
-        var matchOk=hex===e.digest;
-        var cell=el.querySelector("tr[data-dig='"+e.digest+"'] td.pl-st");
-        if(cell)cell.innerHTML=matchOk?"<span class='pl-match'>REVEALED · ✓ match</span>":
+        e.matchOk=(hex===e.digest);
+        var row=el.querySelector("tr[data-dig='"+e.digest+"']");
+        if(!row)return;
+        var stCell=row.querySelector("td.pl-st");
+        if(stCell)stCell.innerHTML=e.matchOk?"<span class='pl-match'>REVEALED · ✓ match</span>":
                                        "<span class='pl-mismatch'>REVEALED · ✗ MISMATCH</span>";
+        var payloadCell=row.querySelector("td.pl-payload");
+        if(payloadCell)payloadCell.innerHTML=payloadCellHtml(e,hex);
       });
     });
   }
@@ -1773,6 +1817,35 @@ function unwrapEnvelope(item){return(item&&typeof item==="object"&&item.capsule&
 function sh(d){return d.slice(0,8)+"…"+d.slice(-4);}
 function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
+/* ---------- disclosed-payload rendering (shared helper — same canonicalization as
+ * the digest recompute; see test_bundle_js_shared_helpers_match_capsule_js). The
+ * bytes hashed against the committed digest and the bytes shown to the reader MUST
+ * come from the same function -- a display that re-serializes by a different rule
+ * than JSON.stringify(p, Object.keys(p).sort()) could show content that doesn't
+ * match what was actually verified. */
+var PAYLOAD_TRUNCATE_BYTES=8192;
+function canonicalPayloadText(payload){
+  return typeof payload==="string"?payload:JSON.stringify(payload,Object.keys(payload).sort());
+}
+function payloadPreview(payload){
+  var t=canonicalPayloadText(payload);
+  return t.length>80?t.slice(0,80)+"…":t;
+}
+function payloadCellHtml(entry,recomputedDigest){
+  if(entry.withheld||entry._revPayload==null||entry.matchOk!==true)return"";
+  var full=typeof entry._revPayload==="string"
+    ?entry._revPayload
+    :JSON.stringify(entry._revPayload,Object.keys(entry._revPayload).sort(),2);
+  var bytes=new TextEncoder().encode(full);
+  var truncated=bytes.length>PAYLOAD_TRUNCATE_BYTES;
+  var shown=truncated?new TextDecoder("utf-8").decode(bytes.slice(0,PAYLOAD_TRUNCATE_BYTES)):full;
+  var note=truncated?"<p class='pl-payload-truncated'>truncated for display, full payload is in the URL fragment</p>":"";
+  return"<details class='pl-payload-details'><summary><code>"+safe(payloadPreview(entry._revPayload))+"</code></summary>"
+    +"<div class='pl-payload-full'><pre>"+safe(shown)+"</pre>"+note
+    +"<div class='pl-payload-digests'><div>committed <code>"+safe(entry.digest)+"</code></div>"
+    +"<div>recomputed <code>"+safe(recomputedDigest||"")+"</code></div></div></div></details>";
+}
+
 /* === PORTED FROM CAPSULE_JS (verbatim) — capsule_id recompute (RFC 8785 JCS
  * + SHA-256), see test_bundle_js_shared_helpers_match_capsule_js === */
 var CHAIN_LINKAGE_FIELDS={"capsule_id":1,"chain":1};
@@ -2089,12 +2162,11 @@ async function verifyCapsuleDigests(cap,disclosures){
   for(var i=0;i<g.privlog.length;i++){
     var e=g.privlog[i];
     if(e.withheld||e._revPayload==null)continue;
-    var bytes=typeof e._revPayload==="string"
-      ?new TextEncoder().encode(e._revPayload)
-      :new TextEncoder().encode(JSON.stringify(e._revPayload,Object.keys(e._revPayload).sort()));
+    var bytes=new TextEncoder().encode(canonicalPayloadText(e._revPayload));
     var buf=await crypto.subtle.digest("SHA-256",bytes);
     var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
     e.matchOk=(hex===e.digest);
+    e._recomputedDigest=hex;
   }
   return g;
 }
@@ -2210,7 +2282,7 @@ function $(id){return document.getElementById(id);}
 function renderPrivlog(rows){
   var el=$("privlogContent");if(!el)return;
   if(!rows.length){el.innerHTML="<p style='color:var(--muted);font-size:13px'>No committed artifacts found across these records.</p>";return;}
-  var h="<table class='pltable'><thead><tr><th>#</th><th>artifact</th><th>type</th><th>digest</th><th>status</th><th>context</th></tr></thead><tbody>";
+  var h="<table class='pltable'><thead><tr><th>#</th><th>artifact</th><th>type</th><th>digest</th><th>status</th><th>payload</th><th>context</th></tr></thead><tbody>";
   rows.forEach(function(r,idx){
     var e=r.entry;
     var st=e.withheld?"<span class='pl-withheld'>WITHHELD</span>":
@@ -2219,7 +2291,8 @@ function renderPrivlog(rows){
             "<span class='pl-revealed'>REVEALED</span>";
     h+="<tr data-idx='"+idx+"' data-dig='"+safe(e.digest)+"'><td>"+(r.record_index+1)+"</td><td>"+safe(e.id)+"</td>"+
       "<td>"+safe(e.type)+(e.isKnown?"":' <em class="opaque-badge">OPAQUE</em>')+"</td>"+
-      "<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td class='pl-st'>"+st+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
+      "<td><code>"+safe(e.digest.slice(0,16))+"…</code></td><td class='pl-st'>"+st+"</td>"+
+      "<td class='pl-payload'>"+payloadCellHtml(e,e._recomputedDigest)+"</td><td class='pl-ctx'>"+safe(e.ctx)+"</td></tr>";
   });
   h+="</tbody></table>";
   el.innerHTML=h;

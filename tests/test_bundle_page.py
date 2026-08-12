@@ -88,6 +88,14 @@ def test_bundle_js_shared_helpers_match_capsule_js():
         BUNDLE_JS, "var CHAIN_LINKAGE_FIELDS=", capid_end
     )
 
+    # disclosed-payload rendering (canonicalPayloadText/payloadPreview/payloadCellHtml) —
+    # same drift-guard: the bytes hashed and the bytes shown must come from one helper,
+    # identical in both files, never two independently-maintained copies.
+    payload_end = '</div></div></details>";\n}'
+    assert _slice_between(CAPSULE_JS, "/* ---------- disclosed-payload rendering", payload_end) == _slice_between(
+        BUNDLE_JS, "/* ---------- disclosed-payload rendering", payload_end
+    )
+
 
 # ---------------------------------------------------------------------------
 # render_bundle_page: routes, CSP, offline self-containment
@@ -455,3 +463,138 @@ def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
     mismatch_verified = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": "not the preimage"}})
     mm_entry = next(e for e in mismatch_verified["privlog"] if e["type"] == "agent_input")
     assert mm_entry["matchOk"] is False
+
+
+# ---------------------------------------------------------------------------
+# [ldg-viewer-disclosed-payload-render]: disclosed-payload rendering in the
+# privilege log — render the payload only on a genuine match, never on a
+# mismatch or a withheld row, with the committed/recomputed digests shown
+# alongside it and the same canonicalization used for the hash.
+# ---------------------------------------------------------------------------
+
+
+@pytestmark_node
+def test_payload_cell_renders_on_genuine_match(js_paths):
+    import hashlib
+
+    payload = {"b": 2, "a": 1}
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
+    entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
+    assert entry["matchOk"] is True
+
+    html = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": entry, "recomputedDigest": entry["_recomputedDigest"]})
+    assert "<details" in html
+    assert '"a": 1' in html and '"b": 2' in html  # pretty-printed, sorted keys
+    assert f"committed <code>{digest}</code>" in html
+    assert f"recomputed <code>{entry['_recomputedDigest']}</code>" in html
+    assert "truncated" not in html
+
+
+@pytestmark_node
+def test_payload_cell_renders_text_not_json_for_string_payload(js_paths):
+    import hashlib
+
+    payload = "hello agent input"
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
+    entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
+    html = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": entry, "recomputedDigest": entry["_recomputedDigest"]})
+    assert "<pre>hello agent input</pre>" in html
+
+
+@pytestmark_node
+def test_payload_cell_renders_nothing_on_mismatch(js_paths):
+    """A REVEALED · MISMATCH row must never render the unverified payload —
+    an unverified payload next to a green digest is exactly the confusion
+    the privilege log exists to prevent."""
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = "c" * 64
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": "not the preimage"}})
+    entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
+    assert entry["matchOk"] is False
+
+    html = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": entry, "recomputedDigest": entry.get("_recomputedDigest")})
+    assert html == ""
+
+
+@pytestmark_node
+def test_payload_cell_renders_nothing_when_withheld(js_paths):
+    g = _run_js(js_paths, {"fn": "parseAac", "data": CAPSULE_A})
+    entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
+    assert entry["withheld"] is True
+    html = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": entry, "recomputedDigest": None})
+    assert html == ""
+
+
+@pytestmark_node
+def test_bundle_privlog_renders_payload_per_record(js_paths):
+    """Bundle path: one record with a genuine match, one withheld — each
+    record's row must reflect its own reveal state independently."""
+    import hashlib
+
+    payload = "record zero payload"
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    rec0 = json.loads(json.dumps(CAPSULE_A))
+    rec0["capsule_id"] = "1" * 64
+    rec0["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+    rec1 = json.loads(json.dumps(CAPSULE_A))
+    rec1["capsule_id"] = "2" * 64
+
+    rows = _run_js(js_paths, {
+        "fn": "buildBundlePrivlog", "records": [rec0, rec1],
+        "disclosures": {rec0["capsule_id"]: {"agent_input": payload}},
+    })
+    r0 = next(r for r in rows if r["record_index"] == 0 and r["entry"]["type"] == "agent_input")
+    r1 = next(r for r in rows if r["record_index"] == 1 and r["entry"]["type"] == "agent_input")
+    assert r0["entry"]["matchOk"] is True
+    assert r1["entry"]["withheld"] is True
+
+    html0 = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": r0["entry"], "recomputedDigest": r0["entry"]["_recomputedDigest"]})
+    html1 = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": r1["entry"], "recomputedDigest": None})
+    assert "record zero payload" in html0
+    assert html1 == ""
+
+
+@pytestmark_node
+def test_oversized_payload_truncates_with_note(js_paths):
+    import hashlib
+
+    payload = {"blob": "x" * 20000}  # pretty-printed JSON exceeds PAYLOAD_TRUNCATE_BYTES (8192)
+    canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canon.encode()).hexdigest()
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
+    entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
+    assert entry["matchOk"] is True
+
+    html = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": entry, "recomputedDigest": entry["_recomputedDigest"]})
+    assert "truncated for display, full payload is in the URL fragment" in html
+    assert "pl-payload-truncated" in html
+    # the full 20000-char blob must not appear verbatim -- it was actually cut
+    assert "x" * 20000 not in html
+
+
+@pytestmark_node
+def test_canonicalization_shared_with_digest_path(js_paths):
+    """The exact bytes canonicalPayloadText produces for display must be the
+    exact bytes verifyCapsuleDigests hashed -- one helper, not two rules that
+    could silently diverge."""
+    import hashlib
+
+    payload = {"z": [3, 2, 1], "a": "first"}
+    canon_from_js = _run_js(js_paths, {"fn": "canonicalPayloadText", "payload": payload})
+    assert canon_from_js == json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+    digest = hashlib.sha256(canon_from_js.encode()).hexdigest()
+    cap = json.loads(json.dumps(CAPSULE_A))
+    cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
+    g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
+    entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
+    assert entry["matchOk"] is True
+    assert entry["_recomputedDigest"] == digest

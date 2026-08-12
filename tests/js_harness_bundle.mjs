@@ -63,6 +63,15 @@ async function main() {
     case "verifyCapsuleDigests":
       result = await verifyCapsuleDigests(op.data, op.disclosures);
       break;
+    case "canonicalPayloadText":
+      result = canonicalPayloadText(op.payload);
+      break;
+    case "payloadPreview":
+      result = payloadPreview(op.payload);
+      break;
+    case "payloadCellHtml":
+      result = payloadCellHtml(op.entry, op.recomputedDigest);
+      break;
     case "parseAac":
       result = parseAac(op.data);
       break;
