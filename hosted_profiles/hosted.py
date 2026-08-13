@@ -489,6 +489,8 @@ _CAPSULE_CSS = """
 .finding-panel{margin-top:16px;border-radius:12px;padding:14px 18px;border:1px solid var(--line)}
 .finding-panel.finding-fail{background:var(--fail-soft);border-color:var(--fail)}
 .finding-panel.finding-gap{background:var(--fail-soft);border-color:var(--fail)}
+.finding-panel.finding-summary{background:transparent;border-color:var(--line)}
+.finding-summary .finding-label{color:var(--muted)}
 .finding-label{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--fail);margin-bottom:6px}
 .finding-text{font-size:13.5px;color:var(--ink);margin-bottom:6px}
 .finding-meta{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
@@ -1081,6 +1083,70 @@ function checkWitness(w,total){
   return{status:"pass",detail:"witnessed "+held+" of "+n};
 }
 
+
+/* ---------- plain-language summary (renders on EVERY bundle) ----------
+ * The ritual answers "does this verify". It does not answer "what happened",
+ * and until now a clean bundle said almost nothing — four terse stage lines and
+ * no prose. A stranger handed a permalink could see green checks without ever
+ * learning what the records claim, or which claims carry weaker assurance.
+ * This states, in English, what the records say AND what they don't establish.
+ * It never asserts more than the fields carry. */
+function describeBundle(capsules){
+  var caps=capsules.map(unwrapEnvelope).filter(function(c){return c&&c.capsule_id;});
+  if(!caps.length)return null;
+  var n=caps.length,parts=[];
+
+  var ts=caps.map(function(c){return c.timestamp;}).filter(Boolean).sort();
+  var when=ts.length?(ts[0]===ts[ts.length-1]?("at "+ts[0]):("between "+ts[0]+" and "+ts[ts.length-1])):null;
+  var ops={};caps.forEach(function(c){if(c.operator)ops[c.operator]=1;});
+  var opNames=Object.keys(ops);
+  parts.push(n+" record"+(n===1?"":"s")+(when?", "+when:"")
+    +(opNames.length===1?", from operator “"+opNames[0]+"”":
+      opNames.length>1?", from "+opNames.length+" operators":"")+".");
+
+  var kinds={};caps.forEach(function(c){var t=c.action_type||"unspecified";kinds[t]=(kinds[t]||0)+1;});
+  var kindBits=Object.keys(kinds).map(function(k){
+    var label=k==="fyi"?"informational":k==="decide"?"decision":k==="act"?"action":k;
+    return kinds[k]+" "+label+(kinds[k]===1?"":"s");
+  });
+  if(kindBits.length)parts.push(kindBits.join(", ")+".");
+
+  var accepted=0,rejected=0,human=0;
+  caps.forEach(function(c){
+    var d=c.disposition||{};
+    if(d.decision==="accept")accepted++;
+    else if(d.decision==="reject"||d.decision==="deny")rejected++;
+    if(d.human_disposed===true)human++;
+  });
+  if(rejected)parts.push(rejected+" of "+n+" "+(rejected===1?"was":"were")+" refused.");
+  if(accepted===n&&n>0)parts.push("All were accepted.");
+  parts.push(human===0
+    ? "No human approved any of them — every disposition was made by policy."
+    : human+" of "+n+" carried a recorded human disposition.");
+
+  /* Assurance is the part a reader cannot infer and most needs. */
+  var selfAtt=0,unconfirmed=0;
+  caps.forEach(function(c){
+    var a=c.assurance||{};
+    if(a.attestation_mode==="self_attested")selfAtt++;
+    if(a.effect_mode==="dispatched_unconfirmed")unconfirmed++;
+  });
+  if(unconfirmed)parts.push(unconfirmed+" record"+(unconfirmed===1?"":"s")+" report"+(unconfirmed===1?"s":"")
+    +" the effect as dispatched but unconfirmed — the runtime says it sent the action; nothing here confirms it landed.");
+  if(selfAtt===n&&n>0)parts.push("Every record is self-attested: the same party took the action and wrote the record.");
+
+  var withheld=0;
+  caps.forEach(function(c){
+    var ca=((c.model_attestation||{}).compute_attestation)||{};
+    if(ca.agent_input_digest||ca.agent_output_digest)withheld++;
+  });
+  if(withheld)parts.push("Inputs and outputs are committed as digests only — the payloads are not in "
+    +(withheld===n?"these records":"all of these records")+", so their contents cannot be read here, only matched if someone later discloses them.");
+
+  return{code:"summary",label:"What these records say",text:parts.join(" "),
+    meta:"plain-language summary of the fields carried; it makes no claim the ritual did not check"};
+}
+
 function evaluateRitual(capsules,witness,integrity){
   var stages=[],finding=null;
   var alteredIds={},firstMismatch=null,firstMismatchIsBody=false;
@@ -1164,7 +1230,7 @@ function evaluateRitual(capsules,witness,integrity){
   var wit=checkWitness(witness,capsules.length);
   stages.push({name:"Witness",status:wit.status,detail:wit.detail});
 
-  return{stages:stages,finding:finding};
+  return{stages:stages,finding:finding,summary:describeBundle(capsules)};
 }
 
 async function renderRitual(bundle,witness){
@@ -1181,9 +1247,16 @@ async function renderRitual(bundle,witness){
       +"<span class='ritual-name'>"+safe(s.name)+"</span><span class='ritual-detail'>"+safe(s.detail)+"</span></div>";
   });
   h+="</div>";
+  if(summary.summary){
+    var sm=summary.summary;
+    h+="<div class='finding-panel finding-summary'>"
+      +"<div class='finding-label'>"+safe(sm.label)+"</div>"
+      +"<p class='finding-text'>"+safe(sm.text)+"</p>"
+      +"<div class='finding-meta'>"+safe(sm.meta)+"</div></div>";
+  }
   if(summary.finding){
     var f=summary.finding;
-    h+="<div class='finding-panel finding-"+(f.code==="chain_gap"?"gap":"fail")+"'>"
+    h+="<div class='finding-panel finding-"+(f.code==="chain_gap"?"gap":f.code==="no_chain_declared"?"gap":"fail")+"'>"
       +"<div class='finding-label'>"+safe(f.label)+"</div>"
       +"<p class='finding-text'>"+safe(f.text)+"</p>"
       +"<div class='finding-meta'>"+safe(f.meta)+"</div></div>";
@@ -2764,7 +2837,7 @@ def render_capsule_page(capsule_id: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Capsule {sid} — AAC Verifier</title>
+<title>Capsule {sid} — Agent Action Capsule Verifier</title>
 <style>
 {_PAGE_CSS}
 {_CAPSULE_CSS}
@@ -2786,7 +2859,7 @@ def render_capsule_page(capsule_id: str) -> str:
 </nav>
 
 <div class="wrap" style="padding:32px 0 16px">
-  <div class="pill">capsule · AAC profile</div>
+  <div class="pill">capsule · Agent Action Capsule profile</div>
   <h1 style="margin-top:12px">Capsule <code class="mono" style="font-size:1.1rem">{sid}</code></h1>
   <p class="mono" style="font-size:11.5px;word-break:break-all;color:var(--muted);margin-top:6px">{cid}</p>
 </div>
@@ -2907,7 +2980,7 @@ def render_capsule_page(capsule_id: str) -> str:
         <a class="brand" href="https://agentactioncapsule.org">
           <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
         </a>
-        <p>Stateless public verification surface for AAC capsule-bound records.
+        <p>Stateless public verification surface for Agent Action Capsule records.
         Anchor: <a href="https://anchor.agentactioncapsule.org">anchor.agentactioncapsule.org</a>.</p>
       </div>
       <div class="foot-cols">
