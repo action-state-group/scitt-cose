@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """``hosted_profiles.hosted``'s ``MMR_JS`` is a hand port of capsule-ledger's
-``asg_ledger.mmr.core`` completeness-certificate math (leaf_hash,
+``capsule_ledger.mmr.core`` completeness-certificate math (leaf_hash,
 interior_hash, root_from_peaks, verify_inclusion, verify_consistency) -- not
 a reimplementation this suite trusts by inspection. These tests actually run
 it (via Node, ``tests/js_harness_mmr.mjs``) against the pinned vectors in
@@ -86,7 +86,7 @@ def test_js_root_from_peaks_matches_python_for_every_kat39_size(mmr_js_path, kat
         assert got_peaks == kat39["peak_indices"][mmr_index], f"peaks(size={int(mmr_index)+1})"
         got_root = _run_js(mmr_js_path, {"fn": "rootFromPeaks", "peaks": expected_hashes})
         # Cross-language parity only (root_from_peaks has no upstream KAT root --
-        # see asg_ledger/mmr/core.py's docstring); the full-tree case is checked
+        # see capsule_ledger/mmr/core.py's docstring); the full-tree case is checked
         # against Python's own root_full below for the strongest signal.
         if mmr_index == "38":
             assert got_root == kat39["root_full"]

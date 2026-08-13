@@ -220,7 +220,7 @@ def test_asgi_routes_wired():
 
 
 def test_bundle_route_matches_capsule_ledger_default_permalink_base():
-    """capsule-ledger's asg_ledger/cli/bundle_cmd.py hardcodes
+    """capsule-ledger's capsule_ledger/cli/bundle_cmd.py hardcodes
     DEFAULT_VERIFY_BASE_URL = "https://verify.agentactioncapsule.org/bundle" --
     confirm the path this module serves at is exactly "/bundle", no trailing
     segment, so that permalink resolves here unmodified."""

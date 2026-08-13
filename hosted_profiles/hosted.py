@@ -1517,7 +1517,7 @@ if(capsuleId){
 """
 
 
-#: Vanilla-JS port of capsule-ledger's ``asg_ledger.mmr.core`` (MMRIVER-draft
+#: Vanilla-JS port of capsule-ledger's ``capsule_ledger.mmr.core`` (MMRIVER-draft
 #: -compatible completeness-certificate math). Served at ``/static/mmr.js``.
 #:
 #: This is a faithful, function-for-function port of the *pure* verification
@@ -1895,7 +1895,7 @@ _BUNDLE_CSS = """
 #: Bundle-viewer client controller — served at ``/static/bundle.js``.
 #:
 #: This is the "Bundle-open page" from the task: a recipient-side viewer for
-#: ``capsule bundle`` output (capsule-ledger's ``asg_ledger/cli/bundle_cmd.py``).
+#: ``capsule bundle`` output (capsule-ledger's ``capsule_ledger/cli/bundle_cmd.py``).
 #: Bundle JSON travels in the URL fragment only (never sent to this server —
 #: see ``render_bundle_page``); the offline single-file mode inlines the same
 #: data as ``window.__BUNDLE_FRAGMENT_B64U__`` instead of a URL fragment (a
@@ -2202,7 +2202,7 @@ function encodeFragment(obj){
  * Optional bundle field this viewer knows how to check (capsule-ledger's
  * `capsule bundle` does not populate it yet as of this viewer shipping --
  * a bundle without one is handled honestly as "not available", never a
- * fabricated pass. Schema, mirroring asg_ledger.mmr.index.MmrLedger's own
+ * fabricated pass. Schema, mirroring capsule_ledger.mmr.index.MmrLedger's own
  * RangeProof/ConsistencyProof shapes 1:1 so a future capsule-ledger CLI
  * change can populate it directly from that module's own output:
  *
@@ -2216,7 +2216,7 @@ function encodeFragment(obj){
  * }
  *
  * Each <InclusionProof>/<ConsistencyProof> is exactly the JSON shape
- * asg_ledger.mmr.core's dataclasses serialize to (v, kind, size, leaf_index,
+ * capsule_ledger.mmr.core's dataclasses serialize to (v, kind, size, leaf_index,
  * witness, peaks_left, peaks_right / v, kind, size_a, size_b, old_peaks,
  * witness, new_peaks) -- see mmr.js's verifyInclusion/verifyConsistency.
  * Boundary leaf body digests are the bundle's own first/last record
@@ -3298,7 +3298,7 @@ def render_landing_page() -> str:
 
 
 #: Token replaced client-side (``BUNDLE_JS``'s download button) or by a
-#: future producer-side embed (capsule-ledger's planned ``--with-viewer``
+#: producer-side embed (capsule-ledger's ``--with-viewer``, shipped in its #28;
 #: flag — see the PR description) with the real base64url bundle fragment.
 #: Chosen with an ``@`` so it can never collide with real base64url content.
 _BUNDLE_FRAGMENT_PLACEHOLDER = "@@BUNDLE_FRAGMENT@@"
@@ -3440,7 +3440,7 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
 def render_bundle_page(*, offline: bool = False) -> str:
     """Return the HTML for the bundle-open page — the recipient-side viewer
     for a ``capsule bundle`` export (capsule-ledger's
-    ``asg_ledger/cli/bundle_cmd.py``).
+    ``capsule_ledger/cli/bundle_cmd.py``).
 
     Two delivery modes, one codebase (this function, ``MMR_JS``, ``BUNDLE_JS``):
 
