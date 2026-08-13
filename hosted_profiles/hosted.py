@@ -2885,6 +2885,7 @@ def render_capsule_page(capsule_id: str) -> str:
         </div>
         <div class="foot-col">
           <h5>Privacy</h5>
+          <a href="{_esc(REPO_URL)}/blob/main/docs/verification-trust-model.md">Trust model &#x2197;</a>
           <a href="/instrumentation-policy">Instrumentation policy</a>
           <a href="{_esc(REPO_URL)}">Source &#x2197;</a>
         </div>
@@ -3087,6 +3088,7 @@ def render_landing_page() -> str:
           <h5>Source</h5>
           <a href="https://github.com/action-state-group">GitHub ↗</a>
           <a href="https://github.com/ietf-wg-scitt/examples">Test vectors ↗</a>
+          <a href="{repo}/blob/main/docs/verification-trust-model.md">Trust model ↗</a>
         </div>
       </div>
     </div>
@@ -3231,6 +3233,7 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
         </div>
         <div class="foot-col">
           <h5>Privacy</h5>
+          <a href="{_esc(REPO_URL)}/blob/main/docs/verification-trust-model.md">Trust model &#x2197;</a>
           <a href="{_esc(REPO_URL)}">Source &#x2197;</a>
         </div>
       </div>

@@ -102,6 +102,7 @@ def test_landing_page_self_hosted_js_no_inline_scripts():
         "https://github.com/action-state-group",
         "https://github.com/ietf-wg-scitt/examples",
         "https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/",
+        f"{REPO_URL}/blob/main/docs/verification-trust-model.md",
     }
     unexpected = external - allowed
     assert not unexpected, f"unexpected external hrefs: {unexpected}"

@@ -417,6 +417,22 @@ instance is live at <https://verify.actionstate.ai> — this package unchanged
 verifier-vs-Transparency-Service boundary table and states the privacy posture.
 You don't need it: the verifier runs anywhere.
 
+### Bundle & capsule permalinks — offline, not just hosted
+
+`GET /v/<capsule_id>` and `GET /bundle` are the recipient-side viewers behind
+`capsule bundle`'s permalinks. **The record never leaves the browser in
+either mode** — it rides in the URL fragment (the part after `#`), which
+HTTP never transmits, so the server serving the viewer's HTML/JS never sees
+the bytes being verified. Integrity, Sequence and Authenticity are checkable
+with **zero network**: download the self-contained copy from
+`GET /bundle/offline-shell` (or the CLI's `permalink --check`) and it still
+verifies opened straight from `file://`. **Witness needs a network by
+definition** — it's a claim about a log someone else keeps — and when the
+anchor is unreachable the viewer renders that stage *skipped, not failed*.
+Full trust model, including exactly what a server does learn (a viewed
+`capsule_id`, and — until you've downloaded and diffed it — trust in served
+JS): [`docs/verification-trust-model.md`](docs/verification-trust-model.md).
+
 ## Test vectors (cross-implementation, stable)
 
 [`test-vectors/`](test-vectors/) is a frozen, **append-only** vector set for
