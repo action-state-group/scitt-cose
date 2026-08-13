@@ -1060,13 +1060,25 @@ function checkAuthenticity(capsules){
   return{status:"skip",detail:"signed statement present — not verified in the browser; use the Verify a signed statement tool"};
 }
 
-function checkWitness(w){
+function checkWitness(w,total){
+  /* `total` is the number of records in this bundle. The anchor-status call
+   * checks only the FOCAL capsule (the one named in the URL path), so
+   * w.configured is the number CHECKED, not the number present. Reporting
+   * "witnessed 1 of 1" inside a 2-record bundle read as full coverage when one
+   * record had never been checked at all; the denominator now always names the
+   * bundle, and partial coverage can never render as a pass. */
   if(!w)return{status:"skip",detail:"no witness data provided"};
   if(w.verified===false)return{status:"fail",detail:"inclusion proof did not verify"};
   if(w.reachable===false)return{status:"skip",detail:"independent-witness check skipped (unreachable) — everything else verified; reconnect any time to complete it"};
-  var held=w.held||0,configured=w.configured||held||1;
-  if(held<configured)return{status:"skip",detail:"witnessed "+held+" of "+configured+" · retrying — rung held"};
-  return{status:"pass",detail:"witnessed "+held+" of "+configured};
+  var held=w.held||0;
+  var checked=w.configured||0;
+  var n=(typeof total==="number"&&total>0)?total:(checked||1);
+  if(checked<n){
+    return{status:"skip",
+      detail:"witnessed "+held+" of "+n+" — only "+checked+" record"+(checked===1?"":"s")+" in this bundle "+(checked===1?"was":"were")+" checked against the log; the rest are unchecked, not unwitnessed"};
+  }
+  if(held<n)return{status:"skip",detail:"witnessed "+held+" of "+n+" · retrying — rung held"};
+  return{status:"pass",detail:"witnessed "+held+" of "+n};
 }
 
 function evaluateRitual(capsules,witness,integrity){
@@ -1105,8 +1117,32 @@ function evaluateRitual(capsules,witness,integrity){
     stages.push({name:"Integrity",status:"pass",detail:"every record matches its fingerprint"});
   }
 
+  /* How many records actually declare a parent? findChainGaps only reports a
+   * MISSING parent; a bundle where no record declares one at all produces zero
+   * gaps, which previously rendered as "unbroken — every record names the one
+   * before it". That sentence asserts a property nothing checked, and it made a
+   * completely unchained bundle indistinguishable from a fully chained one.
+   * Sequence is now three-valued: not-declared / partial / unbroken. */
+  var _capsForSeq=capsules.map(unwrapEnvelope);
+  var _declared=0;
+  _capsForSeq.forEach(function(c){
+    if(isH64(((c.chain)||{}).parent_capsule_id||""))_declared++;
+  });
+  var _expectedLinks=Math.max(0,_capsForSeq.length-1);
+
   var gaps=findChainGaps(capsules);
-  if(gaps.length){
+  if(_capsForSeq.length<2){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"single record — nothing to sequence"});
+  }else if(_declared===0){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"not checked — no record here declares a parent, so the order shown is presentation order, not an attested sequence"});
+    if(!finding){
+      finding={code:"no_chain_declared",label:"What this does not show",
+        text:"These "+_capsForSeq.length+" records carry no chain links. Nothing here attests that they happened in this order, or that none is missing between them — they are individually verifiable records displayed in the order the bundle listed them.",
+        meta:"skipped stage: no_chain_declared · 0 of "+_expectedLinks+" expected links declared"};
+    }
+  }else if(gaps.length){
     var g0=gaps[0];
     var beforeId=(capsules[g0.beforeIdx]||{}).capsule_id||"",afterId=(capsules[g0.afterIdx]||{}).capsule_id||"";
     stages.push({name:"Sequence",status:"fail",
@@ -1116,13 +1152,16 @@ function evaluateRitual(capsules,witness,integrity){
         text:"Whatever sits between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" is not in this bundle. That is information, not just an error: the gap has a location and two edges you can browse from.",
         meta:"failed stage: chain_gap · window: "+beforeId.slice(0,8)+"…→"+afterId.slice(0,8)+"… · missing parent "+g0.missingParent.slice(0,8)+"…"};
     }
+  }else if(_declared<_expectedLinks){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"partial — "+_declared+" of "+_expectedLinks+" expected links declared; the undeclared positions are not attested as adjacent"});
   }else{
     stages.push({name:"Sequence",status:"pass",detail:"unbroken — every record names the one before it"});
   }
 
   var auth=checkAuthenticity(capsules);
   stages.push({name:"Authenticity",status:auth.status,detail:auth.detail});
-  var wit=checkWitness(witness);
+  var wit=checkWitness(witness,capsules.length);
   stages.push({name:"Witness",status:wit.status,detail:wit.detail});
 
   return{stages:stages,finding:finding};
