@@ -30,9 +30,9 @@ encode the record as base64url **after** the `#`, so:
 - Pasting JSON into the "paste bundle JSON" / "paste capsule JSON" box on
   either page does the same: it's parsed and re-encoded into the fragment
   client-side, never POSTed.
-- Every cryptographic check — digest recompute, Merkle inclusion/consistency,
-  signature verification — runs in JavaScript in your tab, against the bytes
-  already in your tab.
+- Every check the viewer *does* run in the browser — digest recompute, chain
+  linkage, Merkle inclusion/consistency, disclosure recompute — runs in
+  JavaScript in your tab, against the bytes already in your tab.
 
 You can confirm this yourself: open dev tools → Network, load a permalink,
 and watch — the fragment never appears in a request.
@@ -47,10 +47,10 @@ as pass/fail/skip, never blended into one verdict:
 - **Bundle page** (`/bundle`): **Integrity · Sequence · Completeness ·
   Cross-check**
 
-Every stage *except Witness* is pure computation over the bytes already in
-the fragment — digest recompute against `capsule_id`, chain-parent linkage,
-signature/disclosure checks, Merkle range-proof math. None of it calls out
-anywhere. That means it runs identically:
+**Integrity, Sequence, Completeness and Cross-check are pure computation**
+over the bytes already in the fragment — digest recompute against
+`capsule_id`, chain-parent linkage, disclosure recompute, Merkle
+range-proof math. None of it calls out anywhere, so it runs identically:
 
 - **Offline, from disk.** `GET /bundle/offline-shell` (linked from the
   "Download self-contained copy" button on `/bundle`) returns the same DOM
@@ -59,7 +59,24 @@ anywhere. That means it runs identically:
   disconnect from the network entirely — Integrity, Sequence, Completeness
   and Cross-check all still run and render.
 - **From the CLI.** capsule-ledger's `permalink --check` runs the same
-  verification logic locally without a browser at all.
+  computation locally without a browser at all — and, unlike this browser
+  page, also verifies Authenticity: the CLI has no WebCrypto-vs-COSE gap to
+  work around, so it's the zero-network path that covers all three today.
+
+**Authenticity (the COSE signature) is the honest exception, stated
+plainly rather than buried:** the capsule page's Authenticity stage does
+not verify a signature in the browser today, in either delivery mode. It
+renders **skip** — "not checked" if no `signed_statement` is present, or
+"present — not verified in the browser; use the Verify a signed statement
+tool" if one is — never a fabricated pass. This viewer ships no
+client-side COSE verifier yet. "The Verify a signed statement tool" is the
+landing page's `POST /verify` (a network call to this same server, over
+bytes it discards on return — see the Privacy posture section on `/`); for
+zero network, the identical check is this package's own
+`scitt_cose.statement.parse_signed_statement` (`pip install scitt-cose`,
+runs anywhere, no server involved). Until browser-side verification ships,
+treat the capsule page's Authenticity stage as "not evaluated here," not
+as evidence either way — this is a tracked, known gap, not a silent one.
 
 **Witness needs a network by definition** — it is a claim about a log
 someone else keeps, not a property of the bytes in your hand. The capsule
@@ -111,10 +128,12 @@ page serving the check:
 |---|---|---|
 | Integrity (body matches its id) | recompute the digest in your own tab | no |
 | Sequence (chain has no gaps) | walk `chain.parent_capsule_id` locally | no |
-| Authenticity / Completeness | verify signatures / disclosures locally | no |
+| Completeness / Cross-check (bundle page) | Merkle range-proof + digest recompute locally | no |
+| Authenticity (COSE signature) | not evaluated by this browser page yet — `permalink --check` or `scitt-cose` locally | no, via the CLI · yes, via the hosted `/verify` tool |
 | Witness (a third party saw it) | RFC 9162 inclusion proof against the anchor's published key | yes — and skips honestly when absent |
 
 If you don't trust this server to serve you correct JS even once, download
-the offline shell, verify it, and never load `/v/` or `/bundle` live again —
-the CLI's `permalink --check` gives you the same guarantee without a browser
+the offline shell, verify it, and never load `/v/` or `/bundle` live again for
+Integrity, Sequence, Completeness or Cross-check — the CLI's `permalink
+--check` gives you the same guarantee, plus Authenticity, without a browser
 in the loop at all.
