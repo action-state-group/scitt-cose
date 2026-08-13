@@ -489,6 +489,8 @@ _CAPSULE_CSS = """
 .finding-panel{margin-top:16px;border-radius:12px;padding:14px 18px;border:1px solid var(--line)}
 .finding-panel.finding-fail{background:var(--fail-soft);border-color:var(--fail)}
 .finding-panel.finding-gap{background:var(--fail-soft);border-color:var(--fail)}
+.finding-panel.finding-summary{background:transparent;border-color:var(--line)}
+.finding-summary .finding-label{color:var(--muted)}
 .finding-label{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--fail);margin-bottom:6px}
 .finding-text{font-size:13.5px;color:var(--ink);margin-bottom:6px}
 .finding-meta{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
@@ -1060,13 +1062,89 @@ function checkAuthenticity(capsules){
   return{status:"skip",detail:"signed statement present — not verified in the browser; use the Verify a signed statement tool"};
 }
 
-function checkWitness(w){
+function checkWitness(w,total){
+  /* `total` is the number of records in this bundle. The anchor-status call
+   * checks only the FOCAL capsule (the one named in the URL path), so
+   * w.configured is the number CHECKED, not the number present. Reporting
+   * "witnessed 1 of 1" inside a 2-record bundle read as full coverage when one
+   * record had never been checked at all; the denominator now always names the
+   * bundle, and partial coverage can never render as a pass. */
   if(!w)return{status:"skip",detail:"no witness data provided"};
   if(w.verified===false)return{status:"fail",detail:"inclusion proof did not verify"};
   if(w.reachable===false)return{status:"skip",detail:"independent-witness check skipped (unreachable) — everything else verified; reconnect any time to complete it"};
-  var held=w.held||0,configured=w.configured||held||1;
-  if(held<configured)return{status:"skip",detail:"witnessed "+held+" of "+configured+" · retrying — rung held"};
-  return{status:"pass",detail:"witnessed "+held+" of "+configured};
+  var held=w.held||0;
+  var checked=w.configured||0;
+  var n=(typeof total==="number"&&total>0)?total:(checked||1);
+  if(checked<n){
+    return{status:"skip",
+      detail:"witnessed "+held+" of "+n+" — only "+checked+" record"+(checked===1?"":"s")+" in this bundle "+(checked===1?"was":"were")+" checked against the log; the rest are unchecked, not unwitnessed"};
+  }
+  if(held<n)return{status:"skip",detail:"witnessed "+held+" of "+n+" · retrying — rung held"};
+  return{status:"pass",detail:"witnessed "+held+" of "+n};
+}
+
+
+/* ---------- plain-language summary (renders on EVERY bundle) ----------
+ * The ritual answers "does this verify". It does not answer "what happened",
+ * and until now a clean bundle said almost nothing — four terse stage lines and
+ * no prose. A stranger handed a permalink could see green checks without ever
+ * learning what the records claim, or which claims carry weaker assurance.
+ * This states, in English, what the records say AND what they don't establish.
+ * It never asserts more than the fields carry. */
+function describeBundle(capsules){
+  var caps=capsules.map(unwrapEnvelope).filter(function(c){return c&&c.capsule_id;});
+  if(!caps.length)return null;
+  var n=caps.length,parts=[];
+
+  var ts=caps.map(function(c){return c.timestamp;}).filter(Boolean).sort();
+  var when=ts.length?(ts[0]===ts[ts.length-1]?("at "+ts[0]):("between "+ts[0]+" and "+ts[ts.length-1])):null;
+  var ops={};caps.forEach(function(c){if(c.operator)ops[c.operator]=1;});
+  var opNames=Object.keys(ops);
+  parts.push(n+" record"+(n===1?"":"s")+(when?", "+when:"")
+    +(opNames.length===1?", from operator “"+opNames[0]+"”":
+      opNames.length>1?", from "+opNames.length+" operators":"")+".");
+
+  var kinds={};caps.forEach(function(c){var t=c.action_type||"unspecified";kinds[t]=(kinds[t]||0)+1;});
+  var kindBits=Object.keys(kinds).map(function(k){
+    var label=k==="fyi"?"informational":k==="decide"?"decision":k==="act"?"action":k;
+    return kinds[k]+" "+label+(kinds[k]===1?"":"s");
+  });
+  if(kindBits.length)parts.push(kindBits.join(", ")+".");
+
+  var accepted=0,rejected=0,human=0;
+  caps.forEach(function(c){
+    var d=c.disposition||{};
+    if(d.decision==="accept")accepted++;
+    else if(d.decision==="reject"||d.decision==="deny")rejected++;
+    if(d.human_disposed===true)human++;
+  });
+  if(rejected)parts.push(rejected+" of "+n+" "+(rejected===1?"was":"were")+" refused.");
+  if(accepted===n&&n>0)parts.push("All were accepted.");
+  parts.push(human===0
+    ? "No human approved any of them — every disposition was made by policy."
+    : human+" of "+n+" carried a recorded human disposition.");
+
+  /* Assurance is the part a reader cannot infer and most needs. */
+  var selfAtt=0,unconfirmed=0;
+  caps.forEach(function(c){
+    var a=c.assurance||{};
+    if(a.attestation_mode==="self_attested")selfAtt++;
+    if(a.effect_mode==="dispatched_unconfirmed")unconfirmed++;
+  });
+  if(unconfirmed)parts.push(unconfirmed+" record"+(unconfirmed===1?"":"s")+" report"+(unconfirmed===1?"s":"")
+    +" the effect as dispatched but unconfirmed — the runtime says it sent the action; nothing here confirms it landed.");
+  if(selfAtt===n&&n>0)parts.push("Every record is self-attested: the same party took the action and wrote the record.");
+
+  var withheld=0;
+  caps.forEach(function(c){
+    var ca=((c.model_attestation||{}).compute_attestation)||{};
+    if(ca.agent_input_digest||ca.agent_output_digest)withheld++;
+  });
+  if(withheld)parts.push("Inputs and outputs are committed as digests only — the payloads are not in "
+    +(withheld===n?"these records":"all of these records")+", so their contents cannot be read here, only matched if someone later discloses them.");
+
+  return{code:"summary",label:"What these records say",text:parts.join(" "),
+    meta:"plain-language summary of the fields carried; it makes no claim the ritual did not check"};
 }
 
 function evaluateRitual(capsules,witness,integrity){
@@ -1105,8 +1183,32 @@ function evaluateRitual(capsules,witness,integrity){
     stages.push({name:"Integrity",status:"pass",detail:"every record matches its fingerprint"});
   }
 
+  /* How many records actually declare a parent? findChainGaps only reports a
+   * MISSING parent; a bundle where no record declares one at all produces zero
+   * gaps, which previously rendered as "unbroken — every record names the one
+   * before it". That sentence asserts a property nothing checked, and it made a
+   * completely unchained bundle indistinguishable from a fully chained one.
+   * Sequence is now three-valued: not-declared / partial / unbroken. */
+  var _capsForSeq=capsules.map(unwrapEnvelope);
+  var _declared=0;
+  _capsForSeq.forEach(function(c){
+    if(isH64(((c.chain)||{}).parent_capsule_id||""))_declared++;
+  });
+  var _expectedLinks=Math.max(0,_capsForSeq.length-1);
+
   var gaps=findChainGaps(capsules);
-  if(gaps.length){
+  if(_capsForSeq.length<2){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"single record — nothing to sequence"});
+  }else if(_declared===0){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"not checked — no record here declares a parent, so the order shown is presentation order, not an attested sequence"});
+    if(!finding){
+      finding={code:"no_chain_declared",label:"What this does not show",
+        text:"These "+_capsForSeq.length+" records carry no chain links. Nothing here attests that they happened in this order, or that none is missing between them — they are individually verifiable records displayed in the order the bundle listed them.",
+        meta:"skipped stage: no_chain_declared · 0 of "+_expectedLinks+" expected links declared"};
+    }
+  }else if(gaps.length){
     var g0=gaps[0];
     var beforeId=(capsules[g0.beforeIdx]||{}).capsule_id||"",afterId=(capsules[g0.afterIdx]||{}).capsule_id||"";
     stages.push({name:"Sequence",status:"fail",
@@ -1116,16 +1218,19 @@ function evaluateRitual(capsules,witness,integrity){
         text:"Whatever sits between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" is not in this bundle. That is information, not just an error: the gap has a location and two edges you can browse from.",
         meta:"failed stage: chain_gap · window: "+beforeId.slice(0,8)+"…→"+afterId.slice(0,8)+"… · missing parent "+g0.missingParent.slice(0,8)+"…"};
     }
+  }else if(_declared<_expectedLinks){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"partial — "+_declared+" of "+_expectedLinks+" expected links declared; the undeclared positions are not attested as adjacent"});
   }else{
     stages.push({name:"Sequence",status:"pass",detail:"unbroken — every record names the one before it"});
   }
 
   var auth=checkAuthenticity(capsules);
   stages.push({name:"Authenticity",status:auth.status,detail:auth.detail});
-  var wit=checkWitness(witness);
+  var wit=checkWitness(witness,capsules.length);
   stages.push({name:"Witness",status:wit.status,detail:wit.detail});
 
-  return{stages:stages,finding:finding};
+  return{stages:stages,finding:finding,summary:describeBundle(capsules)};
 }
 
 async function renderRitual(bundle,witness){
@@ -1142,9 +1247,16 @@ async function renderRitual(bundle,witness){
       +"<span class='ritual-name'>"+safe(s.name)+"</span><span class='ritual-detail'>"+safe(s.detail)+"</span></div>";
   });
   h+="</div>";
+  if(summary.summary){
+    var sm=summary.summary;
+    h+="<div class='finding-panel finding-summary'>"
+      +"<div class='finding-label'>"+safe(sm.label)+"</div>"
+      +"<p class='finding-text'>"+safe(sm.text)+"</p>"
+      +"<div class='finding-meta'>"+safe(sm.meta)+"</div></div>";
+  }
   if(summary.finding){
     var f=summary.finding;
-    h+="<div class='finding-panel finding-"+(f.code==="chain_gap"?"gap":"fail")+"'>"
+    h+="<div class='finding-panel finding-"+(f.code==="chain_gap"?"gap":f.code==="no_chain_declared"?"gap":"fail")+"'>"
       +"<div class='finding-label'>"+safe(f.label)+"</div>"
       +"<p class='finding-text'>"+safe(f.text)+"</p>"
       +"<div class='finding-meta'>"+safe(f.meta)+"</div></div>";
@@ -1405,7 +1517,7 @@ if(capsuleId){
 """
 
 
-#: Vanilla-JS port of capsule-ledger's ``asg_ledger.mmr.core`` (MMRIVER-draft
+#: Vanilla-JS port of capsule-ledger's ``capsule_ledger.mmr.core`` (MMRIVER-draft
 #: -compatible completeness-certificate math). Served at ``/static/mmr.js``.
 #:
 #: This is a faithful, function-for-function port of the *pure* verification
@@ -1783,7 +1895,7 @@ _BUNDLE_CSS = """
 #: Bundle-viewer client controller — served at ``/static/bundle.js``.
 #:
 #: This is the "Bundle-open page" from the task: a recipient-side viewer for
-#: ``capsule bundle`` output (capsule-ledger's ``asg_ledger/cli/bundle_cmd.py``).
+#: ``capsule bundle`` output (capsule-ledger's ``capsule_ledger/cli/bundle_cmd.py``).
 #: Bundle JSON travels in the URL fragment only (never sent to this server —
 #: see ``render_bundle_page``); the offline single-file mode inlines the same
 #: data as ``window.__BUNDLE_FRAGMENT_B64U__`` instead of a URL fragment (a
@@ -2090,7 +2202,7 @@ function encodeFragment(obj){
  * Optional bundle field this viewer knows how to check (capsule-ledger's
  * `capsule bundle` does not populate it yet as of this viewer shipping --
  * a bundle without one is handled honestly as "not available", never a
- * fabricated pass. Schema, mirroring asg_ledger.mmr.index.MmrLedger's own
+ * fabricated pass. Schema, mirroring capsule_ledger.mmr.index.MmrLedger's own
  * RangeProof/ConsistencyProof shapes 1:1 so a future capsule-ledger CLI
  * change can populate it directly from that module's own output:
  *
@@ -2104,7 +2216,7 @@ function encodeFragment(obj){
  * }
  *
  * Each <InclusionProof>/<ConsistencyProof> is exactly the JSON shape
- * asg_ledger.mmr.core's dataclasses serialize to (v, kind, size, leaf_index,
+ * capsule_ledger.mmr.core's dataclasses serialize to (v, kind, size, leaf_index,
  * witness, peaks_left, peaks_right / v, kind, size_a, size_b, old_peaks,
  * witness, new_peaks) -- see mmr.js's verifyInclusion/verifyConsistency.
  * Boundary leaf body digests are the bundle's own first/last record
@@ -2202,6 +2314,69 @@ async function crossCheckSelfReport(bundle,records){
     "disagrees with this viewer's own independent recompute — trust the recompute, investigate the bundle"};
 }
 
+/* ---------- plain-language summary (renders on EVERY bundle) ----------
+ * The ritual answers "does this verify". It does not answer "what happened",
+ * and until now a clean bundle said almost nothing — four terse stage lines and
+ * no prose. A stranger handed a permalink could see green checks without ever
+ * learning what the records claim, or which claims carry weaker assurance.
+ * This states, in English, what the records say AND what they don't establish.
+ * It never asserts more than the fields carry. */
+function describeBundle(capsules){
+  var caps=capsules.map(unwrapEnvelope).filter(function(c){return c&&c.capsule_id;});
+  if(!caps.length)return null;
+  var n=caps.length,parts=[];
+
+  var ts=caps.map(function(c){return c.timestamp;}).filter(Boolean).sort();
+  var when=ts.length?(ts[0]===ts[ts.length-1]?("at "+ts[0]):("between "+ts[0]+" and "+ts[ts.length-1])):null;
+  var ops={};caps.forEach(function(c){if(c.operator)ops[c.operator]=1;});
+  var opNames=Object.keys(ops);
+  parts.push(n+" record"+(n===1?"":"s")+(when?", "+when:"")
+    +(opNames.length===1?", from operator “"+opNames[0]+"”":
+      opNames.length>1?", from "+opNames.length+" operators":"")+".");
+
+  var kinds={};caps.forEach(function(c){var t=c.action_type||"unspecified";kinds[t]=(kinds[t]||0)+1;});
+  var kindBits=Object.keys(kinds).map(function(k){
+    var label=k==="fyi"?"informational":k==="decide"?"decision":k==="act"?"action":k;
+    return kinds[k]+" "+label+(kinds[k]===1?"":"s");
+  });
+  if(kindBits.length)parts.push(kindBits.join(", ")+".");
+
+  var accepted=0,rejected=0,human=0;
+  caps.forEach(function(c){
+    var d=c.disposition||{};
+    if(d.decision==="accept")accepted++;
+    else if(d.decision==="reject"||d.decision==="deny")rejected++;
+    if(d.human_disposed===true)human++;
+  });
+  if(rejected)parts.push(rejected+" of "+n+" "+(rejected===1?"was":"were")+" refused.");
+  if(accepted===n&&n>0)parts.push("All were accepted.");
+  parts.push(human===0
+    ? "No human approved any of them — every disposition was made by policy."
+    : human+" of "+n+" carried a recorded human disposition.");
+
+  /* Assurance is the part a reader cannot infer and most needs. */
+  var selfAtt=0,unconfirmed=0;
+  caps.forEach(function(c){
+    var a=c.assurance||{};
+    if(a.attestation_mode==="self_attested")selfAtt++;
+    if(a.effect_mode==="dispatched_unconfirmed")unconfirmed++;
+  });
+  if(unconfirmed)parts.push(unconfirmed+" record"+(unconfirmed===1?"":"s")+" report"+(unconfirmed===1?"s":"")
+    +" the effect as dispatched but unconfirmed — the runtime says it sent the action; nothing here confirms it landed.");
+  if(selfAtt===n&&n>0)parts.push("Every record is self-attested: the same party took the action and wrote the record.");
+
+  var withheld=0;
+  caps.forEach(function(c){
+    var ca=((c.model_attestation||{}).compute_attestation)||{};
+    if(ca.agent_input_digest||ca.agent_output_digest)withheld++;
+  });
+  if(withheld)parts.push("Inputs and outputs are committed as digests only — the payloads are not in "
+    +(withheld===n?"these records":"all of these records")+", so their contents cannot be read here, only matched if someone later discloses them.");
+
+  return{code:"summary",label:"What these records say",text:parts.join(" "),
+    meta:"plain-language summary of the fields carried; it makes no claim the ritual did not check"};
+}
+
 /* ---------- ritual: Integrity / Sequence / Completeness / Cross-check ---------- */
 async function evaluateBundleRitual(records,completeness,crossCheck,integrity,disclosures){
   var stages=[],finding=null;
@@ -2237,8 +2412,22 @@ async function evaluateBundleRitual(records,completeness,crossCheck,integrity,di
     stages.push({name:"Integrity",status:"pass",detail:"every record matches its fingerprint"});
   }
 
+  /* Same three-valued Sequence as the capsule surface: a bundle where nothing
+   * declares a parent must not render as "unbroken". See CAPSULE_JS. */
+  var _capsForSeq=records.map(unwrapEnvelope);
+  var _declared=0;
+  _capsForSeq.forEach(function(c){
+    if(isH64(((c.chain)||{}).parent_capsule_id||""))_declared++;
+  });
+  var _expectedLinks=Math.max(0,_capsForSeq.length-1);
+
   var gaps=findChainGaps(records);
-  if(gaps.length){
+  if(_capsForSeq.length<2){
+    stages.push({name:"Sequence",status:"skip",detail:"single record — nothing to sequence"});
+  }else if(_declared===0){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"not checked — no record here declares a parent, so the order shown is presentation order, not an attested sequence"});
+  }else if(gaps.length){
     var g0=gaps[0];
     stages.push({name:"Sequence",status:"fail",
       detail:"gap between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" — record "+(g0.afterIdx+1)+" names a parent that is not here"});
@@ -2247,14 +2436,17 @@ async function evaluateBundleRitual(records,completeness,crossCheck,integrity,di
         text:"Whatever sits between record "+(g0.beforeIdx+1)+" and record "+(g0.afterIdx+1)+" is not in this bundle.",
         meta:"failed stage: chain_gap · missing parent "+g0.missingParent.slice(0,8)+"…"};
     }
+  }else if(_declared<_expectedLinks){
+    stages.push({name:"Sequence",status:"skip",
+      detail:"partial — "+_declared+" of "+_expectedLinks+" expected links declared; the undeclared positions are not attested as adjacent"});
   }else{
-    stages.push({name:"Sequence",status:"pass",detail:"unbroken — every record names the one before it, or nothing"});
+    stages.push({name:"Sequence",status:"pass",detail:"unbroken — every record names the one before it"});
   }
 
   stages.push({name:"Completeness",status:completeness.status,detail:completeness.detail});
   stages.push({name:"Cross-check",status:crossCheck.status,detail:crossCheck.detail});
 
-  return{stages:stages,finding:finding};
+  return{stages:stages,finding:finding,summary:describeBundle(records)};
 }
 
 /* ---------- privilege log (aggregated across every record) ----------
@@ -2333,6 +2525,11 @@ function renderRitual(summary){
       "<span class='ritual-name'>"+safe(s.name)+"</span><span class='ritual-detail'>"+safe(s.detail)+"</span></div>";
   });
   h+="</div>";
+  if(summary.summary){
+    var sm=summary.summary;
+    h+="<div class='finding-panel finding-summary'><div class='finding-label'>"+safe(sm.label)+"</div>"+
+      "<p class='finding-text'>"+safe(sm.text)+"</p><div class='finding-meta'>"+safe(sm.meta)+"</div></div>";
+  }
   if(summary.finding){
     var f=summary.finding;
     h+="<div class='finding-panel finding-fail'><div class='finding-label'>"+safe(f.label)+"</div>"+
@@ -2725,7 +2922,7 @@ def render_capsule_page(capsule_id: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Capsule {sid} — AAC Verifier</title>
+<title>Capsule {sid} — Agent Action Capsule Verifier</title>
 <style>
 {_PAGE_CSS}
 {_CAPSULE_CSS}
@@ -2747,7 +2944,7 @@ def render_capsule_page(capsule_id: str) -> str:
 </nav>
 
 <div class="wrap" style="padding:32px 0 16px">
-  <div class="pill">capsule · AAC profile</div>
+  <div class="pill">capsule · Agent Action Capsule profile</div>
   <h1 style="margin-top:12px">Capsule <code class="mono" style="font-size:1.1rem">{sid}</code></h1>
   <p class="mono" style="font-size:11.5px;word-break:break-all;color:var(--muted);margin-top:6px">{cid}</p>
 </div>
@@ -2868,7 +3065,7 @@ def render_capsule_page(capsule_id: str) -> str:
         <a class="brand" href="https://agentactioncapsule.org">
           <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
         </a>
-        <p>Stateless public verification surface for AAC capsule-bound records.
+        <p>Stateless public verification surface for Agent Action Capsule records.
         Anchor: <a href="https://anchor.agentactioncapsule.org">anchor.agentactioncapsule.org</a>.</p>
       </div>
       <div class="foot-cols">
@@ -3101,7 +3298,7 @@ def render_landing_page() -> str:
 
 
 #: Token replaced client-side (``BUNDLE_JS``'s download button) or by a
-#: future producer-side embed (capsule-ledger's planned ``--with-viewer``
+#: producer-side embed (capsule-ledger's ``--with-viewer``, shipped in its #28;
 #: flag — see the PR description) with the real base64url bundle fragment.
 #: Chosen with an ``@`` so it can never collide with real base64url content.
 _BUNDLE_FRAGMENT_PLACEHOLDER = "@@BUNDLE_FRAGMENT@@"
@@ -3243,7 +3440,7 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
 def render_bundle_page(*, offline: bool = False) -> str:
     """Return the HTML for the bundle-open page — the recipient-side viewer
     for a ``capsule bundle`` export (capsule-ledger's
-    ``asg_ledger/cli/bundle_cmd.py``).
+    ``capsule_ledger/cli/bundle_cmd.py``).
 
     Two delivery modes, one codebase (this function, ``MMR_JS``, ``BUNDLE_JS``):
 
