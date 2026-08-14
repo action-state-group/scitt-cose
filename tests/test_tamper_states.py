@@ -113,8 +113,11 @@ def test_chain_gap_mutant_check():
 def test_witness_downgrade_is_skip_not_fail():
     bundle, witness, _, _ = _load("witness_downgrade")
     summary, _ = _run(bundle, witness)
-    for name in ("Integrity", "Sequence", "Authenticity"):
+    for name in ("Integrity", "Sequence"):
         assert _stage(summary.stages, name).status == "pass"
+    auth = _stage(summary.stages, "Authenticity")
+    assert auth.status == "skip"  # verifies, but only against a self-asserted key
+    assert auth.detail == aac.AUTHENTICITY_SELF_ASSERTED_DETAIL
     w = _stage(summary.stages, "Witness")
     assert w.status == "skip"  # unreached witnesses are never disproven
     assert "1 of 3" in w.detail
@@ -134,8 +137,11 @@ def test_witness_downgrade_upgrades_to_pass_when_all_report():
 def test_offline_pass_verifies_locally_witness_skipped_not_failed():
     bundle, witness, _, _ = _load("offline_pass")
     summary, _ = _run(bundle, witness)
-    for name in ("Integrity", "Sequence", "Authenticity"):
+    for name in ("Integrity", "Sequence"):
         assert _stage(summary.stages, name).status == "pass"
+    auth = _stage(summary.stages, "Authenticity")
+    assert auth.status == "skip"  # verifies, but only against a self-asserted key
+    assert auth.detail == aac.AUTHENTICITY_SELF_ASSERTED_DETAIL
     w = _stage(summary.stages, "Witness")
     assert w.status == "skip"
     assert "unreachable" in w.detail
@@ -144,10 +150,13 @@ def test_offline_pass_verifies_locally_witness_skipped_not_failed():
 
 # ---------------------------------------------------------------------------
 # Authenticity is real crypto, not a fabricated flag — every fixture vector's
-# Authenticity "pass" must depend on the embedded signature actually verifying.
+# Authenticity "skip" (self-asserted key) must depend on the embedded
+# signature actually verifying. A tampered statement must FAIL, never SKIP —
+# "skip" means "verified, but only tells you the bytes are unaltered"; a
+# statement that doesn't verify at all must not be able to hide in that tier.
 # ---------------------------------------------------------------------------
 
-def test_authenticity_mutant_check_flips_to_fail():
+def test_authenticity_mutant_check_flips_to_fail_not_skip():
     import base64
 
     for name in ("digest_mismatch", "chain_gap", "witness_downgrade", "offline_pass"):
@@ -157,7 +166,20 @@ def test_authenticity_mutant_check_flips_to_fail():
         raw[-1] ^= 0xFF  # flip the last byte — corrupts the COSE signature
         tampered[0]["signed_statement"]["statement_b64"] = base64.b64encode(bytes(raw)).decode()
         stage = aac._check_authenticity(tampered)
-        assert stage.status == "fail", f"{name}: tampered signature must fail, not pass"
+        assert stage.status == "fail", f"{name}: tampered signature must fail, not skip"
+        assert stage.status != "skip"
+
+
+def test_authenticity_self_asserted_verifying_signature_is_skip_not_pass():
+    """The decision this task implements: a verifying signature over a
+    self-asserted key must never render as a green pass — it proves only that
+    the bytes are unaltered since signing, not who signed them."""
+    bundle, _, _, _ = _load("offline_pass")
+    stage = aac._check_authenticity(bundle)
+    assert stage.status == "skip"
+    assert stage.status != "pass"
+    assert stage.detail == aac.AUTHENTICITY_SELF_ASSERTED_DETAIL
+    assert "not who signed them" in stage.detail
 
 
 def test_authenticity_skip_when_no_signature_present():

@@ -38,9 +38,9 @@
       "status": "pass"
     },
     {
-      "detail": "all signatures hold \u2014 verified over the original bytes",
+      "detail": "signature verifies against a key supplied with the record \u2014 this shows the bytes are unaltered since signing, not who signed them",
       "name": "Authenticity",
-      "status": "pass"
+      "status": "skip"
     },
     {
       "detail": "witnessed 1 of 1",

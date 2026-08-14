@@ -373,6 +373,17 @@ class RitualSummary:
     finding: Finding | None = None
 
 
+#: Exact wording for the "verifies but self-asserted" tier — a verifying
+#: signature over a self-asserted key proves the bytes are unaltered since
+#: signing; it does not establish who signed. Rendering that as a green pass
+#: would claim a property nothing here established. Pinned so viewer surfaces
+#: (this module and the browser-side CAPSULE_JS check) can't drift apart.
+AUTHENTICITY_SELF_ASSERTED_DETAIL = (
+    "signature verifies against a key supplied with the record — this shows the bytes "
+    "are unaltered since signing, not who signed them"
+)
+
+
 def _check_authenticity(capsules: list[dict]) -> RitualStage:
     """Verify any embedded signed statements for real; never trust a claimed flag.
 
@@ -382,6 +393,16 @@ def _check_authenticity(capsules: list[dict]) -> RitualStage:
     no COSE bytes by default (the JSON travels in the URL fragment only), so
     this stage is honestly "skip" when none is supplied — it never reports
     "pass" for a check that did not run.
+
+    Three-valued, same as Sequence: no statement → skip; statement present and
+    the signature verifies against a self-asserted key (the only kind this
+    codebase can produce or discover today — there is no key-binding registry,
+    DID, certificate chain, or witness statement yet) → skip, never pass,
+    because a verifying signature over a self-asserted key only proves the
+    bytes are unaltered since signing, not who signed them; a signature bound
+    to an independently checkable identity would be the third tier ("pass"),
+    but that tier has no data source yet (tracked as a separate, later task) —
+    so a verified signature can only ever land in the middle tier here.
     """
     sidecars = [c.get("signed_statement") for c in capsules if c.get("signed_statement")]
     if not sidecars:
@@ -402,9 +423,7 @@ def _check_authenticity(capsules: list[dict]) -> RitualStage:
                 return RitualStage("Authenticity", "fail", "at least one signature did not verify")
         except Exception:  # noqa: BLE001 - malformed sidecar counts as a fail, not a crash
             return RitualStage("Authenticity", "fail", "at least one signature did not verify")
-    return RitualStage(
-        "Authenticity", "pass", "all signatures hold — verified over the original bytes"
-    )
+    return RitualStage("Authenticity", "skip", AUTHENTICITY_SELF_ASSERTED_DETAIL)
 
 
 def _check_witness(witness: dict | None) -> RitualStage:
