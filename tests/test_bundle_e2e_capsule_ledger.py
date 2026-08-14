@@ -12,7 +12,7 @@ This is the fairness requirement from the task brief, checked directly: a
 bundle produced by the free/OSS `capsule bundle` command -- with NO special
 casing, no paid-tier field, nothing this viewer's code branches on -- must
 verify here. The completeness certificate this test attaches is minted with
-capsule-ledger's own `capsule_ledger.mmr` module (or `asg_ledger.mmr` on older checkouts) (read-only, sibling-repo import,
+capsule-ledger's own `capsule_ledger.mmr` module (read-only, sibling-repo import,
 mirroring `scripts/generate_mmr_kat39_vectors.py`'s existing pattern) because
 `capsule bundle` does not populate one yet as of this viewer shipping -- that
 wiring is capsule-ledger's own follow-up (see the PR description); this test
@@ -100,11 +100,11 @@ def real_bundle():
 @pytest.fixture(scope="module")
 def genuine_completeness_certificate(real_bundle):
     """Mint a real completeness certificate for `real_bundle` using
-    capsule-ledger's own asg_ledger.mmr module -- not a hand-rolled stand-in."""
+    capsule-ledger's own capsule_ledger.mmr module -- not a hand-rolled stand-in."""
     bundle, fixture = real_bundle
     sys.path.insert(0, str(CAPSULE_LEDGER))
-    from asg_ledger.cli.ledger_io import open_ledger  # noqa: PLC0415
-    from asg_ledger.mmr.index import MmrLedger  # noqa: PLC0415
+    from capsule_ledger.cli.ledger_io import open_ledger  # noqa: PLC0415
+    from capsule_ledger.mmr.index import MmrLedger  # noqa: PLC0415
 
     from_seq, to_seq = bundle["range"]
     with open_ledger(fixture) as store:
