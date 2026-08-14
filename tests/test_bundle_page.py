@@ -91,6 +91,14 @@ def test_bundle_js_shared_helpers_match_capsule_js():
     # disclosed-payload rendering (canonicalPayloadText/payloadPreview/payloadCellHtml) —
     # same drift-guard: the bytes hashed and the bytes shown must come from one helper,
     # identical in both files, never two independently-maintained copies.
+    # describeBundle — the plain-language summary makes user-facing claims about
+    # what records say; two independently-maintained copies would let the capsule
+    # and bundle surfaces describe the same bundle differently.
+    describe_end = 'meta:"plain-language summary of the fields carried; it makes no claim the ritual did not check"};\n}'
+    assert _slice_between(CAPSULE_JS, "function describeBundle(capsules){", describe_end) == _slice_between(
+        BUNDLE_JS, "function describeBundle(capsules){", describe_end
+    )
+
     payload_end = '</div></div></details>";\n}'
     assert _slice_between(CAPSULE_JS, "/* ---------- disclosed-payload rendering", payload_end) == _slice_between(
         BUNDLE_JS, "/* ---------- disclosed-payload rendering", payload_end
@@ -220,7 +228,7 @@ def test_asgi_routes_wired():
 
 
 def test_bundle_route_matches_capsule_ledger_default_permalink_base():
-    """capsule-ledger's asg_ledger/cli/bundle_cmd.py hardcodes
+    """capsule-ledger's capsule_ledger/cli/bundle_cmd.py hardcodes
     DEFAULT_VERIFY_BASE_URL = "https://verify.agentactioncapsule.org/bundle" --
     confirm the path this module serves at is exactly "/bundle", no trailing
     segment, so that permalink resolves here unmodified."""

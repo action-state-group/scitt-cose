@@ -45,9 +45,26 @@ REPO = Path(__file__).resolve().parents[1]
 OUT_DIR = REPO / "test-vectors" / "mmr"
 
 
+def _ledger_mod(suffix: str):
+    """Import `<pkg>.<suffix>` from whichever package name this checkout uses.
+
+    capsule-ledger renamed `asg_ledger` -> `capsule_ledger`; a checkout may carry
+    a stale `asg_ledger/` beside the live one, so the current name is tried first.
+    """
+    import importlib  # noqa: PLC0415
+
+    last = None
+    for pkg in ("capsule_ledger", "asg_ledger"):
+        try:
+            return importlib.import_module(f"{pkg}.{suffix}")
+        except ImportError as exc:  # noqa: PERF203
+            last = exc
+    raise last
+
+
 def _load_capsule_ledger(cl_path: Path):
     sys.path.insert(0, str(cl_path))
-    from asg_ledger.mmr import core  # noqa: PLC0415
+    core = _ledger_mod("mmr.core")
 
     spec = importlib.util.spec_from_file_location("_kat39_ref", cl_path / "tests" / "test_mmr_kat39.py")
     kat39 = importlib.util.module_from_spec(spec)
@@ -60,7 +77,7 @@ def _asdict_proof(p) -> dict:
 
 
 def generate_kat39(core, kat39) -> dict:
-    from asg_ledger.mmr.store import MemoryNodeStore  # noqa: PLC0415
+    MemoryNodeStore = _ledger_mod("mmr.store").MemoryNodeStore
 
     store = MemoryNodeStore()
     interior_triples = []  # (left_hex, right_hex, parent_pos, result_hex) -- pure interior_hash KAT data
@@ -181,7 +198,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cl_path = Path(args.capsule_ledger_path).resolve()
-    if not (cl_path / "asg_ledger" / "mmr" / "core.py").exists():
+    if not any((cl_path / pkg / "mmr" / "core.py").exists() for pkg in ("capsule_ledger", "asg_ledger")):
         print(f"capsule-ledger checkout not found at {cl_path}", file=sys.stderr)
         return 2
 

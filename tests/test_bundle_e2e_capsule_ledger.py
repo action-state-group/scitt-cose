@@ -12,7 +12,7 @@ This is the fairness requirement from the task brief, checked directly: a
 bundle produced by the free/OSS `capsule bundle` command -- with NO special
 casing, no paid-tier field, nothing this viewer's code branches on -- must
 verify here. The completeness certificate this test attaches is minted with
-capsule-ledger's own `asg_ledger.mmr` module (read-only, sibling-repo import,
+capsule-ledger's own `capsule_ledger.mmr` module (or `asg_ledger.mmr` on older checkouts) (read-only, sibling-repo import,
 mirroring `scripts/generate_mmr_kat39_vectors.py`'s existing pattern) because
 `capsule bundle` does not populate one yet as of this viewer shipping -- that
 wiring is capsule-ledger's own follow-up (see the PR description); this test
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import importlib
 import json
 import shutil
 import subprocess
@@ -50,8 +51,22 @@ def _find_capsule_ledger() -> Path | None:
         repo_root.parents[3] / "capsule-ledger" if len(repo_root.parents) > 3 else None,
     ]
     for c in candidates:
-        if c and (c / "asg_ledger" / "mmr" / "core.py").exists():
+        if c and _ledger_pkg(c):
             return c.resolve()
+    return None
+
+
+#: capsule-ledger renamed its package `asg_ledger` -> `capsule_ledger`. A checkout
+#: may still carry a stale `asg_ledger/` beside the live one, so probe the current
+#: name FIRST — pinning to the old name silently tests dead code, which for a
+#: cross-implementation guard is worse than not running at all.
+LEDGER_PKGS = ("capsule_ledger", "asg_ledger")
+
+
+def _ledger_pkg(root: Path) -> str | None:
+    for pkg in LEDGER_PKGS:
+        if (root / pkg / "mmr" / "core.py").exists():
+            return pkg
     return None
 
 
@@ -68,7 +83,8 @@ def real_bundle():
     """Run the real `capsule bundle` CLI against the real amaury fixture
     ledger -- zero mocking, zero special-casing."""
     sys.path.insert(0, str(CAPSULE_LEDGER))
-    from asg_ledger.cli.main import main as cli_main  # noqa: PLC0415
+    pkg = _ledger_pkg(CAPSULE_LEDGER)
+    cli_main = importlib.import_module(f"{pkg}.cli.main").main
 
     fixture = CAPSULE_LEDGER / "tests" / "fixtures" / "amaury_sample_ledger.jsonl"
     assert fixture.exists(), "amaury fixture missing from capsule-ledger checkout"
