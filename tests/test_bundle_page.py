@@ -126,8 +126,16 @@ def test_hosted_bundle_page_is_csp_safe():
         "https://agentactioncapsule.org",
         "https://agentactioncapsule.org/docs/",
         "https://anchor.agentactioncapsule.org",
+        f"{REPO_URL}/blob/main/docs/verification-trust-model.md",
     }
     assert not (external - allowed), external - allowed
+
+
+def test_bundle_page_links_trust_model_doc_in_both_modes():
+    """A stranger with a bundle permalink has no reason to find our GitHub —
+    the trust model must be reachable from the page itself, hosted or offline."""
+    assert "docs/verification-trust-model.md" in render_bundle_page()
+    assert "docs/verification-trust-model.md" in render_bundle_page(offline=True)
 
 
 def test_offline_bundle_shell_is_self_contained_and_reusable_template():

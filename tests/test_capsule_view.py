@@ -306,6 +306,13 @@ def test_capsule_page_renders_with_valid_id():
     assert f'data-capsule-id="{cid}"' in html
 
 
+def test_capsule_page_links_trust_model_doc():
+    """A stranger with a permalink has no reason to find our GitHub — the
+    trust model must be reachable from the page itself, not just the README."""
+    html = render_capsule_page("b" * 64)
+    assert "docs/verification-trust-model.md" in html
+
+
 # ---------------------------------------------------------------------------
 # Acceptance 6: AAC profile first-class + renderer plug-point
 # ---------------------------------------------------------------------------
