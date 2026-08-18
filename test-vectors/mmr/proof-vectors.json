@@ -105,6 +105,167 @@
       "expect": true
     }
   ],
+  "negative_inclusion_cases": [
+    {
+      "label": "wrong-body-digest",
+      "description": "Proof for leaf 0, but body_digest from leaf 3 — leaf_hash mismatch causes root recomputation to diverge",
+      "leaf_index": 0,
+      "size": 22,
+      "body_digest": "22dc2e6404475362e139e594e3486a24676dfe64609fca46511d4149ea9e7488",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 0,
+        "witness": [
+          "d133beebbee4388d5f5c715c6da1d51eac7bdc6a3f0dcf974b298f30ec91aa9f",
+          "244faaa89bac1a783ddf7eeb19c70463c055b4011edf9ca0ea47806b3ba54436",
+          "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": false
+    },
+    {
+      "label": "wrong-root",
+      "description": "Valid proof for leaf 0 with correct body_digest, but first byte of root is XOR'd with 0xFF — recomputed root does not match",
+      "leaf_index": 0,
+      "size": 22,
+      "body_digest": "b512b2dd10a5444b38811e7eb9487baaadad0e9da59ef29a0c34c24603e349df",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 0,
+        "witness": [
+          "d133beebbee4388d5f5c715c6da1d51eac7bdc6a3f0dcf974b298f30ec91aa9f",
+          "244faaa89bac1a783ddf7eeb19c70463c055b4011edf9ca0ea47806b3ba54436",
+          "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "768639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": false
+    },
+    {
+      "label": "truncated-witness",
+      "description": "Proof for leaf 7 (size 22) with last witness element removed — path is too short to reconstruct the correct subtree root",
+      "leaf_index": 7,
+      "size": 22,
+      "body_digest": "1268d916bfefa28f636f4ad7967697fbfc8adc1f700c7d183ed310e9206a01b0",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 7,
+        "witness": [
+          "d02cc023b5f84ecabc7c7accdbcf33cff679deb5b629d5acd0ac76bce3fb18f0",
+          "6573e9e2e6ee9ee357c25c8e46a49423ef1bb0e013f3d1eedf59aef495bcd8d5"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": false
+    },
+    {
+      "label": "sibling-swap",
+      "description": "Proof for leaf 3 with witness[0] and witness[1] swapped — wrong sibling order causes root recomputation to diverge",
+      "leaf_index": 3,
+      "size": 22,
+      "body_digest": "22dc2e6404475362e139e594e3486a24676dfe64609fca46511d4149ea9e7488",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 3,
+        "witness": [
+          "ebfd449c1e91324edbd72c8960715c55917e376e8d8d1d97df16ed0010591999",
+          "48d1da91527e9d7f3b940f857f6eafb2e404c5a1874ad88dfbadc4d3de1caed4",
+          "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": false
+    },
+    {
+      "label": "forged-leaf-as-interior",
+      "description": "Genuine proof for leaf 0 but body_digest is set to the right-subtree peak (an actual interior node value) — leaf_hash(interior) != leaf_hash(real_body) so the path recomputation fails",
+      "leaf_index": 0,
+      "size": 22,
+      "body_digest": "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8",
+      "proof": {
+        "v": 1,
+        "kind": "inclusion",
+        "size": 22,
+        "leaf_index": 0,
+        "witness": [
+          "d133beebbee4388d5f5c715c6da1d51eac7bdc6a3f0dcf974b298f30ec91aa9f",
+          "244faaa89bac1a783ddf7eeb19c70463c055b4011edf9ca0ea47806b3ba54436",
+          "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+        ],
+        "peaks_left": [],
+        "peaks_right": [
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "expect": false
+    }
+  ],
+  "negative_consistency_cases": [
+    {
+      "label": "wrong-root-a",
+      "description": "Consistency proof with first byte of root_a XOR'd with 0xFF — the recomputed old root does not match the stated root_a",
+      "size_a": 11,
+      "root_a": "8d52b657b3ce4b37e8472c04a3f75b9faba2fd8debe845dde0d49d2f8118690e",
+      "size_b": 22,
+      "root_b": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+      "proof": {
+        "v": 1,
+        "kind": "consistency",
+        "size_a": 11,
+        "size_b": 22,
+        "old_peaks": [
+          "a8e55be0fc114b75e211eb815b1dec6744972dd63b96b229e3d38ad92e53e980",
+          "6573e9e2e6ee9ee357c25c8e46a49423ef1bb0e013f3d1eedf59aef495bcd8d5",
+          "d02cc023b5f84ecabc7c7accdbcf33cff679deb5b629d5acd0ac76bce3fb18f0"
+        ],
+        "witness": [
+          [
+            "4eb35d17e8c0e7e5ca8def06ff1f7000d1cdd89f506142c79d58216267684c3a"
+          ],
+          [
+            "9d237bb5f5089b10fd74e33dd73cb53243d4918bf61ec18e34efdfd681b073c3",
+            "a8e55be0fc114b75e211eb815b1dec6744972dd63b96b229e3d38ad92e53e980"
+          ],
+          [
+            "33bfa40ea1ccf7f7ff1a7cfa208b1cd4f337115b8e5ade04dc73a85ed090891c",
+            "6573e9e2e6ee9ee357c25c8e46a49423ef1bb0e013f3d1eedf59aef495bcd8d5",
+            "a8e55be0fc114b75e211eb815b1dec6744972dd63b96b229e3d38ad92e53e980"
+          ]
+        ],
+        "new_peaks": [
+          "9881ce1c3c7aa7b2e427007aeafcca84d75932eceb643cb16317d070c867f278",
+          "1511faee6b329cda81ba7e763321fa565ccea947b7c00c3969b7f8e179f14bc8"
+        ]
+      },
+      "expect": false
+    }
+  ],
   "consistency_case": {
     "size_a": 11,
     "root_a": "7252b657b3ce4b37e8472c04a3f75b9faba2fd8debe845dde0d49d2f8118690e",

@@ -196,6 +196,42 @@ def test_verify_consistency_rejects_wrong_size_b(mmr_js_path, proof_vectors):
     assert got is False
 
 
+def test_js_verify_inclusion_rejects_every_negative_case(mmr_js_path, proof_vectors):
+    """Every case in negative_inclusion_cases must be rejected (returns False).
+    Combined with test_js_verify_inclusion_accepts_every_genuine_proof, this proves
+    the verifier is not vacuously True or vacuously False — the mutant (a verifier
+    that accepts everything) would fail here."""
+    neg_cases = proof_vectors.get("negative_inclusion_cases", [])
+    assert neg_cases, "negative_inclusion_cases missing from proof-vectors.json (FINDING-3)"
+    for case in neg_cases:
+        got = _run_js(mmr_js_path, {
+            "fn": "verifyInclusion",
+            "root": case["root"], "size": case["size"], "leaf_index": case["leaf_index"],
+            "body_digest": case["body_digest"], "proof": case["proof"],
+        })
+        assert got is False, (
+            f"negative case '{case.get('label', '?')}' was accepted — verifier should have rejected it"
+        )
+
+
+def test_js_verify_consistency_rejects_every_negative_case(mmr_js_path, proof_vectors):
+    """Every case in negative_consistency_cases must be rejected (returns False).
+    Combined with test_js_verify_consistency_accepts_genuine_proof, this proves
+    the verifier is not vacuously True or vacuously False."""
+    neg_cases = proof_vectors.get("negative_consistency_cases", [])
+    assert neg_cases, "negative_consistency_cases missing from proof-vectors.json (FINDING-3)"
+    for case in neg_cases:
+        got = _run_js(mmr_js_path, {
+            "fn": "verifyConsistency",
+            "root_a": case["root_a"], "size_a": case["size_a"],
+            "root_b": case["root_b"], "size_b": case["size_b"],
+            "proof": case["proof"],
+        })
+        assert got is False, (
+            f"negative case '{case.get('label', '?')}' was accepted — verifier should have rejected it"
+        )
+
+
 def test_verify_inclusion_never_throws_on_garbage_proof(mmr_js_path, proof_vectors):
     """The never-raise contract: malformed input is a verification failure,
     never an exception -- mirrors core.py's verify_inclusion docstring."""

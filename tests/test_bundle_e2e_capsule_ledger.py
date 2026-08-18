@@ -188,7 +188,12 @@ def test_raw_oss_bundle_renders_with_no_special_casing(real_bundle, js_paths):
         assert len(row["entry"]["digest"]) == 64
 
     completeness = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
-    assert completeness["status"] == "skip"  # honest: no certificate in the raw free-tier bundle
+    # PR #43 (bundle-completeness-cert) made `capsule bundle` always attach a completeness
+    # certificate — the raw free-tier bundle now includes one, so the truthful status is "pass".
+    assert completeness["status"] == "pass", completeness
+    # Positive: "pass" means verifyInclusion ran and the proof was sound — not just "cert present".
+    # The detail line is set only on a verified range, never on skip or fail paths.
+    assert "provably complete" in completeness["detail"], completeness
 
     cross_check = _run_js(js_paths, {"fn": "crossCheckSelfReport", "bundle": bundle, "records": bundle["records"]})
     assert cross_check["status"] == "pass"  # real free-tier records genuinely agree with their own self-report
@@ -200,7 +205,10 @@ def test_raw_oss_bundle_renders_with_no_special_casing(real_bundle, js_paths):
     integrity = next(s for s in ritual["stages"] if s["name"] == "Integrity")
     sequence = next(s for s in ritual["stages"] if s["name"] == "Sequence")
     assert integrity["status"] == "pass"
-    assert sequence["status"] == "pass"  # bundle_cmd.py transitively pulls in cited chain parents
+    # The amaury fixture has partial chain coverage (confirm_purchase cites approve_purchase but
+    # the other records are standalone), so the honest Sequence verdict is "skip" (partial),
+    # not "pass" (every link declared).
+    assert sequence["status"] == "skip"
 
 
 def test_hosted_route_renders_bundle_page_shell():
@@ -236,6 +244,32 @@ def test_corrupted_completeness_certificate_byte_is_rejected(real_bundle, genuin
     else:
         # size-4 bundle may have an empty witness path for the boundary leaf --
         # corrupt the root instead, which every shape still carries.
+        b = bytearray(bytes.fromhex(cc["range_root"]))
+        b[0] ^= 0xFF
+        cc["range_root"] = b.hex()
+    bundle["completeness_certificate"] = cc
+
+    completeness = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
+    assert completeness["status"] == "fail", completeness
+
+
+def test_raw_bundle_cert_corruption_is_rejected(real_bundle, js_paths):
+    """MUTANT test for FINDING-1: the raw OSS bundle now ships with a completeness
+    certificate minted by capsule-ledger PR #43; corrupt one byte of its inclusion
+    witness (or root if witness is empty) and confirm checkCompleteness flips to
+    'fail' — proving the check is load-bearing, not vacuously accepting."""
+    bundle, _ = real_bundle
+    bundle = dict(bundle)
+    assert "completeness_certificate" in bundle, (
+        "raw bundle has no completeness_certificate — capsule-ledger PR #43 must be present"
+    )
+    cc = json.loads(json.dumps(bundle["completeness_certificate"]))
+    witness = cc["range_proof"]["inclusion_from"]["witness"]
+    if witness:
+        b = bytearray(bytes.fromhex(witness[0]))
+        b[0] ^= 0xFF
+        witness[0] = b.hex()
+    else:
         b = bytearray(bytes.fromhex(cc["range_root"]))
         b[0] ^= 0xFF
         cc["range_root"] = b.hex()
