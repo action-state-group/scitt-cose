@@ -178,16 +178,26 @@ def _strict_decode_item(raw: bytes, what: str):
         value = cbor2.CBORDecoder(stream).decode()
     except Exception as exc:  # noqa: BLE001 - any parser error -> typed CoseError
         raise CoseError(f"{what} is not valid CBOR ({type(exc).__name__})") from exc
-    extra = len(raw) - stream.tell()
-    if extra:
-        raise CoseError(f"trailing bytes after {what} ({extra} extra) — rejected as malleable")
     try:
         recanonical = cbor2.dumps(value, canonical=True)
     except Exception as exc:  # noqa: BLE001
         raise CoseError(f"{what} could not be re-encoded ({type(exc).__name__})") from exc
-    # Length, not bytes: a key re-ordering preserves length (and is benign for a
-    # unique-key map); indefinite-length, non-minimal, and duplicate-key (which
-    # collapses to fewer pairs) all change it.
+    # cbor2 ≥5.x uses read-ahead buffering (a single read(4096) call), so
+    # stream.tell() equals len(raw) after any decode — it cannot detect trailing
+    # bytes. Instead distinguish the two failure modes via the canonical re-encoding:
+    #
+    # • Trailing bytes: recanonical is exactly the valid prefix — raw.startswith(recanonical)
+    #   is True and len(recanonical) < len(raw).
+    # • Non-deterministic encoding (indefinite-length, non-minimal int/length,
+    #   duplicate map key): canonical re-encoding length differs but is NOT a prefix
+    #   of raw — raw.startswith(recanonical) is False.
+    #
+    # Length, not bytes, is still the final equality check: a key re-ordering
+    # preserves length (and is benign for a unique-key map), so a validly-signed
+    # message whose header maps are not in canonical *order* is accepted.
+    if len(recanonical) < len(raw) and raw.startswith(recanonical):
+        extra = len(raw) - len(recanonical)
+        raise CoseError(f"trailing bytes after {what} ({extra} extra) — rejected as malleable")
     if len(recanonical) != len(raw):
         raise CoseError(
             f"non-deterministic {what} (indefinite-length, non-minimal, or "
