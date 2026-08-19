@@ -256,10 +256,21 @@ These are conscious decisions, not oversights. They are documented rather than
   signatures (a verdict change on well-formed input), so we do **not** enforce
   it. The verifier still rejects `r`/`s` that are zero or out of range (via
   `cryptography`). Consequence: a COSE_Sign1's 64-byte signature is not
-  byte-unique. Anyone keying idempotency/dedup on the *signature bytes* (rather
-  than on the signed content or the statement's leaf digest) must account for
-  this. The leaf digest — what the transparency log commits to — is over the
-  full statement bytes and is unaffected in practice for the canonical signer.
+  byte-unique: for any valid `(r, s)`, `(r, n−s)` also verifies over the same
+  `Sig_structure` (SEC1 v2.0 §4.1.3), so one signing act can produce two
+  distinct `COSE_Sign1` byte strings. Low-`s` normalization does not close
+  this — it only picks a canonical representative among possible signatures a
+  signer could emit; it says nothing about entries that were computed before
+  normalization was added. A digest taken over the **full statement bytes**
+  (which include the signature) is therefore **not** a stable function of the
+  signing act — it inherits this non-uniqueness and yields two different
+  values for the same act. That is fine for a *leaf commitment* (what the
+  transparency log proves inclusion of may legitimately cover the full
+  statement bytes; the signature belongs inside the integrity claim it
+  commits to). It is **not** fine for anything keyed as an *entry identifier*
+  — dedup, idempotency, or a SCRAPI Location URL — which MUST be a function
+  of the act and must instead digest the `Sig_structure` (or the signed
+  payload), never the full envelope.
 
 - **Statement `alg` is taken from the protected header.** `verify_sign1` selects
   the verification primitive from the integrity-protected `alg`, then requires
