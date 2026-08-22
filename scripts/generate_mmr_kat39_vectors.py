@@ -5,8 +5,12 @@ the vanilla-JS MMR completeness-certificate port (``hosted_profiles.hosted``'s
 ``MMR_JS``) against capsule-ledger's Python reference (``asg_ledger.mmr.core``).
 
 This script is NOT run in CI and has NO runtime dependency from scitt-cose on
-capsule-ledger (scitt-cose stays vendor-neutral; MMR is capsule-ledger's
-concept, never scitt-cose's). It requires a local ``capsule-ledger`` checkout
+capsule-ledger. Note this is narrower than it once was: as of ``scitt_cose.cll``
+(CLL log verification, Amendment E), scitt-cose DOES independently implement
+MMR inclusion/consistency/range verification -- ported, not imported, byte-
+identical, and cross-checked against these same committed vectors (see
+``tests/test_cll.py``). What stays true is only that THIS script has no
+runtime dependency on capsule-ledger. It requires a local ``capsule-ledger`` checkout
 next to this repo (``../capsule-ledger`` by default, override with
 ``--capsule-ledger-path``) purely as a one-time, read-only oracle to mint the
 committed JSON. The committed vectors are the artifact; re-running this script
