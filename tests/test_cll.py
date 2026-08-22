@@ -103,10 +103,11 @@ def test_negative_consistency_cases_are_rejected(proof_vectors):
 
 # -- checkpoint digest: cross-checked against a live capsule_emit value ------
 # Pinned by calling capsule_emit.checkpoint.emit.CheckpointRecord(**same
-# fields).digest() directly against the cll-extract-mmr-to-capsule-emit
-# branch (commit e3df69dfe / 34e90f1) -- the "shared format" this task
-# depends on. Confirms Checkpoint.signing_body()/digest() here are a
-# byte-identical port, not just structurally similar.
+# fields).digest() directly -- the Option-C single-commitment shape
+# (v, kind, log_id, mmr_size, root, prev_size, prev_root, key_id, timestamp;
+# no peaks_digest, per [ldg-checkpoint-single-commitment]). Confirms
+# Checkpoint.signing_body()/digest() here are a byte-identical port, not
+# just structurally similar.
 
 
 def test_checkpoint_digest_matches_capsule_emit_reference():
@@ -116,7 +117,6 @@ def test_checkpoint_digest_matches_capsule_emit_reference():
         log_id="log-a",
         mmr_size=22,
         root="898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
-        peaks_digest="deadbeef" * 8,
         prev_size=11,
         prev_root="7252b657b3ce4b37e8472c04a3f75b9faba2fd8debe845dde0d49d2f8118690e",
         key_id="node-a",
@@ -125,12 +125,46 @@ def test_checkpoint_digest_matches_capsule_emit_reference():
     )
     assert cp.signing_body() == (
         '{"key_id":"node-a","kind":"mmr_checkpoint","log_id":"log-a","mmr_size":22,'
-        '"peaks_digest":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",'
         '"prev_root":"7252b657b3ce4b37e8472c04a3f75b9faba2fd8debe845dde0d49d2f8118690e",'
         '"prev_size":11,"root":"898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",'
         '"timestamp":"2026-08-21T00:00:00Z","v":1}'
     )
-    assert cp.digest() == "4115036519a7cc8b5e9b2a9b00fcf599113920d5880fc3645abfcb1f4491222c"
+    assert cp.digest() == "a19825f207017fd4c91be22927ced3f07ac3392ac44a94b891429f280a2347b2"
+
+
+# -- peaks_digest dropped: capsule-emit 0.4.0's Option-C single-commitment ---
+# checkpoint (v, kind, log_id, mmr_size, root, prev_size, prev_root, key_id,
+# timestamp, signature[, witnesses]) no longer emits peaks_digest. A real
+# producer checkpoint dict -- exactly what capsule_emit.checkpoint.emit.
+# CheckpointRecord.to_dict() now produces -- must from_dict() cleanly and
+# verify. Before this fix, from_dict() KeyError'd on the missing key.
+
+
+def test_from_dict_accepts_capsule_emit_shape_without_peaks_digest():
+    producer_dict = {
+        "v": 1,
+        "kind": "mmr_checkpoint",
+        "log_id": "log-a",
+        "mmr_size": 22,
+        "root": "898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",
+        "prev_size": 11,
+        "prev_root": "7252b657b3ce4b37e8472c04a3f75b9faba2fd8debe845dde0d49d2f8118690e",
+        "key_id": "node-a",
+        "timestamp": "2026-08-21T00:00:00Z",
+        "signature": "",
+    }
+    assert "peaks_digest" not in producer_dict
+
+    cp = cll.Checkpoint.from_dict(producer_dict)
+
+    assert cp.signing_body() == (
+        '{"key_id":"node-a","kind":"mmr_checkpoint","log_id":"log-a","mmr_size":22,'
+        '"prev_root":"7252b657b3ce4b37e8472c04a3f75b9faba2fd8debe845dde0d49d2f8118690e",'
+        '"prev_size":11,"root":"898639faeacaa93b2648c748db07ca54f1dd12ffee423f260b5dcee8b6e889e1",'
+        '"timestamp":"2026-08-21T00:00:00Z","v":1}'
+    )
+    assert cp.digest() == "a19825f207017fd4c91be22927ced3f07ac3392ac44a94b891429f280a2347b2"
+    assert not hasattr(cp, "peaks_digest")
 
 
 # -- mutant tests: must show the red ------------------------------------------
@@ -205,11 +239,11 @@ def test_verify_checkpoint_chain_rejects_the_rollback(proof_vectors):
 
     older = cll.Checkpoint(
         v=1, kind="mmr_checkpoint", log_id="log-x", mmr_size=cc["size_a"], root=cc["root_a"],
-        peaks_digest="", prev_size=0, prev_root="", key_id="node-x", timestamp="2026-08-21T00:00:00Z",
+        prev_size=0, prev_root="", key_id="node-x", timestamp="2026-08-21T00:00:00Z",
     )
     forked_newer = cll.Checkpoint(
         v=1, kind="mmr_checkpoint", log_id="log-x", mmr_size=cc["size_b"], root=forked_root_b_bytes.hex(),
-        peaks_digest="", prev_size=cc["size_a"], prev_root=cc["root_a"], key_id="node-x",
+        prev_size=cc["size_a"], prev_root=cc["root_a"], key_id="node-x",
         timestamp="2026-08-21T01:00:00Z",
     )
     result = cll.verify_checkpoint_chain(older, forked_newer, proof)
@@ -218,7 +252,7 @@ def test_verify_checkpoint_chain_rejects_the_rollback(proof_vectors):
 
     genuine_newer = cll.Checkpoint(
         v=1, kind="mmr_checkpoint", log_id="log-x", mmr_size=cc["size_b"], root=true_root_b,
-        peaks_digest="", prev_size=cc["size_a"], prev_root=cc["root_a"], key_id="node-x",
+        prev_size=cc["size_a"], prev_root=cc["root_a"], key_id="node-x",
         timestamp="2026-08-21T01:00:00Z",
     )
     result2 = cll.verify_checkpoint_chain(older, genuine_newer, proof)
@@ -246,7 +280,7 @@ def test_range_proof_verifies_and_states_its_scope_honestly(proof_vectors):
     )
     checkpoint = cll.Checkpoint(
         v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=22, root=root_hex,
-        peaks_digest="", prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
+        prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
     )
 
     result = cll.verify_range_against_checkpoint(
@@ -277,7 +311,7 @@ def test_range_proof_mutant_tampered_boundary_fails(proof_vectors):
     )
     checkpoint = cll.Checkpoint(
         v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=22, root=root_hex,
-        peaks_digest="", prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
+        prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
     )
     # Wrong to_digest: claim record 12 was something it wasn't.
     wrong_to_digest = bytes.fromhex(proof_vectors["body_digests"][0])
@@ -332,18 +366,12 @@ def test_capsule_verifies_offline_end_to_end_via_witnessed_checkpoint(eddsa_keys
     inclusion_proof = cll.InclusionProof.from_dict(leaf_case["proof"])
     body_digest = bytes.fromhex(leaf_case["body_digest"])
 
-    # peaks at size 22, left to right -- available directly as the
-    # consistency_case's new_peaks (peaks at size_b=22).
-    peak_hashes_hex = pv["consistency_case"]["proof"]["new_peaks"]
-    peaks_digest = hashlib.sha256(b"".join(bytes.fromhex(h) for h in peak_hashes_hex)).hexdigest()
-
     checkpoint = cll.Checkpoint(
         v=1,
         kind="mmr_checkpoint",
         log_id="demo-log",
         mmr_size=22,
         root=pv["full_root"],
-        peaks_digest=peaks_digest,
         prev_size=0,
         prev_root="",
         key_id="node-demo",
@@ -392,7 +420,7 @@ def test_end_to_end_fails_offline_if_receipt_is_for_a_different_checkpoint(eddsa
 
     checkpoint = cll.Checkpoint(
         v=1, kind="mmr_checkpoint", log_id="demo-log", mmr_size=22, root=pv["full_root"],
-        peaks_digest="", prev_size=0, prev_root="", key_id="node-demo",
+        prev_size=0, prev_root="", key_id="node-demo",
         timestamp="2026-08-21T03:00:00Z",
     )
 
