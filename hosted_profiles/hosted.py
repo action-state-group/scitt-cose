@@ -1059,15 +1059,136 @@ function annotateRecords(capsules,integrity){
   });
 }
 
-/* Capsule bundles carry no COSE bytes by default (JSON in the URL fragment
- * only) and this page ships no client-side COSE verifier — that logic runs
- * server-side, at POST /verify. So Authenticity is honestly "not checked"
- * here rather than a fabricated pass; verifying an embedded signed statement
- * for real is scitt_cose.aac.evaluate_ritual's job (see tests). */
-function checkAuthenticity(capsules){
-  var has=capsules.some(function(c){return !!c.signed_statement;});
-  if(!has)return{status:"skip",detail:"not checked — no signed statement provided for this bundle"};
-  return{status:"skip",detail:"signed statement present — not verified in the browser; use the Verify a signed statement tool"};
+/* ---------- minimal COSE_Sign1 (RFC 9052 §4.4) verify, EdDSA only ----------
+ * Just enough CBOR to decode a COSE_Sign1 envelope and re-encode its
+ * Sig_structure -- not a general CBOR library. Mirrors
+ * scitt_cose/cose_sign1.py's _sig_structure/verify_sign1 exactly (same
+ * ["Signature1", body_protected, external_aad, payload] structure, same
+ * alg code point -8 for EdDSA) so a statement that verifies here verifies
+ * there too. Definite-length encodings only, same as every statement this
+ * codebase produces; an indefinite-length or otherwise malformed envelope
+ * throws, which the caller below turns into "fail", not a crash. */
+function _cborReadLen(view,offset,ai){
+  if(ai<24)return[ai,offset];
+  if(ai===24)return[view.getUint8(offset),offset+1];
+  if(ai===25)return[view.getUint16(offset),offset+2];
+  if(ai===26)return[view.getUint32(offset),offset+4];
+  if(ai===27){var hi=view.getUint32(offset),lo=view.getUint32(offset+4);return[hi*4294967296+lo,offset+8];}
+  throw new Error("cbor: indefinite-length encoding not supported");
+}
+function _cborDecode(bytes,offset){
+  var view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  var ib=bytes[offset],major=ib>>5,ai=ib&0x1f;
+  offset+=1;
+  if(ai===31)throw new Error("cbor: indefinite-length encoding not supported");
+  var lr,len;
+  if(major===0){lr=_cborReadLen(view,offset,ai);return{value:lr[0],next:lr[1]};}
+  if(major===1){lr=_cborReadLen(view,offset,ai);return{value:-1-lr[0],next:lr[1]};}
+  if(major===2){lr=_cborReadLen(view,offset,ai);len=lr[0];offset=lr[1];return{value:bytes.slice(offset,offset+len),next:offset+len};}
+  if(major===3){lr=_cborReadLen(view,offset,ai);len=lr[0];offset=lr[1];return{value:new TextDecoder("utf-8").decode(bytes.slice(offset,offset+len)),next:offset+len};}
+  if(major===4){
+    lr=_cborReadLen(view,offset,ai);len=lr[0];offset=lr[1];
+    var arr=[];for(var i=0;i<len;i++){var r=_cborDecode(bytes,offset);arr.push(r.value);offset=r.next;}
+    return{value:arr,next:offset};
+  }
+  if(major===5){
+    lr=_cborReadLen(view,offset,ai);len=lr[0];offset=lr[1];
+    var m=new Map();
+    for(var j=0;j<len;j++){var kr=_cborDecode(bytes,offset);offset=kr.next;var vr=_cborDecode(bytes,offset);offset=vr.next;m.set(kr.value,vr.value);}
+    return{value:m,next:offset};
+  }
+  if(major===6){lr=_cborReadLen(view,offset,ai);var inner=_cborDecode(bytes,lr[1]);return{value:{cborTag:lr[0],value:inner.value},next:inner.next};}
+  if(major===7){
+    if(ai===20)return{value:false,next:offset};
+    if(ai===21)return{value:true,next:offset};
+    if(ai===22)return{value:null,next:offset};
+    if(ai===23)return{value:undefined,next:offset};
+    if(ai===26)return{value:view.getFloat32(offset),next:offset+4};
+    if(ai===27)return{value:view.getFloat64(offset),next:offset+8};
+    throw new Error("cbor: unsupported simple/float encoding");
+  }
+  throw new Error("cbor: unsupported major type "+major);
+}
+function _cborEncodeHead(major,len){
+  if(len<24)return new Uint8Array([(major<<5)|len]);
+  if(len<=0xff)return new Uint8Array([(major<<5)|24,len]);
+  if(len<=0xffff)return new Uint8Array([(major<<5)|25,(len>>8)&0xff,len&0xff]);
+  return new Uint8Array([(major<<5)|26,(len>>>24)&0xff,(len>>>16)&0xff,(len>>>8)&0xff,len&0xff]);
+}
+function _cborConcat(parts){
+  var total=0;parts.forEach(function(p){total+=p.length;});
+  var out=new Uint8Array(total),o=0;
+  parts.forEach(function(p){out.set(p,o);o+=p.length;});
+  return out;
+}
+function _cborEncodeBstr(bytes){return _cborConcat([_cborEncodeHead(2,bytes.length),bytes]);}
+function _cborEncodeTstr(str){var b=new TextEncoder().encode(str);return _cborConcat([_cborEncodeHead(3,b.length),b]);}
+function _sigStructureBytes(protectedBstr,payload){
+  return _cborConcat([_cborEncodeHead(4,4),_cborEncodeTstr("Signature1"),_cborEncodeBstr(protectedBstr),_cborEncodeBstr(new Uint8Array(0)),_cborEncodeBstr(payload)]);
+}
+function _b64StdToBytes(s){
+  var bin=atob(s);var bytes=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return bytes;
+}
+function _pemToDer(pem){
+  var b64=String(pem).replace(/-----BEGIN [^-]+-----/,"").replace(/-----END [^-]+-----/,"").replace(/\\s+/g,"");
+  return _b64StdToBytes(b64);
+}
+var COSE_ALG_EDDSA=-8,COSE_SIGN1_TAG=18;
+/* Verify a COSE_Sign1 statement for real, in-browser -- returns true/false,
+ * throws on anything structurally wrong (unsupported alg, malformed CBOR,
+ * detached payload) so the caller can fold "couldn't verify" and "verified
+ * false" into the same fail-closed outcome, same as parse_signed_statement's
+ * except-clause on the Python side. */
+async function verifyStatementEd25519(statementBytes,pubkeyPem){
+  var top=_cborDecode(statementBytes,0).value;
+  if(!top||top.cborTag!==COSE_SIGN1_TAG)throw new Error("not a COSE_Sign1 message (missing tag 18)");
+  var arr=top.value;
+  if(!Array.isArray(arr)||arr.length!==4)throw new Error("COSE_Sign1 value must be a 4-element array");
+  var protectedBstr=arr[0],payloadSlot=arr[2],signature=arr[3];
+  if(!(protectedBstr instanceof Uint8Array))throw new Error("protected header must be a bstr");
+  if(!(payloadSlot instanceof Uint8Array))throw new Error("payload is detached or malformed — not supported here");
+  if(!(signature instanceof Uint8Array))throw new Error("signature element is not a bstr");
+  var alg=null;
+  if(protectedBstr.length){
+    var ph=_cborDecode(protectedBstr,0).value;
+    if(ph instanceof Map)alg=ph.get(1);
+  }
+  if(alg!==COSE_ALG_EDDSA)throw new Error("unsupported alg (browser check only verifies EdDSA/-8)");
+  var tbs=_sigStructureBytes(protectedBstr,payloadSlot);
+  var key=await crypto.subtle.importKey("spki",_pemToDer(pubkeyPem),{name:"Ed25519"},false,["verify"]);
+  return crypto.subtle.verify({name:"Ed25519"},key,signature,tbs);
+}
+
+/* Authenticity is three-valued, mirroring what Sequence does above: a
+ * verifying signature only ever proves the bytes are unaltered since
+ * signing -- it does not establish WHO signed, because every key this
+ * check can discover today comes from the sidecar itself (self-asserted).
+ * Rendering a verifying self-asserted signature as a green pass would be
+ * the same class of false-assurance bug fixed for Sequence: a check that
+ * claims a property nothing here established. A pass tier requires the key
+ * to be bound to an independently checkable identity (registry entry, DID,
+ * certificate chain, witness statement) -- that binding mechanism doesn't
+ * exist yet (separate, later task), so a verified signature can only ever
+ * land in the skip tier below, never pass. Mirrors
+ * hosted_profiles/aac.py::_check_authenticity -- keep both in sync. */
+async function checkAuthenticity(capsules){
+  var sidecars=capsules.map(function(c){return c.signed_statement;}).filter(Boolean);
+  if(!sidecars.length)return{status:"skip",detail:"not checked — no signed statement provided for this bundle"};
+  for(var i=0;i<sidecars.length;i++){
+    var sc=sidecars[i]||{};
+    try{
+      if(!sc.pubkey_pem)throw new Error("no pubkey_pem supplied");
+      var stmtBytes=_b64StdToBytes(sc.statement_b64||"");
+      var ok=await verifyStatementEd25519(stmtBytes,sc.pubkey_pem);
+      if(!ok)throw new Error("signature did not verify");
+    }catch(ex){
+      return{status:"fail",detail:"at least one signature did not verify"};
+    }
+  }
+  return{status:"skip",
+    detail:"signature verifies against a key supplied with the record — this shows the bytes are unaltered since signing, not who signed them"};
 }
 
 function checkWitness(w,total){
@@ -1155,7 +1276,7 @@ function describeBundle(capsules){
     meta:"plain-language summary of the fields carried; it makes no claim the ritual did not check"};
 }
 
-function evaluateRitual(capsules,witness,integrity){
+async function evaluateRitual(capsules,witness,integrity){
   var stages=[],finding=null;
   var alteredIds={},firstMismatch=null,firstMismatchIsBody=false;
   capsules.forEach(function(c,i){
@@ -1233,7 +1354,7 @@ function evaluateRitual(capsules,witness,integrity){
     stages.push({name:"Sequence",status:"pass",detail:"unbroken — every record names the one before it"});
   }
 
-  var auth=checkAuthenticity(capsules);
+  var auth=await checkAuthenticity(capsules);
   stages.push({name:"Authenticity",status:auth.status,detail:auth.detail});
   var wit=checkWitness(witness,capsules.length);
   stages.push({name:"Witness",status:wit.status,detail:wit.detail});
@@ -1247,7 +1368,7 @@ async function renderRitual(bundle,witness){
   if(typeof crypto!=="undefined"&&crypto.subtle){
     integrity=await Promise.all(bundle.map(verifyCapsuleId));
   }
-  var summary=evaluateRitual(bundle,witness,integrity);
+  var summary=await evaluateRitual(bundle,witness,integrity);
   var marks={pass:"✓",fail:"✕",skip:"–"};
   var h="<div class='ritual-stages'>";
   summary.stages.forEach(function(s){
