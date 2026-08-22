@@ -1,0 +1,12 @@
+include tests/conftest.py
+graft test-vectors
+exclude tests/test_capsule_view.py
+exclude tests/test_hosted_page.py
+exclude tests/test_hosted_parity.py
+exclude tests/test_machine_mandate.py
+exclude tests/test_bundle_e2e_capsule_ledger.py
+exclude tests/test_bundle_page.py
+exclude tests/test_capsule_id_recompute.py
+exclude tests/test_mmr_js_parity.py
+exclude tests/test_tamper_states.py
+exclude tests/test_envelope_unwrap.py
