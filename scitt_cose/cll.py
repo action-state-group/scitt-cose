@@ -568,7 +568,6 @@ class Checkpoint:
     log_id: str
     mmr_size: int
     root: str
-    peaks_digest: str
     prev_size: int
     prev_root: str
     key_id: str
@@ -583,7 +582,6 @@ class Checkpoint:
             log_id=d["log_id"],
             mmr_size=int(d["mmr_size"]),
             root=d["root"],
-            peaks_digest=d["peaks_digest"],
             prev_size=int(d["prev_size"]),
             prev_root=d.get("prev_root", ""),
             key_id=d["key_id"],
@@ -598,7 +596,6 @@ class Checkpoint:
             "log_id": self.log_id,
             "mmr_size": self.mmr_size,
             "root": self.root,
-            "peaks_digest": self.peaks_digest,
             "prev_size": self.prev_size,
             "prev_root": self.prev_root,
             "key_id": self.key_id,
