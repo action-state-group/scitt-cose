@@ -18,10 +18,10 @@ Outputs (in --output directory):
     withheld_b.json         Withheld-artifacts manifest for B-approve (for demo tool)
     reveal_a.json           Disclosed PII for A (recompute-and-match demo)
     anchor_results.json     capsule_ids, entry_hashes, receipt_b64, permalink stubs
-    receipts/               .cose bytes per anchored capsule
+    receipts/               .cose bytes per witnessed capsule
 
-Run once to generate; the anchor results are committed so the demo can
-reproduce the same permalinks without re-anchoring.
+Run once to generate; the witness results are committed so the demo can
+reproduce the same permalinks without re-witnessing.
 
 HOLD on publish-permalinks until verify.actionstate.ai P1 deploys.
 """
@@ -361,12 +361,12 @@ def _build_tampered_b(capsule_b: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Anchor helper
+# Witness helper
 # ---------------------------------------------------------------------------
 
 def _anchor_capsule(capsule_id: str, out_dir: Path, label: str) -> dict:
     """Submit capsule_id to the live SCITT TS; save receipt; return metadata."""
-    print(f"  Anchoring {label} ({capsule_id[:12]}…)")
+    print(f"  Witnessing {label} ({capsule_id[:12]}…)")
     result = submit_anchor(capsule_id, timeout=30.0)
 
     receipt_file = out_dir / "receipts" / f"{label}_receipt.cose"
@@ -463,7 +463,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # ------------------------------------------------------------------
-    # 6. Anchor A + B against live SCITT TS
+    # 6. Witness A + B against live SCITT TS
     # ------------------------------------------------------------------
     anchor_results: dict = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -478,7 +478,7 @@ def main(argv: list[str] | None = None) -> None:
     }
 
     if not args.no_anchor:
-        print("Anchoring against live SCITT TS…")
+        print("Witnessing against live SCITT TS…")
         anchor_results["capsules"]["capsule_a"] = _anchor_capsule(
             cap_a["capsule_id"], out, "capsule_a"
         )
@@ -488,9 +488,9 @@ def main(argv: list[str] | None = None) -> None:
         anchor_results["capsules"]["capsule_c_deny"] = _anchor_capsule(
             cap_c["capsule_id"], out, "capsule_c_deny"
         )
-        print("  Anchor submissions complete.")
+        print("  Witness submissions complete.")
     else:
-        print("  --no-anchor: skipping live anchor submission.")
+        print("  --no-anchor: skipping live witness submission.")
         for label, cap in [("capsule_a", cap_a), ("capsule_b_approve", cap_b), ("capsule_c_deny", cap_c)]:
             anchor_results["capsules"][label] = {
                 "capsule_id": cap["capsule_id"],

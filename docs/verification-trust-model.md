@@ -81,13 +81,13 @@ as evidence either way — this is a tracked, known gap, not a silent one.
 **Witness needs a network by definition** — it is a claim about a log
 someone else keeps, not a property of the bytes in your hand. The capsule
 page's Witness stage calls `GET /anchor-status/<capsule_id>` and, if that
-succeeds, verifies the returned RFC 9162 inclusion proof against the anchor's
-published key. If the anchor is unreachable, the stage renders **skipped,
+succeeds, verifies the returned RFC 9162 inclusion proof against the witness's
+published key. If the witness is unreachable, the stage renders **skipped,
 not failed** — everything else keeps its independently-computed verdict, and
 the finding says "reconnect any time to complete it," not "fails."
 capsule-body integrity is checked first and gates this stage: a `capsule_id`
 that doesn't recompute from its own fragment body is never shown a green
-anchored banner no matter what the log says about that id, because the id
+witnessed banner no matter what the log says about that id, because the id
 being logged proves nothing about a body that's since been altered.
 
 ## What a server *does* learn — stated, not buried
@@ -130,7 +130,7 @@ page serving the check:
 | Sequence (chain has no gaps) | walk `chain.parent_capsule_id` locally | no |
 | Completeness / Cross-check (bundle page) | Merkle range-proof + digest recompute locally | no |
 | Authenticity (COSE signature) | not evaluated by this browser page yet — `permalink --check` or `scitt-cose` locally | no, via the CLI · yes, via the hosted `/verify` tool |
-| Witness (a third party saw it) | RFC 9162 inclusion proof against the anchor's published key | yes — and skips honestly when absent |
+| Witness (a third party saw it) | RFC 9162 inclusion proof against the witness's published key | yes — and skips honestly when absent |
 
 If you don't trust this server to serve you correct JS even once, download
 the offline shell, verify it, and never load `/v/` or `/bundle` live again for

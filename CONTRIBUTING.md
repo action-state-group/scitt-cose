@@ -12,7 +12,7 @@ keep it small, neutral, and verifiable are very welcome.
    specific profile's payload semantics will be declined — build that in a
    downstream package instead.
 2. **No Transparency Service code.** This library verifies; it never registers,
-   issues receipts, anchors, or stores. The hosted wrapper must stay stateless
+   issues receipts, witnesses, or stores. The hosted wrapper must stay stateless
    and read-only — no write path, no persistence, no key custody for issuance.
 3. **Minimal dependencies.** Runtime imports are `cbor2`, `cryptography`, and
    the standard library — nothing else. A test enforces this
