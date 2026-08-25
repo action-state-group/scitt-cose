@@ -31,13 +31,13 @@ and must never blur:
 
 | | Hosted **verifier** (this design) | Hosted **Transparency Service** (separate, commercial) |
 |---|---|---|
-| Operation | verify only | register statements, **issue receipts**, anchor |
+| Operation | verify only | register statements, **issue receipts**, witness |
 | State | **none** (stateless) | a durable, append-only log |
 | Trust commitment | **none** — verify it yourself | uptime, integrity, non-equivocation, witnessing |
 | Risk | low (read-only utility) | high (operational trust infrastructure) |
 | Who must trust whom | nobody trusts the operator | the ecosystem trusts the log operator |
 
-A verifier that starts storing submissions, issuing receipts, or anchoring has
+A verifier that starts storing submissions, issuing receipts, or witnessing has
 silently become a transparency service with all of its obligations. The design
 forbids that drift: no write path, no persistence, no key custody for issuance.
 
@@ -169,7 +169,7 @@ a Signed Statement and a digest-only Receipt; the capabilities declare it is
 
 | | This: **SCITT-only verifier** | Separate: **Transparency Service** |
 |---|---|---|
-| Verb | verify (read-only) | register + **issue receipts** + anchor |
+| Verb | verify (read-only) | register + **issue receipts** + witness |
 | State | none | durable append-only log |
 | Trust obligation | none (verify it yourself) | uptime, integrity, non-equivocation |
 | Code | `hosted_profiles.hosted`, wrapping `scitt_cose` | a separate Transparency Service |
@@ -210,5 +210,5 @@ holds no state:
 - **Abuse surface:** unauthenticated public endpoint → mitigated by statelessness
   (no amplification, no storage to exhaust), body-size cap, and edge rate limits.
 - **Drift risk:** the single most important ongoing discipline is *not* letting
-  this grow a write/issue/anchor path. That would change its risk class entirely
+  this grow a write/issue/witness path. That would change its risk class entirely
   and is out of scope by design.

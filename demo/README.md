@@ -47,7 +47,7 @@ All three are registered against the live SCITT transparency service
 | `fixtures/withheld_b.json` | Withheld-artifacts manifest for B (reason: internal policy + operational data) |
 | `fixtures/reveal_a.json` | Disclosed PII for A — recomputes to committed digest (reveal demo) |
 | `fixtures/tampered_b.json` | Capsule B with response_digest flipped — verify surface shows break |
-| `fixtures/anchor_results.json` | capsule_ids, entry_hashes, receipt_b64 (base64), permalink stubs; `.cose` binaries are gitignored but re-creatable via `--no-anchor` + re-anchor |
+| `fixtures/anchor_results.json` | capsule_ids, entry_hashes, receipt_b64 (base64), permalink stubs; `.cose` binaries are gitignored but re-creatable via `--no-anchor` + re-witness |
 
 ---
 
@@ -101,13 +101,13 @@ Tampered twin link ready in a third tab (loaded but not shown yet).
 ## Regenerating
 
 ```bash
-# Offline (no anchor — regenerates capsule_ids deterministically):
+# Offline (no witness — regenerates capsule_ids deterministically):
 python3 demo/northwind_refund_chain.py --no-anchor
 
-# Live (anchor against ts.agentactioncapsule.org — overwrites receipts/):
+# Live (witness against ts.agentactioncapsule.org — overwrites receipts/):
 python3 demo/northwind_refund_chain.py
 ```
 
 The capsule_ids are deterministic given the synthetic timestamps and content,
-so `--no-anchor` regenerates the same IDs. Re-anchoring creates new tree entries
+so `--no-anchor` regenerates the same IDs. Re-witnessing creates new tree entries
 but the capsule_ids are unchanged.

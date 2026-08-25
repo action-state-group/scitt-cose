@@ -25,7 +25,7 @@ project is modeled on that practice.
   (BCP 78/79, with code components under the Revised BSD License). Developed in
   public.
 - **Vendor-neutral** — no required product; the specification favors no vendor.
-  Any party can implement, run, and anchor — including in their own environment.
+  Any party can implement, run, and witness — including in their own environment.
 - **Verifiable** — decisions happen in the open: public issues, public pull
   requests, public discussion.
 - **Donate by design** — the profile, the trademark, and the reference services
@@ -94,7 +94,7 @@ announced unilaterally.
 ## Scope & boundaries
 
 The open project is the **record layer**: the profile, the producer (with example
-constraint manifests), the verifier, and the anchor. Acting on declared
+constraint manifests), the verifier, and the witness. Acting on declared
 constraints at runtime — *enforcement* — is a separate concern that composes with
 a policy gateway. The capsule records what happened; it does not gate. We state
 this boundary so the open/commercial line is transparent rather than implied.

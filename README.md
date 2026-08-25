@@ -40,7 +40,7 @@ use `python-cwt` or any other COSE library.
 **Does NOT:**
 
 - **Operate a Transparency Service.** It never registers statements, issues
-  receipts, anchors, or stores anything. Running a log is a separate concern with
+  receipts, witnesses, or stores anything. Running a log is a separate concern with
   its own operational trust obligations.
 - **Validate any application profile's payload semantics.** The statement payload
   is treated as **opaque bytes**. There is no application-profile awareness —
@@ -382,7 +382,7 @@ Dockerfile, or clone + run below).
 
 **This is a SCITT-*only* verifier, and it is NOT a Transparency Service.** It
 verifies statements and receipts; it never registers, issues receipts, or
-anchors. Running a Transparency Service is a **separate** offering with its own
+witnesses. Running a Transparency Service is a **separate** offering with its own
 operational trust obligations — deliberately out of scope here.
 
 Run it standalone from a repo checkout (no other service involved):
@@ -431,7 +431,7 @@ browser page yet — that stage renders an honest `skip`, never a fabricated
 pass — but is checkable with zero network too, via the CLI's
 `permalink --check` or `scitt-cose` installed locally. **Witness needs a
 network by definition** — it's a claim about a log someone else keeps — and
-when the anchor is unreachable the viewer renders that stage *skipped, not
+when the witness is unreachable the viewer renders that stage *skipped, not
 failed*. Full trust model, including exactly what a server does learn (a
 viewed `capsule_id`, and — until you've downloaded and diffed it — trust in
 served JS): [`docs/verification-trust-model.md`](docs/verification-trust-model.md).

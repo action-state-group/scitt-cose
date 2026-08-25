@@ -15,7 +15,7 @@ by default, override with ``--aac-path``) purely as a one-time, read-only
 oracle to mint the committed JSON. The committed vectors are the artifact;
 re-running this script is only for provenance / regenerating a future version.
 
-The four capsule-*.json inputs are real, live-anchored AAC capsules (not
+The four capsule-*.json inputs are real, live-witnessed AAC capsules (not
 synthetic): the 3-capsule dapr-agents-capsule demo chain run on
 2026-08-03 against anchor.agentactioncapsule.org (capsule-emit repo,
 examples/dapr-agents-capsule/run-transcript.md — leaves 242/243/244), plus

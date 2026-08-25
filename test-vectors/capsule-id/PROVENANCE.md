@@ -8,7 +8,7 @@ recompute check added to `CAPSULE_JS`/`BUNDLE_JS`. Generated/pinned by
 ## Source
 
 `capsule-1.json`, `capsule-2.json`, `capsule-3.json` are the exact, real,
-live-anchored capsules from the 3-capsule `dapr-agents-capsule` demo run on
+live-witnessed capsules from the 3-capsule `dapr-agents-capsule` demo run on
 2026-08-03 against `anchor.agentactioncapsule.org` (`capsule-emit` repo,
 `examples/dapr-agents-capsule/run-transcript.md`; leaves 242, 243, 244). Each
 one's `capsule_id` independently verifies against
@@ -22,7 +22,7 @@ production data, not synthetic.
 leaf 243) with **only** `disposition` changed:
 `{decision:reject, verdict_class:blocked}` -> `{decision:accept,
 verdict_class:executed}`, `capsule_id` left byte-identical to the real,
-anchored value. This reproduces the headline finding: a denial silently
+witnessed value. This reproduces the headline finding: a denial silently
 reads as an approval when the viewer never recomputes `capsule_id` from the
 fragment body.
 
@@ -31,7 +31,7 @@ fragment body.
 `model_attestation.compute_attestation.agent_input.amount` from `"48500.00"`
 to `"25000.00"` on a revealed `agent_input` field. The real capsule-2 body
 recovered here has `agent_input`/`agent_output` **withheld** (digest-only,
-matching what was actually anchored on 2026-08-03) — no revealed-payload
+matching what was actually witnessed on 2026-08-03) — no revealed-payload
 variant with that amount was recoverable from any local checkout, and
 re-running the live demo to mint a new one was explicitly out of scope
 ("do NOT redo"). The disposition-flip mutation alone is fully sufficient to

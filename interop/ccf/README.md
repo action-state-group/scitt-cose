@@ -1,6 +1,6 @@
 # CCF Interop Artifacts — IETF 126
 
-Cross-TS interop proof: a COSE_Sign1 Signed Statement anchored on two independent
+Cross-TS interop proof: a COSE_Sign1 Signed Statement witnessed on two independent
 Transparency Services (our RFC9162_SHA256 log + Microsoft's CCF SCITT dev node),
 both receipts verified by `scitt_cose.verify_receipt`.
 
