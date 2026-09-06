@@ -38,6 +38,7 @@ any other downstream consumer would.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from typing import Any
 
@@ -141,6 +142,8 @@ CAPABILITIES = {
         "report the statement's issuer / subject / content-type / alg (payload-opaque)",
         "verify a COSE Receipt inclusion proof + log signature "
         "(RFC 9162 SHA-256 vds=1, or CCF ccf.v1 vds=2)",
+        "verify a CLL checkpoint's own Ed25519 signature (json-ed25519 wire form; "
+        "if a public key is given) -- never confirms a witness countersigned it",
     ],
     "does_not": [
         "operate a Transparency Service (register / issue receipts / anchor)",
@@ -377,6 +380,14 @@ VERIFY_JS = """\
         +row("root",r.root)+row("tree_size",r.tree_size)+row("leaf_index",r.leaf_index)
         +"</dl></div>";
     }
+    if(v.checkpoint){
+      var cp=v.checkpoint, cv=cp.signature_verified, covers=cp.covers||{};
+      html+="<div class='vcard'><h4>Checkpoint</h4><dl class='kv'>"
+        +row("signature",cv===true?"verified":(cv===false?"NOT verified":"not checked"),cv===true?"t":(cv===false?"f":""))
+        +row("log_id",covers.log_id)+row("mmr_size",covers.mmr_size)+row("root",covers.root)
+        +row("prev_size",covers.prev_size)+row("key_id",covers.key_id)+row("timestamp",covers.timestamp)
+        +"</dl></div>";
+    }
     var reasons=(v.reasons||[]);
     if(reasons.length){
       html+="<div class='vcard'><h4>"+(v.valid?"Notes":"Reasons")+"</h4><ul class='reasons'>"
@@ -391,11 +402,12 @@ VERIFY_JS = """\
     var payload={};
     [["statement_b64","statement_b64"],["statement_pubkey_pem","statement_pubkey_pem"],
      ["receipt_b64","receipt_b64"],["log_pubkey_pem","log_pubkey_pem"],
-     ["leaf_entry_hex","leaf_entry_hex"]].forEach(function(p){
+     ["leaf_entry_hex","leaf_entry_hex"],
+     ["checkpoint_json","checkpoint_json"],["checkpoint_pubkey_hex","checkpoint_pubkey_hex"]].forEach(function(p){
        var v=val(p[1]); if(v!==null) payload[p[0]]=v;
      });
-    if(!payload.statement_b64 && !payload.receipt_b64){
-      render({valid:false,reasons:["Supply at least one of: a signed statement, or a receipt."]});
+    if(!payload.statement_b64 && !payload.receipt_b64 && !payload.checkpoint_json){
+      render({valid:false,reasons:["Supply at least one of: a signed statement, a receipt, or a checkpoint."]});
       return;
     }
     var btn=$("verifyBtn"); btn.disabled=true; var old=btn.innerHTML; btn.innerHTML="Verifying\\u2026";
@@ -407,10 +419,26 @@ VERIFY_JS = """\
   });
 
   $("clearBtn").addEventListener("click", function(){
-    ["statement_b64","statement_pubkey_pem","receipt_b64","log_pubkey_pem","leaf_entry_hex"].forEach(function(id){$(id).value="";});
+    ["statement_b64","statement_pubkey_pem","receipt_b64","log_pubkey_pem","leaf_entry_hex",
+     "checkpoint_json","checkpoint_pubkey_hex"].forEach(function(id){$(id).value="";});
     document.querySelectorAll(".fname").forEach(function(f){f.textContent="";});
     $("verdict").classList.remove("show");
   });
+
+  var flipBtn=$("checkpointFlipByteBtn");
+  if(flipBtn){
+    flipBtn.addEventListener("click", function(){
+      var el=$("checkpoint_json");
+      var obj;
+      try{ obj=JSON.parse(el.value); }catch(e){ return; }
+      if(!obj||typeof obj.signature!=="string"||!obj.signature.length) return;
+      var chars="0123456789abcdef", i=0, cur=obj.signature[i];
+      var next=chars[(chars.indexOf(cur.toLowerCase())+1)%chars.length];
+      obj.signature=next+obj.signature.slice(1);
+      el.value=JSON.stringify(obj,null,2);
+      $("verifyBtn").click();
+    });
+  }
 })();
 """
 
@@ -3299,6 +3327,7 @@ def render_landing_page() -> str:
       <div class="tool-head">
         <button class="tab active" data-panel="p-receipt">Verify a receipt</button>
         <button class="tab" data-panel="p-statement">Verify a signed statement</button>
+        <button class="tab" data-panel="p-checkpoint">Verify a checkpoint</button>
       </div>
       <div class="tool-body">
 
@@ -3329,6 +3358,19 @@ def render_landing_page() -> str:
             <label>Statement public key <span class="opt">PEM · optional</span></label>
             <textarea id="statement_pubkey_pem" placeholder="-----BEGIN PUBLIC KEY-----&#10;…issuer’s public key, to check the signature…&#10;-----END PUBLIC KEY-----"></textarea>
             <div class="hint">Without a key the statement’s fields are reported but the signature is not checked (verdict stays invalid until a key verifies it).</div>
+          </div>
+        </div>
+
+        <div class="panel" id="p-checkpoint">
+          <div class="field">
+            <label>Checkpoint <span class="opt">JSON, json-ed25519 wire form</span></label>
+            <textarea id="checkpoint_json" placeholder='paste a CLL checkpoint, e.g. {{&quot;v&quot;:1,&quot;kind&quot;:&quot;mmr_checkpoint&quot;,&quot;log_id&quot;:&quot;…&quot;,&quot;mmr_size&quot;:4,&quot;root&quot;:&quot;…&quot;,&quot;prev_size&quot;:0,&quot;prev_root&quot;:&quot;&quot;,&quot;key_id&quot;:&quot;…&quot;,&quot;timestamp&quot;:&quot;…&quot;,&quot;signature&quot;:&quot;…&quot;}}'></textarea>
+            <div class="filerow"><button class="fbtn" data-target="checkpoint_json">Upload .json…</button><span class="fname" id="fn-checkpoint_json"></span><button class="fbtn" id="checkpointFlipByteBtn" type="button">Flip a byte &amp; re-verify</button></div>
+          </div>
+          <div class="field">
+            <label>Checkpoint public key <span class="opt">hex, 32 bytes · optional</span></label>
+            <textarea id="checkpoint_pubkey_hex" style="min-height:48px" placeholder="64 hex chars — the raw Ed25519 public key you already trust for this log_id"></textarea>
+            <div class="hint">Without a key the checkpoint's fields are reported but the signature is not checked. This checks the checkpoint's OWN signature only — it does not confirm any witness actually countersigned it (COSE_Sign1-form checkpoints aren't supported here yet).</div>
           </div>
         </div>
 
@@ -3551,8 +3593,8 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
         <a class="brand" href="https://agentactioncapsule.org">
           <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
         </a>
-        <p>Stateless public verification surface for capsule-ledger bundles.
-        Free and neutral for any capsule-ledger installation — self-hosted or hosted, no account, no gating.</p>
+        <p>Stateless public verification surface for capsule bundles.
+        Free and neutral for any capsule-emit installation — self-hosted or hosted, no account, no gating.</p>
       </div>
       <div class="foot-cols">
         <div class="foot-col">
@@ -3612,7 +3654,7 @@ def render_bundle_page(*, offline: bool = False) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ledger bundle verifier — capsule-ledger</title>
+<title>Ledger bundle verifier — Agent Action Capsule</title>
 <style>
 {_PAGE_CSS}
 {_CAPSULE_CSS}
@@ -3637,6 +3679,117 @@ def _b64(value: str) -> bytes:
         return base64.b64decode(s + pad)
 
 
+#: The 9 fields a CLL checkpoint's signature covers, sorted-key + compact
+#: JSON (must match capsule-anchor's ``_checkpoint_signing_body`` /
+#: ``capsule_emit.checkpoint.emit.CheckpointRecord.signing_body()`` byte for
+#: byte, or every real checkpoint fails to verify here).
+_CHECKPOINT_JSON_SIGNING_FIELDS = (
+    "v", "kind", "log_id", "mmr_size", "root",
+    "prev_size", "prev_root", "key_id", "timestamp",
+)
+
+_CHECKPOINT_JSON_HEX_FIELDS = ("root",)
+
+
+def _checkpoint_json_hex_ok(s: object, n_bytes: int) -> bool:
+    return isinstance(s, str) and len(s) == n_bytes * 2 and all(c in "0123456789abcdefABCDEF" for c in s)
+
+
+def verify_checkpoint_json(checkpoint_text: str, pubkey_hex: str | None) -> dict[str, Any]:
+    """Verify a CLL checkpoint minted as deterministic JSON + a bare Ed25519
+    signature (the ``json-ed25519`` wire form -- COSE_Sign1 checkpoints are a
+    separate, not-yet-supported form here; see ``docs/checkpoint-wire.md``
+    for the split). This checks ONLY the checkpoint's own signature over its
+    9-field signing body -- it never contacts any witness, so it CANNOT
+    confirm the checkpoint was actually countersigned/observed by a
+    particular log. See the ``notes`` in the returned dict for that
+    distinction, always stated, never implied.
+
+    Algorithm (must match capsule-anchor's ``checkpoint_json.py`` /
+    ``service._checkpoint_digest`` exactly):
+      1. Parse JSON, require the 9 signing fields + ``signature`` (hex).
+      2. ``signing_body = json.dumps(sorted 9-field dict, sort_keys=True,
+         separators=(",", ":")).encode()``
+      3. ``digest_hex = sha256(signing_body).hexdigest()`` (64 hex chars)
+      4. The signature is Ed25519 over ``digest_hex.encode("ascii")`` --
+         the ASCII bytes of the hex STRING, not the raw digest bytes.
+    """
+    reasons: list[str] = []
+    try:
+        obj = json.loads(checkpoint_text)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return {"signature_verified": False, "reasons": [f"not valid JSON: {exc}"]}
+    if not isinstance(obj, dict):
+        return {"signature_verified": False, "reasons": ["checkpoint must be a JSON object"]}
+
+    missing = [k for k in (*_CHECKPOINT_JSON_SIGNING_FIELDS, "signature") if k not in obj]
+    if missing:
+        return {"signature_verified": False, "reasons": [f"missing required field(s): {missing}"]}
+
+    cp = {k: obj[k] for k in _CHECKPOINT_JSON_SIGNING_FIELDS}
+    covers = {
+        "log_id": cp.get("log_id"),
+        "mmr_size": cp.get("mmr_size"),
+        "root": cp.get("root"),
+        "prev_size": cp.get("prev_size"),
+        "key_id": cp.get("key_id"),
+        "timestamp": cp.get("timestamp"),
+    }
+    if cp.get("kind") != "mmr_checkpoint":
+        reasons.append(f"kind must be 'mmr_checkpoint', got {cp.get('kind')!r}")
+    for field in _CHECKPOINT_JSON_HEX_FIELDS:
+        if not _checkpoint_json_hex_ok(cp.get(field), 32):
+            reasons.append(f"{field} must be a 64-char hex string (32 bytes)")
+    if reasons:
+        return {"signature_verified": False, "reasons": reasons, "covers": covers}
+
+    if not pubkey_hex:
+        return {
+            "signature_verified": None,
+            "reasons": ["signature not checked (no checkpoint_pubkey_hex supplied)"],
+            "covers": covers,
+        }
+
+    try:
+        pubkey_bytes = bytes.fromhex(pubkey_hex.strip())
+        if len(pubkey_bytes) != 32:
+            raise ValueError(f"expected 32 bytes, got {len(pubkey_bytes)}")
+    except ValueError as exc:
+        return {"signature_verified": False, "reasons": [f"checkpoint_pubkey_hex invalid: {exc}"], "covers": covers}
+
+    try:
+        signature_bytes = bytes.fromhex(str(obj["signature"]))
+    except ValueError as exc:
+        return {"signature_verified": False, "reasons": [f"signature is not valid hex: {exc}"], "covers": covers}
+
+    signing_body = json.dumps(cp, sort_keys=True, separators=(",", ":")).encode()
+    digest_hex = hashlib.sha256(signing_body).hexdigest()
+
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    try:
+        Ed25519PublicKey.from_public_bytes(pubkey_bytes).verify(signature_bytes, digest_hex.encode("ascii"))
+    except InvalidSignature:
+        return {
+            "signature_verified": False,
+            "reasons": ["checkpoint signature does not verify under the supplied public key"],
+            "covers": covers,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"signature_verified": False, "reasons": [f"signature check failed: {type(exc).__name__}: {exc}"], "covers": covers}
+
+    return {
+        "signature_verified": True,
+        "reasons": [
+            "checkpoint's own signature verified against the supplied public key",
+            "this confirms the checkpoint's authenticity only -- it does NOT confirm any "
+            "witness actually countersigned/observed it (a separate, out-of-band check)",
+        ],
+        "covers": covers,
+    }
+
+
 def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
     """Verify a statement and/or receipt described by ``request`` (pure, stateless).
 
@@ -3655,16 +3808,18 @@ def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
     statement_report: dict | None = None
     receipt_report: dict | None = None
+    checkpoint_report: dict | None = None
 
     has_statement = bool(request.get("statement_b64"))
     has_receipt = bool(request.get("receipt_b64"))
-    if not has_statement and not has_receipt:
+    has_checkpoint = bool(request.get("checkpoint_json"))
+    if not has_statement and not has_receipt and not has_checkpoint:
         # bad_request marks a malformed *transport* (HTTP wrappers answer 400);
         # 200 + valid:false is reserved for well-formed-but-failed verification.
         return {
             "valid": False,
             "bad_request": True,
-            "reasons": ["supply at least one of statement_b64 or receipt_b64"],
+            "reasons": ["supply at least one of statement_b64, receipt_b64, or checkpoint_json"],
             "capabilities": CAPABILITIES,
         }
 
@@ -3720,6 +3875,12 @@ def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
                 receipt_report = {"ok": False}
                 reasons.append(f"receipt: malformed input ({type(exc).__name__})")
 
+    if has_checkpoint:
+        checkpoint_report = verify_checkpoint_json(
+            request["checkpoint_json"], request.get("checkpoint_pubkey_hex")
+        )
+        reasons.extend(checkpoint_report.get("reasons", []))
+
     # Fail closed: `valid` is true only when EVERY component the request carried
     # was affirmatively verified, and at least one real check ran. A statement
     # with no key (signature_verified is None) was NOT checked, so it does not
@@ -3731,12 +3892,15 @@ def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
         components.append(statement_report.get("signature_verified") is True)
     if receipt_report is not None:
         components.append(receipt_report.get("ok") is True)
+    if checkpoint_report is not None:
+        components.append(checkpoint_report.get("signature_verified") is True)
     valid = bool(components) and all(components)
 
     return {
         "valid": valid,
         "statement": statement_report,
         "receipt": receipt_report,
+        "checkpoint": checkpoint_report,
         "reasons": reasons,
         "draft_tracking": DRAFT_TRACKING_NOTICE,
     }
