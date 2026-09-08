@@ -45,6 +45,11 @@ HDR_RECEIPTS = 394
 #: CWT claim labels (RFC 8392 / IANA CWT Claims registry).
 CWT_ISS = 1
 CWT_SUB = 2
+#: RFC 8392 §3.1.6 "iat" (issued-at, seconds since epoch) — used by a
+#: transparency service's Receipt to carry its own witness-observed
+#: registration time, distinct from any submitter-asserted timestamp inside
+#: the signed payload.
+CWT_IAT = 6
 
 PemLike = Union[bytes, str]
 
@@ -306,4 +311,5 @@ __all__ = [
     "HDR_RECEIPTS",
     "CWT_ISS",
     "CWT_SUB",
+    "CWT_IAT",
 ]

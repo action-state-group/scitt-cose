@@ -8,12 +8,14 @@ import pytest
 from scitt_cose import merkle
 from scitt_cose.cose_sign1 import CoseError
 from scitt_cose.receipt import (
+    HDR_GRADE,
     HDR_VDP,
     HDR_VDS,
     VDS_RFC9162_SHA256,
     build_receipt,
     verify_receipt,
 )
+from scitt_cose.statement import CWT_IAT, HDR_CWT_CLAIMS
 
 
 def _entries(n):
@@ -66,6 +68,93 @@ def test_vds_in_protected_and_vdp_shape(eddsa_keys):
     tree_size, leaf_index, path = cbor2.loads(inclusion[0])
     assert tree_size == 4 and leaf_index == 1
     assert all(isinstance(p, bytes) for p in path)
+
+
+def test_iat_and_grade_round_trip_signed(eddsa_keys):
+    """iat + grade, when supplied, land in the PROTECTED header (so the
+    signature covers them) and verify_receipt surfaces both on a successful
+    verify -- the fix for the un-signed-time / un-signed-grade finding."""
+    priv, pub = eddsa_keys
+    es = _entries(5)
+    receipt = build_receipt(
+        leaf_entry_hex=es[2], leaf_index=2, tree_entries_hex=es,
+        alg="EdDSA", log_private_key_pem=priv,
+        iat=1700000000, grade="mmr-verified",
+    )
+    protected_bstr, _unprotected, _payload, _sig = cbor2.loads(receipt).value
+    protected = cbor2.loads(protected_bstr)
+    assert protected[HDR_CWT_CLAIMS][CWT_IAT] == 1700000000
+    assert protected[HDR_GRADE] == "mmr-verified"
+
+    res = verify_receipt(receipt, leaf_entry_hex=es[2], log_public_key_pem=pub)
+    assert res.ok, res.errors
+    assert res.iat == 1700000000
+    assert res.grade == "mmr-verified"
+
+
+def test_iat_and_grade_absent_when_not_supplied(eddsa_keys):
+    """A receipt built exactly as before (no iat/grade) still verifies, and
+    the new fields read back as None -- no behavior change for receipts
+    minted before this claim existed."""
+    priv, pub = eddsa_keys
+    es = _entries(4)
+    receipt = build_receipt(
+        leaf_entry_hex=es[1], leaf_index=1, tree_entries_hex=es,
+        alg="EdDSA", log_private_key_pem=priv,
+    )
+    protected_bstr, _unprotected, _payload, _sig = cbor2.loads(receipt).value
+    protected = cbor2.loads(protected_bstr)
+    assert HDR_CWT_CLAIMS not in protected
+    assert HDR_GRADE not in protected
+
+    res = verify_receipt(receipt, leaf_entry_hex=es[1], log_public_key_pem=pub)
+    assert res.ok, res.errors
+    assert res.iat is None
+    assert res.grade is None
+
+
+def test_tampered_iat_fails_signature(eddsa_keys):
+    """A receipt with `iat` altered in the PROTECTED header after signing
+    must fail signature verification -- proves iat is actually covered by
+    the signature, not just carried alongside it."""
+    priv, pub = eddsa_keys
+    es = _entries(4)
+    receipt = build_receipt(
+        leaf_entry_hex=es[1], leaf_index=1, tree_entries_hex=es,
+        alg="EdDSA", log_private_key_pem=priv, iat=1700000000,
+    )
+    protected_bstr, unprotected, payload, sig = cbor2.loads(receipt).value
+    protected = dict(cbor2.loads(protected_bstr))
+    claims = dict(protected[HDR_CWT_CLAIMS])
+    claims[CWT_IAT] = claims[CWT_IAT] + 1  # tamper the signed witness clock
+    protected[HDR_CWT_CLAIMS] = claims
+    tampered = cbor2.dumps(
+        cbor2.CBORTag(18, [cbor2.dumps(protected), unprotected, payload, sig])
+    )
+    res = verify_receipt(tampered, leaf_entry_hex=es[1], log_public_key_pem=pub)
+    assert not res.ok
+    assert any("signature" in e for e in res.errors)
+
+
+def test_tampered_grade_fails_signature(eddsa_keys):
+    """Same proof for `grade`: altering it post-signature must invalidate
+    the receipt -- this is the exact negative test the un-signed-grade
+    finding (Imran, trace-registry PR #68) showed missing pre-fix."""
+    priv, pub = eddsa_keys
+    es = _entries(4)
+    receipt = build_receipt(
+        leaf_entry_hex=es[1], leaf_index=1, tree_entries_hex=es,
+        alg="EdDSA", log_private_key_pem=priv, grade="countersigned-observed",
+    )
+    protected_bstr, unprotected, payload, sig = cbor2.loads(receipt).value
+    protected = dict(cbor2.loads(protected_bstr))
+    protected[HDR_GRADE] = "mmr-verified"  # tamper the signed grade
+    tampered = cbor2.dumps(
+        cbor2.CBORTag(18, [cbor2.dumps(protected), unprotected, payload, sig])
+    )
+    res = verify_receipt(tampered, leaf_entry_hex=es[1], log_public_key_pem=pub)
+    assert not res.ok
+    assert any("signature" in e for e in res.errors)
 
 
 def test_wrong_leaf_fails(eddsa_keys):
