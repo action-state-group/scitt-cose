@@ -44,11 +44,21 @@ from .cose_sign1 import (
     strict_decode,
     verify_sign1,
 )
+from .statement import CWT_IAT, HDR_CWT_CLAIMS
 
 #: Protected header label carrying the verifiable-data-structure identifier.
 HDR_VDS = 395
 #: Unprotected header label carrying the verifiable-data-proofs map.
 HDR_VDP = 396
+#: Private-use protected-header label (a negative integer, outside any
+#: IANA-registered COSE header-label range) carrying a witness-issued
+#: qualitative grade string, e.g. ``"countersigned-observed"`` (the witness
+#: only observed and countersigned a foreign commitment) or
+#: ``"mmr-verified"`` (the witness independently verified the log's own MMR
+#: math). Absent (key missing) when the issuing witness assigns no grade.
+#: Purely informational — never required for :func:`verify_receipt` to
+#: succeed, and never part of any digest a relying party recomputes.
+HDR_GRADE = -65537
 #: vds value: RFC 9162 SHA-256 Merkle tree.
 VDS_RFC9162_SHA256 = 1
 #: vds value: CCF ccf.v1 Merkle format (used by scitt-ccf-ledger v7+).
@@ -88,6 +98,16 @@ class ReceiptResult:
     root: str | None = None
     tree_size: int | None = None
     leaf_index: int | None = None
+    #: Witness-observed registration time (RFC 8392 "iat", seconds since
+    #: epoch), read from the SIGNED protected header — ``None`` when the
+    #: receipt carries no CWT claims map or no ``iat`` claim (e.g. a receipt
+    #: minted before this claim existed). As with every other field here,
+    #: only trust this when ``ok`` is ``True``: it is read before the
+    #: signature check runs, exactly like ``root``/``tree_size``/``leaf_index``.
+    iat: int | None = None
+    #: Witness-issued qualitative grade string, read from the SIGNED
+    #: protected header — ``None`` when absent. Same trust rule as ``iat``.
+    grade: str | None = None
     errors: list = field(default_factory=list)
 
 
@@ -209,6 +229,8 @@ def build_receipt(
     alg: str,
     log_private_key_pem: PemLike,
     detached: bool = True,
+    iat: int | None = None,
+    grade: str | None = None,
 ) -> bytes:
     """Mint a COSE Receipt for one leaf of an RFC 9162 Merkle tree.
 
@@ -216,6 +238,13 @@ def build_receipt(
     entry at ``leaf_index`` (which must equal ``leaf_entry_hex``), then signs a
     COSE_Sign1 over the root with the log key. By default the payload (the root)
     is detached.
+
+    ``iat`` (witness-observed registration time, seconds since epoch) and
+    ``grade`` (a witness-issued qualitative grade string), when given, are
+    placed in the PROTECTED header — ``iat`` under the CWT claims map (label
+    15, claim 6) and ``grade`` under :data:`HDR_GRADE` — so both are covered
+    by the signature. Omitted (``None``) means the receipt carries neither,
+    same wire shape as before either claim existed.
     """
     if not 0 <= leaf_index < len(tree_entries_hex):
         raise CoseError(f"leaf_index {leaf_index} out of range for {len(tree_entries_hex)} entries")
@@ -227,6 +256,10 @@ def build_receipt(
     inclusion_blob = _encode_inclusion_proof(len(tree_entries_hex), leaf_index, audit_path)
 
     protected = {HDR_VDS: VDS_RFC9162_SHA256}
+    if iat is not None:
+        protected[HDR_CWT_CLAIMS] = {CWT_IAT: iat}
+    if grade is not None:
+        protected[HDR_GRADE] = grade
     unprotected = {HDR_VDP: {VDP_INCLUSION_PROOFS: [inclusion_blob]}}
 
     return sign_sign1(
@@ -284,6 +317,17 @@ def verify_receipt(
     if not isinstance(protected, dict):
         result.errors.append("protected header is not a map")
         return result
+
+    # iat/grade: read from the PROTECTED header, same trust discipline as
+    # root/tree_size/leaf_index below — set here so they're available to a
+    # caller inspecting a failed result's partial state, but only meaningful
+    # once `result.ok` is True (the signature check that authenticates the
+    # whole protected header runs later in this function).
+    claims = protected.get(HDR_CWT_CLAIMS)
+    iat = claims.get(CWT_IAT) if isinstance(claims, dict) else None
+    result.iat = iat if isinstance(iat, int) and not isinstance(iat, bool) else None
+    grade = protected.get(HDR_GRADE)
+    result.grade = grade if isinstance(grade, str) else None
 
     # vds MUST come from the protected (integrity-protected) header.
     vds = protected.get(HDR_VDS)
@@ -408,6 +452,7 @@ __all__ = [
     "verify_receipt",
     "HDR_VDS",
     "HDR_VDP",
+    "HDR_GRADE",
     "VDS_RFC9162_SHA256",
     "VDS_CCF_LEDGER_SHA256",
     "VDP_INCLUSION_PROOFS",
