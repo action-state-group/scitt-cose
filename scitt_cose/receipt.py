@@ -61,16 +61,26 @@ VDP_INCLUSION_PROOFS = -1
 #: type-check that prevents bytes(int) over-allocation).
 _MAX_INCLUSION_PROOFS = 16
 
-#: Protected-header labels the receipt layer understands, for RFC 9052 §3.1
-#: crit enforcement: alg (1), crit (2) itself, and vds (395) which this layer
-#: actively reads. A receipt marking any of these critical is accepted; an
-#: unknown critical label is still rejected.
-_RECEIPT_UNDERSTOOD = frozenset({HDR_ALG, HDR_CRIT, HDR_VDS})
+#: CWT Claims protected-header label (RFC 8392 §3.1 / COSE header label 15).
+#: When present in the receipt's protected header, the map may include RFC 8392
+#: claim 6 (``iat``, issued-at, an integer Unix timestamp). This library
+#: surfaces the value as-is; interpretation is the caller's responsibility.
+HDR_CWT_CLAIMS = 15
+#: CWT claim number for issued-at (RFC 8392 §3.1.6).
+CWT_CLAIM_IAT = 6
 
-#: Extended understood set for CCF receipts: adds kid (4), CWT_Claims (15),
-#: and the ccf.v1 label. CCF does not currently mark these critical, but
-#: declaring them understood future-proofs against that changing.
-_CCF_RECEIPT_UNDERSTOOD = _RECEIPT_UNDERSTOOD | frozenset({4, 15, "ccf.v1"})
+#: Protected-header labels the receipt layer understands, for RFC 9052 §3.1
+#: crit enforcement: alg (1), crit (2) itself, vds (395) which this layer
+#: actively reads, and CWT_CLAIMS (15) which this layer reads for ``iat``.
+#: A receipt marking any of these critical is accepted; an unknown critical
+#: label is still rejected.
+_RECEIPT_UNDERSTOOD = frozenset({HDR_ALG, HDR_CRIT, HDR_VDS, HDR_CWT_CLAIMS})
+
+#: Extended understood set for CCF receipts: adds kid (4), CWT_Claims (15)
+#: (already in _RECEIPT_UNDERSTOOD), and the ccf.v1 label. CCF does not
+#: currently mark these critical, but declaring them understood
+#: future-proofs against that changing.
+_CCF_RECEIPT_UNDERSTOOD = _RECEIPT_UNDERSTOOD | frozenset({4, "ccf.v1"})
 
 PemLike = Union[bytes, str]
 
@@ -82,6 +92,21 @@ class ReceiptResult:
     ``ok`` is ``True`` only when the inclusion proof reconstructs a root *and*
     the COSE_Sign1 over that root verifies under the log key. On any failure
     ``ok`` is ``False`` and ``errors`` explains why.
+
+    New in 0.3.0:
+
+    ``iat`` — the ``iat`` (issued-at) integer from the protected header's CWT
+    claims map (label 15, claim 6 per RFC 8392 §3.1.6), or ``None`` if absent.
+    Present only when the receipt's signer included it; this library surfaces
+    the raw value without interpretation.
+
+    ``protected_header_ext`` — a ``dict`` of any protected-header labels that
+    are not in the set this verifier actively processes (alg/1, crit/2,
+    vds/395, CWT_Claims/15). This gives callers transparent access to
+    profile-specific or private-use labels (e.g. negative label numbers) that
+    were signed into the receipt without the neutral lib needing to understand
+    their semantics. Keys are the raw integer or string labels; values are the
+    decoded CBOR values.
     """
 
     ok: bool = False
@@ -89,6 +114,8 @@ class ReceiptResult:
     tree_size: int | None = None
     leaf_index: int | None = None
     errors: list = field(default_factory=list)
+    iat: int | None = None
+    protected_header_ext: dict = field(default_factory=dict)
 
 
 def _encode_inclusion_proof(tree_size: int, leaf_index: int, audit_path_hex: list[str]) -> bytes:
@@ -291,6 +318,22 @@ def verify_receipt(
         result.errors.append("protected header missing alg (label 1)")
         return result
 
+    # Surface iat from the protected CWT claims map (label 15, claim 6).
+    # Read-only — no interpretation; None when absent.
+    cwt_claims = protected.get(HDR_CWT_CLAIMS)
+    if isinstance(cwt_claims, dict):
+        iat_val = cwt_claims.get(CWT_CLAIM_IAT)
+        if isinstance(iat_val, int) and not isinstance(iat_val, bool):
+            result.iat = iat_val
+
+    # Collect unrecognized protected-header labels so callers can inspect any
+    # profile-specific or private-use labels the signer added, without the
+    # neutral lib ascribing any meaning to them (same discipline as vds/395).
+    _KNOWN_PROTECTED = frozenset({HDR_ALG, HDR_CRIT, HDR_VDS, HDR_CWT_CLAIMS})
+    result.protected_header_ext = {
+        k: v for k, v in protected.items() if k not in _KNOWN_PROTECTED
+    }
+
     if not isinstance(unprotected, dict):
         result.errors.append("unprotected header is not a map")
         return result
@@ -408,6 +451,8 @@ __all__ = [
     "verify_receipt",
     "HDR_VDS",
     "HDR_VDP",
+    "HDR_CWT_CLAIMS",
+    "CWT_CLAIM_IAT",
     "VDS_RFC9162_SHA256",
     "VDS_CCF_LEDGER_SHA256",
     "VDP_INCLUSION_PROOFS",

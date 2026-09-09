@@ -8,6 +8,8 @@ import pytest
 from scitt_cose import merkle
 from scitt_cose.cose_sign1 import CoseError
 from scitt_cose.receipt import (
+    CWT_CLAIM_IAT,
+    HDR_CWT_CLAIMS,
     HDR_VDP,
     HDR_VDS,
     VDS_RFC9162_SHA256,
@@ -195,3 +197,126 @@ def test_verify_receipt_survives_cbor2_6_immutable_output(monkeypatch, eddsa_key
     monkeypatch.setattr(cbor2, "loads", fake_loads)
     r = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=pub)
     assert r.ok, r.errors
+
+
+# ---------------------------------------------------------------------------
+# 0.3.0 — iat + protected_header_ext surfacing
+# ---------------------------------------------------------------------------
+
+def _inject_protected(receipt: bytes, extra_protected: dict) -> bytes:
+    """Rebuild a receipt bytes with additional protected-header entries.
+
+    Injects ``extra_protected`` into the signed protected header and strips the
+    signature (so the result is structurally valid CBOR but the signature will
+    NOT verify). Used to test surfacing of protected-header fields before the
+    sig-verify step.  To also produce a *verifiable* receipt the caller must
+    re-sign; for surfacing tests we only need structural validity up to the
+    sig-check step — so tests that assert on iat/protected_header_ext MUST NOT
+    assert ``r.ok``.
+    """
+    tag = cbor2.loads(receipt)
+    protected_bstr, unprotected, payload, sig = tag.value
+    ph = cbor2.loads(protected_bstr)
+    ph.update(extra_protected)
+    new_protected_bstr = cbor2.dumps(ph)
+    return cbor2.dumps(cbor2.CBORTag(18, [new_protected_bstr, unprotected, payload, sig]))
+
+
+def _build_receipt_with_protected(
+    extra_protected: dict,
+    alg: str,
+    priv: bytes,
+    pub: bytes,
+) -> tuple[bytes, list[str], str]:
+    """Build a properly-signed receipt that includes ``extra_protected`` in the
+    protected header, returning ``(receipt_bytes, entries, leaf_hex)``."""
+    import hashlib
+    from scitt_cose.cose_sign1 import HDR_ALG, ALG_NAME_TO_CODE, sign_sign1
+    from scitt_cose.merkle import merkle_root, inclusion_proof
+    from scitt_cose.receipt import (
+        HDR_VDS, HDR_VDP, VDS_RFC9162_SHA256, VDP_INCLUSION_PROOFS,
+        _encode_inclusion_proof,
+    )
+
+    entries = [hashlib.sha256(f"e{i}".encode()).hexdigest() for i in range(4)]
+    idx = 1
+    root_hex = merkle_root(entries)
+    audit_path = inclusion_proof(entries, idx)
+    inclusion_blob = _encode_inclusion_proof(len(entries), idx, audit_path)
+
+    protected = {HDR_VDS: VDS_RFC9162_SHA256}
+    protected.update(extra_protected)
+    unprotected = {HDR_VDP: {VDP_INCLUSION_PROOFS: [inclusion_blob]}}
+
+    receipt = sign_sign1(
+        bytes.fromhex(root_hex),
+        alg=alg,
+        private_key_pem=priv,
+        protected=protected,
+        unprotected=unprotected,
+        detached=True,
+    )
+    return receipt, entries, entries[idx]
+
+
+def test_iat_surfaced_when_present(eddsa_keys):
+    """A receipt signed with iat in the CWT claims map surfaces it in ReceiptResult."""
+    priv, pub = eddsa_keys
+    iat_value = 1_700_000_000  # arbitrary Unix timestamp
+
+    receipt, entries, leaf = _build_receipt_with_protected(
+        {HDR_CWT_CLAIMS: {CWT_CLAIM_IAT: iat_value}},
+        alg="EdDSA",
+        priv=priv,
+        pub=pub,
+    )
+    r = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    assert r.ok, r.errors
+    assert r.iat == iat_value
+    # CWT_CLAIMS is a known/processed label; not in ext map
+    assert HDR_CWT_CLAIMS not in r.protected_header_ext
+
+
+def test_iat_none_when_absent(eddsa_keys):
+    """A receipt built without CWT claims still verifies and returns iat=None.
+
+    This is the byte-identical backward-compat path: the pre-0.3.0 receipt
+    shape must verify unchanged and produce iat=None.
+    """
+    priv, pub = eddsa_keys
+    es = _entries(5)
+    idx = 2
+    receipt = build_receipt(
+        leaf_entry_hex=es[idx], leaf_index=idx, tree_entries_hex=es,
+        alg="EdDSA", log_private_key_pem=priv,
+    )
+    r = verify_receipt(receipt, leaf_entry_hex=es[idx], log_public_key_pem=pub)
+    assert r.ok, r.errors
+    assert r.iat is None
+    assert r.protected_header_ext == {}
+
+
+def test_unknown_protected_label_in_ext_map(eddsa_keys):
+    """An unrecognized private-use protected label appears in protected_header_ext
+    with its raw value and does NOT break verification.
+
+    Uses label -65537 (a private-use negative int, not named or interpreted by
+    this library) as a generic example of any profile-specific signed field.
+    The neutral lib surfaces it as-is; callers interpret it independently.
+    """
+    priv, pub = eddsa_keys
+    private_label = -65537
+    private_value = b"some-opaque-value"
+
+    receipt, entries, leaf = _build_receipt_with_protected(
+        {private_label: private_value},
+        alg="EdDSA",
+        priv=priv,
+        pub=pub,
+    )
+    r = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    assert r.ok, r.errors
+    assert private_label in r.protected_header_ext
+    assert r.protected_header_ext[private_label] == private_value
+    # iat unaffected
+    assert r.iat is None
