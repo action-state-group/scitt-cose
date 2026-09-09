@@ -231,10 +231,14 @@ def _build_receipt_with_protected(
     """Build a properly-signed receipt that includes ``extra_protected`` in the
     protected header, returning ``(receipt_bytes, entries, leaf_hex)``."""
     import hashlib
-    from scitt_cose.cose_sign1 import HDR_ALG, ALG_NAME_TO_CODE, sign_sign1
-    from scitt_cose.merkle import merkle_root, inclusion_proof
+
+    from scitt_cose.cose_sign1 import sign_sign1
+    from scitt_cose.merkle import inclusion_proof, merkle_root
     from scitt_cose.receipt import (
-        HDR_VDS, HDR_VDP, VDS_RFC9162_SHA256, VDP_INCLUSION_PROOFS,
+        HDR_VDP,
+        HDR_VDS,
+        VDP_INCLUSION_PROOFS,
+        VDS_RFC9162_SHA256,
         _encode_inclusion_proof,
     )
 
