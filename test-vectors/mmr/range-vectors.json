@@ -1,0 +1,204 @@
+{
+  "_provenance": "Self-generated (not upstream) -- 9 leaves, real leaf_hash, arbitrary body digests, minted by cll.checkpoint.core.range_proof and confirmed to verify (positives) or correctly fail (negatives) under the Python reference before export. Pins the ported verifyRange *behavior*: [cll-range-proof-per-record-membership] -- every leaf in the claimed range participates in rebuilding the root, not just the two boundary leaves, so a deleted or replaced interior record is caught.",
+  "body_digests": [
+    "c2bfef99422082a359a5f3d3d902d4809038cf10e500d7ec16170aea760f7f20",
+    "663a85a5bf4a6c150bbfb735abdff85f10e02dd9fa4f8eca49a99001b8d33196",
+    "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71",
+    "1fba386772bb747a27077a2d3579620c3e800da40f774512292ea42edee827f0",
+    "336887bf8b4331d393c4d58d5442cc0a7a071ec3a410b5d393166817d379003f",
+    "b993e8ed2d5db946c98df540c92251eadd1e805c1b4431260edc83f3b9cc0068",
+    "da5b65d74bb05d7bc1a54c9002d1a4cdd4e963c48c0688b639ce59c2a38ea458"
+  ],
+  "full_size": 11,
+  "full_root": "83da2df99cb0e55b991ecdd3d0f2a972678b62080b228877be7987b1deed9543",
+  "range_cases": [
+    {
+      "name": "single-leaf",
+      "from_seq": 5,
+      "to_seq": 5,
+      "size": 8,
+      "root": "3fd54dda9cfe1232b7e3229bee54442ded7fb8117c3c03ae858a68aa263085bc",
+      "body_digests": [
+        "336887bf8b4331d393c4d58d5442cc0a7a071ec3a410b5d393166817d379003f"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 8,
+        "from_index": 4,
+        "to_index": 4,
+        "witness": [
+          "e68e69533767b6947b54b333a576103f69f09bafa9c906f26517c24d61e5c2c4"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "name": "three-leaf",
+      "from_seq": 3,
+      "to_seq": 5,
+      "size": 8,
+      "root": "3fd54dda9cfe1232b7e3229bee54442ded7fb8117c3c03ae858a68aa263085bc",
+      "body_digests": [
+        "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71",
+        "1fba386772bb747a27077a2d3579620c3e800da40f774512292ea42edee827f0",
+        "336887bf8b4331d393c4d58d5442cc0a7a071ec3a410b5d393166817d379003f"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 8,
+        "from_index": 2,
+        "to_index": 4,
+        "witness": [
+          "221d253ee141fb825e4731f23ed716f779ecd5b3b87024d4f96954153bbcdc2d"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "name": "first-leaf",
+      "from_seq": 1,
+      "to_seq": 3,
+      "size": 4,
+      "root": "02dd46532e364cd2a0676d2b2c420cc0a4fa1029d2499ea9a03335a5d12a20f7",
+      "body_digests": [
+        "c2bfef99422082a359a5f3d3d902d4809038cf10e500d7ec16170aea760f7f20",
+        "663a85a5bf4a6c150bbfb735abdff85f10e02dd9fa4f8eca49a99001b8d33196",
+        "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 4,
+        "from_index": 0,
+        "to_index": 2,
+        "witness": []
+      },
+      "expect": true
+    },
+    {
+      "name": "cross-peak",
+      "from_seq": 2,
+      "to_seq": 7,
+      "size": 11,
+      "root": "83da2df99cb0e55b991ecdd3d0f2a972678b62080b228877be7987b1deed9543",
+      "body_digests": [
+        "663a85a5bf4a6c150bbfb735abdff85f10e02dd9fa4f8eca49a99001b8d33196",
+        "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71",
+        "1fba386772bb747a27077a2d3579620c3e800da40f774512292ea42edee827f0",
+        "336887bf8b4331d393c4d58d5442cc0a7a071ec3a410b5d393166817d379003f",
+        "b993e8ed2d5db946c98df540c92251eadd1e805c1b4431260edc83f3b9cc0068",
+        "da5b65d74bb05d7bc1a54c9002d1a4cdd4e963c48c0688b639ce59c2a38ea458"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 11,
+        "from_index": 1,
+        "to_index": 6,
+        "witness": [
+          "861432b3247b4c0c43e064255dbcc845fe699a864f9b7142252cde939c50dc64"
+        ]
+      },
+      "expect": true
+    }
+  ],
+  "negative_range_cases": [
+    {
+      "label": "replaced-interior-record",
+      "from_seq": 3,
+      "to_seq": 7,
+      "size": 11,
+      "root": "83da2df99cb0e55b991ecdd3d0f2a972678b62080b228877be7987b1deed9543",
+      "body_digests": [
+        "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71",
+        "1fba386772bb747a27077a2d3579620c3e800da40f774512292ea42edee827f0",
+        "cc6887bf8b4331d393c4d58d5442cc0a7a071ec3a410b5d393166817d379003f",
+        "b993e8ed2d5db946c98df540c92251eadd1e805c1b4431260edc83f3b9cc0068",
+        "da5b65d74bb05d7bc1a54c9002d1a4cdd4e963c48c0688b639ce59c2a38ea458"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 11,
+        "from_index": 2,
+        "to_index": 6,
+        "witness": [
+          "221d253ee141fb825e4731f23ed716f779ecd5b3b87024d4f96954153bbcdc2d"
+        ]
+      }
+    },
+    {
+      "label": "deleted-interior-record",
+      "from_seq": 3,
+      "to_seq": 7,
+      "size": 11,
+      "root": "83da2df99cb0e55b991ecdd3d0f2a972678b62080b228877be7987b1deed9543",
+      "body_digests": [
+        "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71",
+        "1fba386772bb747a27077a2d3579620c3e800da40f774512292ea42edee827f0",
+        "b993e8ed2d5db946c98df540c92251eadd1e805c1b4431260edc83f3b9cc0068",
+        "da5b65d74bb05d7bc1a54c9002d1a4cdd4e963c48c0688b639ce59c2a38ea458"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 11,
+        "from_index": 2,
+        "to_index": 6,
+        "witness": [
+          "221d253ee141fb825e4731f23ed716f779ecd5b3b87024d4f96954153bbcdc2d"
+        ]
+      }
+    },
+    {
+      "label": "sparse-selection-wrong-window",
+      "from_seq": 3,
+      "to_seq": 7,
+      "size": 11,
+      "root": "83da2df99cb0e55b991ecdd3d0f2a972678b62080b228877be7987b1deed9543",
+      "body_digests": [
+        "663a85a5bf4a6c150bbfb735abdff85f10e02dd9fa4f8eca49a99001b8d33196",
+        "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71",
+        "1fba386772bb747a27077a2d3579620c3e800da40f774512292ea42edee827f0",
+        "336887bf8b4331d393c4d58d5442cc0a7a071ec3a410b5d393166817d379003f",
+        "b993e8ed2d5db946c98df540c92251eadd1e805c1b4431260edc83f3b9cc0068"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 11,
+        "from_index": 2,
+        "to_index": 6,
+        "witness": [
+          "221d253ee141fb825e4731f23ed716f779ecd5b3b87024d4f96954153bbcdc2d"
+        ]
+      }
+    },
+    {
+      "label": "mismatched-checkpoint-root",
+      "from_seq": 3,
+      "to_seq": 7,
+      "size": 11,
+      "root": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "body_digests": [
+        "0351830e475e62c7bb76d0c8e13c72f779f1c5f1c9eecaf07c0670c7e18a0c71",
+        "1fba386772bb747a27077a2d3579620c3e800da40f774512292ea42edee827f0",
+        "336887bf8b4331d393c4d58d5442cc0a7a071ec3a410b5d393166817d379003f",
+        "b993e8ed2d5db946c98df540c92251eadd1e805c1b4431260edc83f3b9cc0068",
+        "da5b65d74bb05d7bc1a54c9002d1a4cdd4e963c48c0688b639ce59c2a38ea458"
+      ],
+      "proof": {
+        "v": 1,
+        "kind": "range",
+        "size": 11,
+        "from_index": 2,
+        "to_index": 6,
+        "witness": [
+          "221d253ee141fb825e4731f23ed716f779ecd5b3b87024d4f96954153bbcdc2d"
+        ]
+      }
+    }
+  ]
+}

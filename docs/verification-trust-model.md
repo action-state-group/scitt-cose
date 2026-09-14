@@ -44,10 +44,10 @@ as pass/fail/skip, never blended into one verdict:
 
 - **Capsule page** (`/v/<capsule_id>`): **Integrity · Sequence · Authenticity
   · Witness**
-- **Bundle page** (`/bundle`): **Integrity · Sequence · Completeness ·
+- **Bundle page** (`/bundle`): **Integrity · Sequence · Range membership ·
   Cross-check**
 
-**Integrity, Sequence, Completeness and Cross-check are pure computation**
+**Integrity, Sequence, Range membership and Cross-check are pure computation**
 over the bytes already in the fragment — digest recompute against
 `capsule_id`, chain-parent linkage, disclosure recompute, Merkle
 range-proof math. None of it calls out anywhere, so it runs identically:
@@ -56,7 +56,7 @@ range-proof math. None of it calls out anywhere, so it runs identically:
   "Download self-contained copy" button on `/bundle`) returns the same DOM
   and the same JS, inlined instead of `<script src>`, with the bundle
   fragment embedded in place of a request. Save it, open it with `file://`,
-  disconnect from the network entirely — Integrity, Sequence, Completeness
+  disconnect from the network entirely — Integrity, Sequence, Range membership
   and Cross-check all still run and render.
 - **From the CLI.** capsule-ledger's `permalink --check` runs the same
   computation locally without a browser at all — and, unlike this browser
@@ -98,7 +98,7 @@ Two residuals, both narrower than "the record":
    is `/v/<capsule_id>`, and its Witness stage calls
    `GET /anchor-status/<capsule_id>` — both send the 64-hex id (a digest, not
    the record) to the server, which can log that *this id* was checked *at
-   this time*. The bundle page's Integrity/Sequence/Completeness/Cross-check
+   this time*. The bundle page's Integrity/Sequence/Range membership/Cross-check
    stages send nothing; they never learn which capsules were in a bundle you
    opened there. The hosted instance additionally counts anonymous view/
    referrer totals (`/instrumentation-policy` states exactly what — a count
@@ -128,12 +128,12 @@ page serving the check:
 |---|---|---|
 | Integrity (body matches its id) | recompute the digest in your own tab | no |
 | Sequence (chain has no gaps) | walk `chain.parent_capsule_id` locally | no |
-| Completeness / Cross-check (bundle page) | Merkle range-proof + digest recompute locally | no |
+| Range membership / Cross-check (bundle page) | Merkle range-proof + digest recompute locally -- proves the claimed records are present and unaltered, not that no others exist | no |
 | Authenticity (COSE signature) | not evaluated by this browser page yet — `permalink --check` or `scitt-cose` locally | no, via the CLI · yes, via the hosted `/verify` tool |
 | Witness (a third party saw it) | RFC 9162 inclusion proof against the witness's published key | yes — and skips honestly when absent |
 
 If you don't trust this server to serve you correct JS even once, download
 the offline shell, verify it, and never load `/v/` or `/bundle` live again for
-Integrity, Sequence, Completeness or Cross-check — the CLI's `permalink
+Integrity, Sequence, Range membership or Cross-check — the CLI's `permalink
 --check` gives you the same guarantee, plus Authenticity, without a browser
 in the loop at all.

@@ -423,7 +423,7 @@ You don't need it: the verifier runs anywhere.
 `capsule bundle`'s permalinks. **The record never leaves the browser in
 either mode** — it rides in the URL fragment (the part after `#`), which
 HTTP never transmits, so the server serving the viewer's HTML/JS never sees
-the bytes being verified. Integrity, Sequence and (bundle-only) Completeness/
+the bytes being verified. Integrity, Sequence and (bundle-only) Range membership/
 Cross-check are checkable with **zero network**: download the self-contained
 copy from `GET /bundle/offline-shell` and it still verifies opened straight
 from `file://`. Authenticity (the COSE signature) isn't evaluated by this

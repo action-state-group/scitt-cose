@@ -30,6 +30,11 @@ def proof_vectors():
     return json.loads((VECTORS / "proof-vectors.json").read_text())
 
 
+@pytest.fixture(scope="module")
+def range_vectors():
+    return json.loads((VECTORS / "range-vectors.json").read_text())
+
+
 # -- KAT39: byte-identical hash/position primitives --------------------------
 # Same vectors test_mmr_js_parity.py pins the JS port against; here they pin
 # this module's Python primitives directly. Provenance: kat39.json's own
@@ -263,68 +268,154 @@ def test_verify_checkpoint_chain_rejects_the_rollback(proof_vectors):
 # -- range: honestly scoped, never a completeness claim -----------------------
 
 
-def test_range_proof_verifies_and_states_its_scope_honestly(proof_vectors):
-    """[4, 12] is a *sub*-range (not starting at record 1) so the honesty
-    caveat has something real to say: this proves records 4-12 are present
-    and unaltered, and says nothing about records 1-3 or anything beyond 12."""
-    root_hex = proof_vectors["full_root"]
-    from_case = next(c for c in proof_vectors["inclusion_cases"] if c["leaf_index"] == 3)
-    to_case = next(c for c in proof_vectors["inclusion_cases"] if c["leaf_index"] == 11)
-
-    range_proof = cll.RangeProof(
-        from_seq=4,
-        to_seq=12,
-        size=22,
-        inclusion_from=cll.InclusionProof.from_dict(from_case["proof"]),
-        inclusion_to=cll.InclusionProof.from_dict(to_case["proof"]),
+def _range_proof_from_case(case: dict) -> cll.RangeProof:
+    p = case["proof"]
+    return cll.RangeProof(
+        from_seq=case["from_seq"],
+        to_seq=case["to_seq"],
+        size=p["size"],
+        from_index=p["from_index"],
+        to_index=p["to_index"],
+        witness=tuple(p["witness"]),
     )
+
+
+def test_range_proof_verifies_and_states_its_scope_honestly(range_vectors):
+    """"three-leaf" ([3, 5] of 7 leaves) is a *sub*-range (not starting at
+    record 1, not reaching the end) so the honesty caveat has something real
+    to say: this proves records 3-5 are present and unaltered, and says
+    nothing about records 1-2 or anything beyond 5."""
+    case = next(c for c in range_vectors["range_cases"] if c["name"] == "three-leaf")
+    range_proof = _range_proof_from_case(case)
     checkpoint = cll.Checkpoint(
-        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=22, root=root_hex,
+        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=case["size"], root=case["root"],
         prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
     )
 
     result = cll.verify_range_against_checkpoint(
-        from_seq=4,
-        to_seq=12,
-        from_digest=bytes.fromhex(from_case["body_digest"]),
-        to_digest=bytes.fromhex(to_case["body_digest"]),
+        from_seq=case["from_seq"],
+        to_seq=case["to_seq"],
+        body_digests=[bytes.fromhex(d) for d in case["body_digests"]],
         checkpoint=checkpoint,
         proof=range_proof,
     )
     assert result.ok is True, result.errors
-    assert "9 of 9" in result.scope_note
-    assert "does NOT prove" in result.scope_note
+    assert "records 3–5" in result.scope_note
+    assert "does not show that no other records exist" in result.scope_note
     assert "range-intact != all-traffic" in result.scope_note
-    assert "witnessed up to size 22" in result.status
+    assert f"witnessed up to size {case['size']}" in result.status
 
 
-def test_range_proof_mutant_tampered_boundary_fails(proof_vectors):
-    root_hex = proof_vectors["full_root"]
-    from_case = next(c for c in proof_vectors["inclusion_cases"] if c["leaf_index"] == 3)
-    to_case = next(c for c in proof_vectors["inclusion_cases"] if c["leaf_index"] == 11)
-    range_proof = cll.RangeProof(
-        from_seq=4,
-        to_seq=12,
-        size=22,
-        inclusion_from=cll.InclusionProof.from_dict(from_case["proof"]),
-        inclusion_to=cll.InclusionProof.from_dict(to_case["proof"]),
+def test_range_proof_mutant_replaced_interior_record_fails(range_vectors):
+    """The bug this proof shape closes: a record strictly between the two
+    endpoints is swapped for a different digest. The old two-boundary proof
+    never looked at this leaf and would have verified anyway."""
+    negative = next(
+        c for c in range_vectors["negative_range_cases"] if c["label"] == "replaced-interior-record"
     )
+    range_proof = _range_proof_from_case(negative)
     checkpoint = cll.Checkpoint(
-        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=22, root=root_hex,
+        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=negative["size"], root=negative["root"],
         prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
     )
-    # Wrong to_digest: claim record 12 was something it wasn't.
-    wrong_to_digest = bytes.fromhex(proof_vectors["body_digests"][0])
+
     result = cll.verify_range_against_checkpoint(
-        from_seq=4,
-        to_seq=12,
-        from_digest=bytes.fromhex(from_case["body_digest"]),
-        to_digest=wrong_to_digest,
+        from_seq=negative["from_seq"],
+        to_seq=negative["to_seq"],
+        body_digests=[bytes.fromhex(d) for d in negative["body_digests"]],
         checkpoint=checkpoint,
         proof=range_proof,
     )
     assert result.ok is False
     assert result.errors
+
+
+def test_range_proof_mutant_deleted_interior_record_fails(range_vectors):
+    negative = next(
+        c for c in range_vectors["negative_range_cases"] if c["label"] == "deleted-interior-record"
+    )
+    range_proof = _range_proof_from_case(negative)
+    checkpoint = cll.Checkpoint(
+        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=negative["size"], root=negative["root"],
+        prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
+    )
+
+    result = cll.verify_range_against_checkpoint(
+        from_seq=negative["from_seq"],
+        to_seq=negative["to_seq"],
+        body_digests=[bytes.fromhex(d) for d in negative["body_digests"]],
+        checkpoint=checkpoint,
+        proof=range_proof,
+    )
+    assert result.ok is False
+    assert result.errors
+
+
+def test_range_proof_mutant_sparse_selection_wrong_window_fails(range_vectors):
+    """Right-shaped digest list (same count the range needs), wrong window
+    of leaves -- the digests come from a different, non-overlapping range.
+    A length check alone can't catch this; only rebuilding the root can."""
+    negative = next(
+        c for c in range_vectors["negative_range_cases"] if c["label"] == "sparse-selection-wrong-window"
+    )
+    range_proof = _range_proof_from_case(negative)
+    checkpoint = cll.Checkpoint(
+        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=negative["size"], root=negative["root"],
+        prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
+    )
+
+    result = cll.verify_range_against_checkpoint(
+        from_seq=negative["from_seq"],
+        to_seq=negative["to_seq"],
+        body_digests=[bytes.fromhex(d) for d in negative["body_digests"]],
+        checkpoint=checkpoint,
+        proof=range_proof,
+    )
+    assert result.ok is False
+    assert result.errors
+
+
+def test_range_proof_mutant_mismatched_checkpoint_root_fails(range_vectors):
+    negative = next(
+        c for c in range_vectors["negative_range_cases"] if c["label"] == "mismatched-checkpoint-root"
+    )
+    range_proof = _range_proof_from_case(negative)
+    checkpoint = cll.Checkpoint(
+        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=negative["size"], root=negative["root"],
+        prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
+    )
+
+    result = cll.verify_range_against_checkpoint(
+        from_seq=negative["from_seq"],
+        to_seq=negative["to_seq"],
+        body_digests=[bytes.fromhex(d) for d in negative["body_digests"]],
+        checkpoint=checkpoint,
+        proof=range_proof,
+    )
+    assert result.ok is False
+    assert result.errors
+
+
+@pytest.mark.parametrize("name", ["single-leaf", "first-leaf", "cross-peak"])
+def test_range_proof_verifies_for_every_positive_case(range_vectors, name):
+    """Round out the positive vector set beyond the "three-leaf" case above:
+    a single-leaf range, the from_seq=1 (leaf index 0) edge case, and a
+    range that crosses multiple MMR peaks."""
+    case = next(c for c in range_vectors["range_cases"] if c["name"] == name)
+    range_proof = _range_proof_from_case(case)
+    checkpoint = cll.Checkpoint(
+        v=1, kind="mmr_checkpoint", log_id="log-range", mmr_size=case["size"], root=case["root"],
+        prev_size=0, prev_root="", key_id="node-r", timestamp="2026-08-21T02:00:00Z",
+    )
+
+    result = cll.verify_range_against_checkpoint(
+        from_seq=case["from_seq"],
+        to_seq=case["to_seq"],
+        body_digests=[bytes.fromhex(d) for d in case["body_digests"]],
+        checkpoint=checkpoint,
+        proof=range_proof,
+    )
+    assert result.ok is True, result.errors
 
 
 # -- witness-lag honesty -------------------------------------------------
