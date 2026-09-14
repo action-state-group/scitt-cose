@@ -68,10 +68,26 @@ CAP_C = _fake_hex64("cc")
 def _cap(cid: str, parent: str | None = None, **overrides) -> dict:
     cap = {
         "capsule_id": cid,
+        "format_version": "4",
+        "canonicalization_id": "jcs",
+        "spec_version": "draft-04",
+        "action_id": "envelope-test",
         "action_type": "decide",
+        "developer": "viewer-test",
         "operator": "acme-co",
         "timestamp": "2026-08-11T00:00:00Z",
-        "disposition": {"decision": "accept", "verdict_class": "executed"},
+        "disposition": {
+            "decision": "accept",
+            "approver": "policy",
+            "human_disposed": False,
+            "verdict_class": "executed",
+        },
+        "assurance": {
+            "attestation_mode": "self_attested",
+            "effect_mode": "not_applicable",
+            "ledger_mode": "standalone",
+        },
+        "effect": {"type": "envelope-test", "status": "planned"},
     }
     if parent:
         cap["chain"] = {"parent_capsule_id": parent, "relation": "sequence"}

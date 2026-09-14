@@ -1,22 +1,22 @@
 {
   "capsule-1": {
     "ok": true,
-    "recomputed": "b823aa8f5be968084235043d1b0d7dd3a66cb60d16f724ddcfc8d54a5ca5e978",
-    "stated": "b823aa8f5be968084235043d1b0d7dd3a66cb60d16f724ddcfc8d54a5ca5e978"
+    "recomputed": "c8b8e75be38563b7babd4619ab531ede218b656024c4a1756604ebc0c8b123d7",
+    "stated": "c8b8e75be38563b7babd4619ab531ede218b656024c4a1756604ebc0c8b123d7"
   },
   "capsule-2": {
     "ok": true,
-    "recomputed": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd",
-    "stated": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd"
+    "recomputed": "6ebe48d528c2eaf997a8d633fc733f02b42d2e466f632b31427609cdc0860ffa",
+    "stated": "6ebe48d528c2eaf997a8d633fc733f02b42d2e466f632b31427609cdc0860ffa"
   },
   "capsule-2-tampered": {
     "ok": false,
-    "recomputed": "47812907a4e9135be259e811c261c081a0ff322f9837cc9d9ad3b872fbda37b8",
-    "stated": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd"
+    "recomputed": "1996ede81b4b0d1aa65374e97b43fd75521942e10a084da592484d64bb3ca5e2",
+    "stated": "6ebe48d528c2eaf997a8d633fc733f02b42d2e466f632b31427609cdc0860ffa"
   },
   "capsule-3": {
     "ok": true,
-    "recomputed": "ff507525ececb1d1c6bdb1de7348ef7673dbe7a9d36ed5002d597ae447c6d710",
-    "stated": "ff507525ececb1d1c6bdb1de7348ef7673dbe7a9d36ed5002d597ae447c6d710"
+    "recomputed": "ee3ac49636a283a8ab8b5e51100641820ebdd59c9504939fa9eb53064ecc0582",
+    "stated": "ee3ac49636a283a8ab8b5e51100641820ebdd59c9504939fa9eb53064ecc0582"
   }
 }

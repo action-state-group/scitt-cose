@@ -31,6 +31,10 @@ globalThis.history = { replaceState: () => {} };
 
 const mmrSrc = readFileSync(process.argv[2], "utf8");
 const bundleSrc = readFileSync(process.argv[3], "utf8");
+const cryptoSrc = readFileSync(new URL("../viewer/dist/aac-crypto.js", import.meta.url), "utf8");
+vm.runInThisContext(cryptoSrc, { filename: "aac-crypto.js" });
+// The bundle uses the canonical verifier for Evidence Bundle v2 and retains
+// this legacy verifier only for already-issued certificate compatibility.
 vm.runInThisContext(mmrSrc, { filename: "mmr.js" });
 vm.runInThisContext(bundleSrc, { filename: "bundle.js" });
 

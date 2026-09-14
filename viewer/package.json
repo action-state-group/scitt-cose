@@ -1,0 +1,12 @@
+{
+  "name": "scitt-cose-viewer-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/aac-crypto.js --bundle --format=iife --target=browser --outfile=dist/aac-crypto.js",
+    "check": "npm run build && ! rg -q 'node:' dist/aac-crypto.js"
+  },
+  "dependencies": {
+    "@action-state-group/agent-action-capsule": "file:vendor/agent-action-capsule-4c6c6ec.tgz"
+  }
+}

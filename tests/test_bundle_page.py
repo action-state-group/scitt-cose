@@ -31,6 +31,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from hosted_profiles.hosted import (
+    AAC_CRYPTO_JS,
     BUNDLE_JS,
     CAPSULE_JS,
     MMR_JS,
@@ -81,12 +82,9 @@ def test_bundle_js_shared_helpers_match_capsule_js():
         BUNDLE_JS, "function _capMismatched(cap){", chain_end
     )
 
-    # capsule_id recompute (RFC 8785 JCS + SHA-256) — same drift-guard: both
-    # files carry a byte-identical hand-port of agent_action_capsule.canonical.
-    capid_end = "return{ok:false,stated:stated,recomputed:null,error:ex.message};\n  }\n}"
-    assert _slice_between(CAPSULE_JS, "var CHAIN_LINKAGE_FIELDS=", capid_end) == _slice_between(
-        BUNDLE_JS, "var CHAIN_LINKAGE_FIELDS=", capid_end
-    )
+    # capsule_id/JCS parity is no longer an inline-source comparison: both
+    # controllers call the one built canonical-library asset.  The Node
+    # harness exercises that asset directly in test_capsule_id_recompute.py.
 
     # disclosed-payload rendering (canonicalPayloadText/payloadPreview/payloadCellHtml) —
     # same drift-guard: the bytes hashed and the bytes shown must come from one helper,
@@ -114,7 +112,7 @@ def test_hosted_bundle_page_is_csp_safe():
     import re
 
     html = render_bundle_page()
-    assert '<script src="/static/mmr.js">' in html
+    assert '<script src="/static/aac-crypto.js">' in html
     assert '<script src="/static/bundle.js">' in html
     assert not re.search(r"<script[^>]*>[^<]", html)  # no inline script bodies
     assert "<link" not in html
@@ -141,7 +139,7 @@ def test_bundle_page_links_trust_model_doc_in_both_modes():
 def test_offline_bundle_shell_is_self_contained_and_reusable_template():
     html = render_bundle_page(offline=True)
     assert "<script src=" not in html  # nothing external — fully inlined
-    assert MMR_JS in html
+    assert AAC_CRYPTO_JS in html
     assert BUNDLE_JS in html
     # 3 occurrences: 1 embed point (first in document order) + 2 internal
     # BUNDLE_JS references (the sentinel check + the download button's own
@@ -278,6 +276,15 @@ CAPSULE_A = {
 }
 
 
+def _jcs_digest(value: object) -> str:
+    """Digest the whole JSON value exactly as the canonical browser library."""
+    import hashlib
+
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+
+
 @pytestmark_node
 def test_withheld_field_renders_as_provable_commitment_never_absent(js_paths):
     """A withheld field must show up in the privilege log as a WITHHELD
@@ -294,7 +301,7 @@ def test_revealed_field_recomputes_and_matches(js_paths):
     import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     envelope = {"capsule": cap, "disclosures": {"agent_input": payload}}
@@ -309,7 +316,7 @@ def test_verify_capsule_digests_confirms_a_genuine_match(js_paths):
     import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
@@ -466,7 +473,7 @@ def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
     import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
 
@@ -501,7 +508,7 @@ def test_payload_cell_renders_on_genuine_match(js_paths):
     import hashlib
 
     payload = {"b": 2, "a": 1}
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
@@ -521,7 +528,7 @@ def test_payload_cell_renders_text_not_json_for_string_payload(js_paths):
     import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
@@ -561,7 +568,7 @@ def test_bundle_privlog_renders_payload_per_record(js_paths):
     import hashlib
 
     payload = "record zero payload"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     rec0 = json.loads(json.dumps(CAPSULE_A))
     rec0["capsule_id"] = "1" * 64
     rec0["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest

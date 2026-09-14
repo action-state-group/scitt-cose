@@ -5,6 +5,17 @@ Fixtures for `[aac-viewer-recompute-capsule-id]` — the capsule_id-vs-body
 recompute check added to `CAPSULE_JS`/`BUNDLE_JS`. Generated/pinned by
 `scripts/generate_capsule_id_vectors.py`.
 
+## Format-4 regeneration
+
+The original witnessed records were format 2.  On 2026-09-14 these viewer
+fixtures were regenerated as format 4 with `canonicalization_id: "jcs"` and
+their chain links were recomputed in order.  Their IDs therefore exercise the
+canonical browser verifier, not the frozen legacy construction.  The mutated
+capsule retains the regenerated clean capsule-2 ID while its disposition stays
+altered, so it remains a negative vector.  Per the consolidation plan, these
+viewer-local duplicates are ultimately superseded by
+agent-action-capsule's canonical vectors.
+
 ## Source
 
 `capsule-1.json`, `capsule-2.json`, `capsule-3.json` are the exact, real,

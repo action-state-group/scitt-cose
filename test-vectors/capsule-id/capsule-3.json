@@ -6,9 +6,9 @@
     "effect_mode": "dispatched_unconfirmed",
     "ledger_mode": "chained"
   },
-  "capsule_id": "ff507525ececb1d1c6bdb1de7348ef7673dbe7a9d36ed5002d597ae447c6d710",
+  "capsule_id": "ee3ac49636a283a8ab8b5e51100641820ebdd59c9504939fa9eb53064ecc0582",
   "chain": {
-    "parent_capsule_id": "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd",
+    "parent_capsule_id": "6ebe48d528c2eaf997a8d633fc733f02b42d2e466f632b31427609cdc0860ffa",
     "relation": "confirms"
   },
   "developer": "invoice-agent@v1",
@@ -23,7 +23,7 @@
     "status": "dispatched",
     "type": "escalate_to_manager"
   },
-  "format_version": "2",
+  "format_version": "4",
   "model_attestation": {
     "compute_attestation": {
       "agent_input_digest": "f80b20558478bc817c343e014e93e3077f7384e7cd8e4b2c7f2cf7e27083198a",
@@ -39,5 +39,6 @@
   },
   "operator": "acme-co",
   "spec_version": "draft-mih-scitt-agent-action-capsule-02",
-  "timestamp": "2026-08-03T00:32:42.443846Z"
+  "timestamp": "2026-08-03T00:32:42.443846Z",
+  "canonicalization_id": "jcs"
 }
