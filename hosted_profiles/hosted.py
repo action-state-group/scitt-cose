@@ -674,7 +674,7 @@ function payloadCellHtml(entry,recomputedDigest){
   if(entry.withheld||entry._revPayload==null||entry.matchOk!==true)return"";
   var full=typeof entry._revPayload==="string"
     ?entry._revPayload
-    :JSON.stringify(entry._revPayload,Object.keys(entry._revPayload).sort(),2);
+    :canonicalPayloadText(entry._revPayload);
   var bytes=new TextEncoder().encode(full);
   var truncated=bytes.length>PAYLOAD_TRUNCATE_BYTES;
   var shown=truncated?new TextDecoder("utf-8").decode(bytes.slice(0,PAYLOAD_TRUNCATE_BYTES)):full;
@@ -2111,7 +2111,7 @@ function payloadCellHtml(entry,recomputedDigest){
   if(entry.withheld||entry._revPayload==null||entry.matchOk!==true)return"";
   var full=typeof entry._revPayload==="string"
     ?entry._revPayload
-    :JSON.stringify(entry._revPayload,Object.keys(entry._revPayload).sort(),2);
+    :canonicalPayloadText(entry._revPayload);
   var bytes=new TextEncoder().encode(full);
   var truncated=bytes.length>PAYLOAD_TRUNCATE_BYTES;
   var shown=truncated?new TextDecoder("utf-8").decode(bytes.slice(0,PAYLOAD_TRUNCATE_BYTES)):full;
