@@ -338,17 +338,31 @@ class ConsistencyProof:
 
 @dataclass(frozen=True)
 class RangeProof:
-    """Proves a contiguous leaf range ``[from_seq, to_seq]`` (inclusive,
-    1-indexed) belongs to the MMR of the given ``size`` -- composed from
-    inclusion proofs of the two range boundaries. See
-    :func:`verify_range_against_checkpoint`'s docstring for exactly what
-    this does and does NOT establish."""
+    """Proves per-record membership of a contiguous leaf range
+    ``[from_seq, to_seq]`` (inclusive, 1-indexed) in the MMR of the given
+    ``size``: records ``from_seq``-``to_seq`` are present, unaltered, and
+    bound to checkpoint C -- this does not show that no other records
+    exist. See :func:`verify_range_against_checkpoint`'s docstring for the
+    mechanism and exactly what this does and does NOT establish.
+
+    Byte-identical port of ``cll.checkpoint.index.RangeProof`` /
+    ``cll.checkpoint.core.RangeProof`` (checkpointed-local-log, the
+    reference): every leaf in the range participates in the hash chain
+    that rebuilds the root, via the caller's own body digests plus
+    ``witness``'s O(log size) sibling hashes, so a deleted or replaced
+    interior leaf changes the peak it falls under and is caught. This
+    replaces the earlier two-boundary-inclusion shape (a pair of
+    InclusionProofs for the endpoints only), which never touched any leaf
+    strictly between them -- an interior leaf could be deleted or replaced
+    there without the proof failing. ``from_index``/``to_index`` are the
+    0-indexed leaf positions (``from_seq - 1``/``to_seq - 1``)."""
 
     from_seq: int
     to_seq: int
     size: int
-    inclusion_from: InclusionProof
-    inclusion_to: InclusionProof
+    from_index: int
+    to_index: int
+    witness: tuple[str, ...]
 
     @classmethod
     def from_dict(cls, d: dict) -> RangeProof:
@@ -356,8 +370,9 @@ class RangeProof:
             from_seq=int(d["from_seq"]),
             to_seq=int(d["to_seq"]),
             size=int(d["size"]),
-            inclusion_from=InclusionProof.from_dict(d["inclusion_from"]),
-            inclusion_to=InclusionProof.from_dict(d["inclusion_to"]),
+            from_index=int(d["from_index"]),
+            to_index=int(d["to_index"]),
+            witness=tuple(d["witness"]),
         )
 
     def to_dict(self) -> dict:
@@ -365,8 +380,9 @@ class RangeProof:
             "from_seq": self.from_seq,
             "to_seq": self.to_seq,
             "size": self.size,
-            "inclusion_from": self.inclusion_from.to_dict(),
-            "inclusion_to": self.inclusion_to.to_dict(),
+            "from_index": self.from_index,
+            "to_index": self.to_index,
+            "witness": list(self.witness),
         }
 
 
@@ -511,35 +527,105 @@ def verify_consistency(
         return False
 
 
+def _reconstruct_range_subtree(
+    pos: int,
+    height: int,
+    leaf_start: int,
+    lo: int,
+    hi: int,
+    body_digests: dict[int, bytes],
+    witness_bytes: list[bytes],
+    cursor: list[int],
+) -> bytes:
+    """Byte-identical port of ``cll.checkpoint.core._reconstruct_range_subtree``
+    (checkpointed-local-log). Rebuilds the hash of the subtree rooted at
+    `pos` (height `height`, covering leaf indices
+    [leaf_start, leaf_start + 2**height - 1]) from `body_digests` for any
+    leaf inside [lo, hi] and one witness hash per maximal subtree wholly
+    outside [lo, hi] -- recursing into any subtree the range only partially
+    covers."""
+    leaf_end = leaf_start + (1 << height) - 1
+    if leaf_end < lo or leaf_start > hi:
+        if cursor[0] >= len(witness_bytes):
+            raise InvalidArgumentError("range proof witness exhausted")
+        w = witness_bytes[cursor[0]]
+        cursor[0] += 1
+        return w
+    if height == 0:
+        return leaf_hash(body_digests[leaf_start])
+    half = 1 << (height - 1)
+    left = _reconstruct_range_subtree(
+        pos - (1 << height), height - 1, leaf_start, lo, hi, body_digests, witness_bytes, cursor
+    )
+    right = _reconstruct_range_subtree(
+        pos - 1, height - 1, leaf_start + half, lo, hi, body_digests, witness_bytes, cursor
+    )
+    return interior_hash(left, right, pos)
+
+
 def verify_range(
     root: bytes,
     from_seq: int,
     to_seq: int,
-    from_digest: bytes,
-    to_digest: bytes,
+    body_digests: list[bytes],
     proof: RangeProof,
 ) -> bool:
-    """Pure range verification. No reader, never raises. Proves the boundary
-    leaves are genuinely bound to their claimed digests under one common,
-    peaks()-validated root; a valid MMR size is only ever a complete
-    accounting of exactly ``leaf_count(size)`` leaves, so this also certifies
-    every leaf strictly between the boundaries is structurally present.
+    """Pure range verification. No reader, never raises. Byte-identical port
+    of ``cll.checkpoint.index.verify_range`` / ``cll.checkpoint.core.
+    verify_range`` (checkpointed-local-log). Rebuilds every peak the range
+    touches from `body_digests` (one per leaf, `body_digests[i]` for seq
+    `from_seq + i`) folded with `proof`'s witness hashes -- an altered,
+    deleted, or replaced interior leaf changes the peak it falls under and
+    is caught here, unlike a two-boundary inclusion check that never looks
+    at any leaf strictly between the two endpoints.
 
     Callers wanting the honest "what this does NOT prove" caveat should use
     :func:`verify_range_against_checkpoint`, which wraps this with that
     rendering."""
     try:
+        _assert_digest(root, "root")
         if proof is None or proof.from_seq != from_seq or proof.to_seq != to_seq:
             return False
         if from_seq < 1 or to_seq < from_seq:
             return False
         if leaf_count(proof.size) != to_seq:
             return False
-        if not verify_inclusion(root, proof.size, from_seq - 1, from_digest, proof.inclusion_from):
+
+        size = proof.size
+        from_index, to_index = proof.from_index, proof.to_index
+        if from_index != from_seq - 1 or to_index != to_seq - 1:
             return False
-        if not verify_inclusion(root, proof.size, to_seq - 1, to_digest, proof.inclusion_to):
+        if not isinstance(proof.witness, (list, tuple)):
             return False
-        return True
+        if not isinstance(body_digests, (list, tuple)):
+            return False
+        if len(body_digests) != to_index - from_index + 1:
+            return False
+
+        for d in body_digests:
+            _assert_digest(d, "body_digest")
+        digest_by_index = {from_index + i: d for i, d in enumerate(body_digests)}
+
+        witness_bytes = [_parse_digest_hex(w) for w in proof.witness]
+
+        pks = peaks(size)
+        cursor = [0]
+        leaf_start = 0
+        reconstructed_peaks: list[bytes] = []
+        for p in pks:
+            h = height_at(p)
+            reconstructed_peaks.append(
+                _reconstruct_range_subtree(
+                    p, h, leaf_start, from_index, to_index, digest_by_index, witness_bytes, cursor
+                )
+            )
+            leaf_start += 1 << h
+
+        if cursor[0] != len(witness_bytes):
+            return False  # unconsumed witnesses -- malformed/oversized proof
+
+        computed_root = root_from_peaks(reconstructed_peaks)
+        return computed_root == root
     except Exception:
         return False
 
@@ -790,21 +876,25 @@ def verify_range_against_checkpoint(
     *,
     from_seq: int,
     to_seq: int,
-    from_digest: bytes,
-    to_digest: bytes,
+    body_digests: list[bytes],
     checkpoint: Checkpoint,
     proof: RangeProof,
     current_size: int | None = None,
 ) -> RangeVerification:
     """Verify that log records ``[from_seq, to_seq]`` (inclusive) are
-    genuinely, contiguously present under `checkpoint`. Never raises.
+    genuinely present and unaltered under `checkpoint`. Never raises.
 
-    Range-intact is not all-traffic: this proves the claimed range is a
-    real, unbroken slice of the checkpointed log (a scope-census of exactly
-    those records, nothing more) -- it does NOT prove no records exist
-    outside ``[from_seq, to_seq]``, that the log started at record 1, or
-    that ``to_seq`` is the log's current end. A range proof answers "is
-    this slice real and unaltered", never "is this the whole log".
+    ``body_digests`` must hold every record's body digest in the range,
+    ordered ``body_digests[i]`` == the digest for seq ``from_seq + i`` --
+    per-record membership means every one of them participates in
+    rebuilding the root, not just the two boundaries (see :func:`verify_range`).
+
+    Range-intact is not all-traffic: this proves the claimed range is
+    present, unaltered, and bound to `checkpoint` -- it does NOT prove no
+    records exist outside ``[from_seq, to_seq]``, that the log started at
+    record 1, or that ``to_seq`` is the log's current end. A range proof
+    answers "is this slice real and unaltered", never "is this the whole
+    log".
     """
     result = RangeVerification()
     try:
@@ -813,19 +903,17 @@ def verify_range_against_checkpoint(
         result.errors.append(f"checkpoint root is not valid hex: {exc}")
         return result
 
-    ok = verify_range(root, from_seq, to_seq, from_digest, to_digest, proof)
+    ok = verify_range(root, from_seq, to_seq, body_digests, proof)
     if not ok:
         result.errors.append(
             f"range proof for [{from_seq}, {to_seq}] does not verify against checkpoint "
             f"root at size {checkpoint.mmr_size}"
         )
 
-    n = to_seq - from_seq + 1
     result.scope_note = (
-        f"proves {n} of {n} claimed records in [{from_seq}, {to_seq}] are present, "
-        "contiguous, and unaltered under this checkpoint -- it does NOT prove these are "
-        "the only records the log holds, nor that no records exist outside this range "
-        "(range-intact != all-traffic)"
+        f"records {from_seq}–{to_seq} are present, unaltered, and bound to this "
+        "checkpoint -- this does not show that no other records exist (range-intact != "
+        "all-traffic)"
     )
     result.status = witness_status_line(
         checkpoint.mmr_size, checkpoint.timestamp, current_size=current_size

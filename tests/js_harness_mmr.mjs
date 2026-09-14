@@ -27,6 +27,8 @@ async function main() {
     result = await MMR.verifyInclusion(op.root, op.size, op.leaf_index, op.body_digest, op.proof);
   } else if (op.fn === "verifyConsistency") {
     result = await MMR.verifyConsistency(op.root_a, op.size_a, op.root_b, op.size_b, op.proof);
+  } else if (op.fn === "verifyRange") {
+    result = await MMR.verifyRange(op.root, op.from_seq, op.to_seq, op.body_digests, op.proof);
   } else {
     throw new Error("unknown fn: " + op.fn);
   }

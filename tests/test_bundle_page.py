@@ -337,63 +337,70 @@ def test_completeness_skip_when_certificate_absent(js_paths):
     bundle = {"records": [CAPSULE_A], "checkpoint": {"tree_size": 1}}
     got = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
     assert got["status"] == "skip"
-    assert "no completeness certificate" in got["detail"]
+    assert "no range membership certificate" in got["detail"]
+
+
+def _range_case_bundle(case: dict) -> dict:
+    """Build a bundle whose records/completeness_certificate match one
+    ``range_cases`` entry from ``range-vectors.json`` exactly -- records in
+    seq order, each ``capsule_id`` the body digest ``verify_range`` binds."""
+    records = [{"capsule_id": d, "chain": {}} for d in case["body_digests"]]
+    return {
+        "records": records,
+        "checkpoint": {"tree_size": case["size"]},
+        "completeness_certificate": {
+            "v": 1,
+            "range_proof": {
+                "from_seq": case["from_seq"], "to_seq": case["to_seq"], "size": case["size"],
+                "from_index": case["proof"]["from_index"], "to_index": case["proof"]["to_index"],
+                "witness": case["proof"]["witness"],
+            },
+            "range_root": case["root"],
+            "checkpoint_size": case["size"],
+            "checkpoint_root": case["root"],
+            "consistency_proof": None,
+        },
+    }
 
 
 @pytestmark_node
 def test_completeness_pass_with_genuine_certificate(js_paths):
-    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "proof-vectors.json").read_text())
-    c0, c1 = vectors["inclusion_cases"][0], vectors["inclusion_cases"][-1]
-    records = [
-        {"capsule_id": c0["body_digest"], "chain": {}},
-        {"capsule_id": c1["body_digest"], "chain": {}},
-    ]
-    bundle = {
-        "records": records,
-        "checkpoint": {"tree_size": vectors["full_size"]},
-        "completeness_certificate": {
-            "v": 1,
-            "range_proof": {
-                "from_seq": 1, "to_seq": 2, "size": vectors["full_size"],
-                "inclusion_from": c0["proof"], "inclusion_to": c1["proof"],
-            },
-            "range_root": vectors["full_root"],
-            "checkpoint_size": vectors["full_size"],
-            "checkpoint_root": vectors["full_root"],
-            "consistency_proof": None,
-        },
-    }
+    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "range-vectors.json").read_text())
+    case = next(c for c in vectors["range_cases"] if c["name"] == "three-leaf")
+    bundle = _range_case_bundle(case)
     got = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
     assert got["status"] == "pass", got
+    assert "records 3–5" in got["detail"]
+    assert "are present, unaltered, and bound to checkpoint" in got["detail"]
+    assert "this does not show that no other records exist" in got["detail"]
 
 
 @pytestmark_node
 def test_completeness_fails_on_corrupted_certificate_byte(js_paths):
-    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "proof-vectors.json").read_text())
-    c0, c1 = vectors["inclusion_cases"][0], vectors["inclusion_cases"][-1]
-    records = [
-        {"capsule_id": c0["body_digest"], "chain": {}},
-        {"capsule_id": c1["body_digest"], "chain": {}},
-    ]
-    tampered_proof = json.loads(json.dumps(c0["proof"]))
-    b = bytearray(bytes.fromhex(tampered_proof["witness"][0]))
+    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "range-vectors.json").read_text())
+    case = json.loads(json.dumps(next(c for c in vectors["range_cases"] if c["name"] == "three-leaf")))
+    b = bytearray(bytes.fromhex(case["proof"]["witness"][0]))
     b[0] ^= 0xFF
-    tampered_proof["witness"][0] = b.hex()
-    bundle = {
-        "records": records,
-        "checkpoint": {"tree_size": vectors["full_size"]},
-        "completeness_certificate": {
-            "v": 1,
-            "range_proof": {
-                "from_seq": 1, "to_seq": 2, "size": vectors["full_size"],
-                "inclusion_from": tampered_proof, "inclusion_to": c1["proof"],
-            },
-            "range_root": vectors["full_root"],
-            "checkpoint_size": vectors["full_size"],
-            "checkpoint_root": vectors["full_root"],
-            "consistency_proof": None,
-        },
+    case["proof"]["witness"][0] = b.hex()
+    bundle = _range_case_bundle(case)
+    got = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "fail", got
+
+
+@pytestmark_node
+def test_completeness_fails_on_replaced_interior_record(js_paths):
+    """The bug this proof shape closes: a record strictly between the two
+    endpoints is swapped for a different digest. The old two-boundary proof
+    never looked at this leaf and would have verified anyway."""
+    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "range-vectors.json").read_text())
+    negative = next(
+        c for c in vectors["negative_range_cases"] if c["label"] == "replaced-interior-record"
+    )
+    case = {
+        "from_seq": negative["from_seq"], "to_seq": negative["to_seq"], "size": negative["size"],
+        "root": negative["root"], "body_digests": negative["body_digests"], "proof": negative["proof"],
     }
+    bundle = _range_case_bundle(case)
     got = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
     assert got["status"] == "fail", got
 

@@ -64,6 +64,11 @@ def proof_vectors():
     return json.loads((VECTORS / "proof-vectors.json").read_text())
 
 
+@pytest.fixture(scope="module")
+def range_vectors():
+    return json.loads((VECTORS / "range-vectors.json").read_text())
+
+
 # -- KAT39: byte-identical low-level hash primitives -------------------------
 
 
@@ -229,6 +234,49 @@ def test_js_verify_consistency_rejects_every_negative_case(mmr_js_path, proof_ve
         })
         assert got is False, (
             f"negative case '{case.get('label', '?')}' was accepted — verifier should have rejected it"
+        )
+
+
+# -- self-generated range vectors: verifyRange --------------------------------
+
+
+def _wire_range_proof(case: dict) -> dict:
+    """``range_cases``/``negative_range_cases`` entries nest the 0-indexed
+    ``core.RangeProof`` (``v``/``kind``/``size``/``from_index``/``to_index``/
+    ``witness``) under ``proof`` alongside a seq-indexed ``from_seq``/
+    ``to_seq`` at the case's top level -- flatten to the wire shape
+    ``verifyRange`` (and ``scitt_cose.cll.RangeProof``) actually consumes."""
+    p = case["proof"]
+    return {
+        "from_seq": case["from_seq"], "to_seq": case["to_seq"], "size": p["size"],
+        "from_index": p["from_index"], "to_index": p["to_index"], "witness": p["witness"],
+    }
+
+
+def test_js_verify_range_accepts_every_genuine_case(mmr_js_path, range_vectors):
+    for case in range_vectors["range_cases"]:
+        got = _run_js(mmr_js_path, {
+            "fn": "verifyRange",
+            "root": case["root"], "from_seq": case["from_seq"], "to_seq": case["to_seq"],
+            "body_digests": case["body_digests"], "proof": _wire_range_proof(case),
+        })
+        assert got is True, f"range case {case['name']!r} should verify"
+
+
+def test_js_verify_range_rejects_every_negative_case(mmr_js_path, range_vectors):
+    """Every case in negative_range_cases must be rejected -- these are the
+    bug class a two-boundary-inclusion range proof could never catch
+    (replaced/deleted interior record, sparse selection, mismatched root)."""
+    neg_cases = range_vectors["negative_range_cases"]
+    assert neg_cases
+    for case in neg_cases:
+        got = _run_js(mmr_js_path, {
+            "fn": "verifyRange",
+            "root": case["root"], "from_seq": case["from_seq"], "to_seq": case["to_seq"],
+            "body_digests": case["body_digests"], "proof": _wire_range_proof(case),
+        })
+        assert got is False, (
+            f"negative case {case['label']!r} was accepted — verifier should have rejected it"
         )
 
 
