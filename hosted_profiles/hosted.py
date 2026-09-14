@@ -2039,6 +2039,12 @@ if(typeof globalThis !== "undefined"){ globalThis.MMR = MMR; }
 #: _CAPSULE_CSS's .ritual-stages/.records-table/.pltable/.anchor-banner
 #: classes (same visual language as the single-capsule verify page).
 _BUNDLE_CSS = """
+.records-tree,.records-tree ul{list-style:none;margin:0;padding-left:0}
+.records-tree ul{margin-left:10px;border-left:1px solid var(--line);padding-left:14px}
+.records-tree li{margin:4px 0;line-height:1.7}
+.rt-kind{font-size:10px;font-weight:700;text-transform:uppercase;padding:1px 6px;border-radius:5px;margin-right:6px}
+.rt-aggregate{background:#ece3ff;color:#6b3fd0}.rt-report{background:#dff0ff;color:#1e6fb0}.rt-interaction{background:#eef0f4;color:#555}.rt-missing{background:#fbeecb;color:#8a6d1a}
+.rt-at{color:var(--muted);font-size:12px}.rt-note{font-size:12px}.rt-cycle,.rt-missing{color:var(--muted);font-style:italic}
 .share-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
 .share-row .mono{font-size:11.5px;color:var(--muted);word-break:break-all}
 .share-row .btnrow{display:flex;gap:10px;flex-shrink:0}
@@ -2622,26 +2628,49 @@ function renderPrivlog(rows){
   // digest pass here; the table above already reflects the real verdict.
 }
 
-function renderRecordsTable(records,integrity){
+function renderRecordsTable(records,integrity,bundle){
   var el=$("recordsTableContent");if(!el)return;
   var notes=annotateRecords(records,integrity);
-  var gaps=findChainGaps(records),gapAt={};
-  gaps.forEach(function(g){gapAt[g.afterIdx]=g;});
-  var h="<table class='records-table'><thead><tr><th>#</th><th>capsule_id</th><th>action_type</th><th>note</th></tr></thead><tbody>";
+  // Render the records as a PROVENANCE TREE from the bundle root, following each
+  // record's references[] (acted_on) and chain parent, rather than a flat list.
+  var byId={},noteFor={};
   records.forEach(function(cap,i){
-    if(gapAt[i]){
-      var gp=gapAt[i];
-      h+="<tr class='rec-row rec-gap'><td>—</td><td colspan='2'>gap — missing parent <code>"+safe(gp.missingParent.slice(0,8))+"…</code></td><td>⌗ chain_gap</td></tr>";
-    }
+    byId[cap.capsule_id]=cap;
     var n=notes[i];
-    var noteText=n.note==="digest_mismatch"?"✕ digest_mismatch":
+    noteFor[cap.capsule_id]=n.note==="digest_mismatch"?"✕ digest_mismatch":
       n.note==="cites an altered record"?"✓ verifies · cites an altered record":"✓ verifies";
-    h+="<tr class='rec-row"+(n.isAltered?" rec-altered":(n.citesAltered?" rec-flagged":""))+"'>"+
-      "<td>"+(i+1)+"</td><td><code>"+safe((cap.capsule_id||"").slice(0,16))+"…</code></td>"+
-      "<td><code>"+safe(cap.action_type||"")+"</code></td><td>"+noteText+"</td></tr>";
   });
-  h+="</tbody></table>";
-  el.innerHTML=h;
+  var disc=(bundle&&bundle.disclosures)||{};
+  function kindOf(id){
+    var ai=(disc[id]||{}).agent_input,sv=(ai&&ai.spec_version)||"";
+    return sv.indexOf("evaluation-summary")===0?"aggregate":sv.indexOf("evaluation-report")===0?"report":byId[id]?"interaction":"missing";
+  }
+  function children(id){
+    var c=byId[id];if(!c)return [];var kids=[];
+    (c.references||[]).forEach(function(r){if(r&&r.digest&&r.type==="agent-action-capsule")kids.push(r.digest);});
+    if(c.chain&&c.chain.parent_capsule_id)kids.push(c.chain.parent_capsule_id);
+    return kids;
+  }
+  function node(id,seen){
+    var cap=byId[id],k=kindOf(id);
+    var label="<span class='rt-kind rt-"+k+"'>"+k+"</span> <code>"+safe(id.slice(0,16))+"…</code>";
+    if(cap)label+=" <span class='rt-at'>"+safe(cap.action_type||"")+"</span> <span class='rt-note'>"+(noteFor[id]||"")+"</span>";
+    else label+=" <span class='rt-missing'>declared missing</span>";
+    if(seen[id])return "<li>"+label+" <span class='rt-cycle'>(shown above)</span></li>";
+    seen[id]=true;
+    var kids=cap?children(id):[],h="<li>"+label;
+    if(kids.length){h+="<ul>";kids.forEach(function(c){h+=node(c,seen);});h+="</ul>";}
+    return h+"</li>";
+  }
+  var root=bundle&&bundle.root;
+  if(root&&byId[root]){
+    el.innerHTML="<ul class='records-tree'>"+node(root,{})+"</ul>";
+  }else{
+    // no resolvable root (e.g. a flat slice): fall back to a simple list
+    el.innerHTML="<ul class='records-tree'>"+records.map(function(cap,i){
+      return "<li><code>"+safe((cap.capsule_id||"").slice(0,16))+"…</code> <span class='rt-at'>"+safe(cap.action_type||"")+"</span> <span class='rt-note'>"+(noteFor[cap.capsule_id]||"")+"</span></li>";
+    }).join("")+"</ul>";
+  }
 }
 
 function renderRitual(summary){
@@ -2705,7 +2734,7 @@ async function loadBundle(data,fragmentB64u){
 
   var privlog=await buildBundlePrivlog(records,data.disclosures);
   renderPrivlog(privlog);
-  renderRecordsTable(records,integrity);
+  renderRecordsTable(records,integrity,data);
 
   var completeness=await checkCompleteness(data);
   renderCompletenessCard(completeness);
