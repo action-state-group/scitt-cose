@@ -660,8 +660,11 @@ function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").rep
  * the digest recompute; see test_bundle_js_shared_helpers_match_capsule_js). The
  * bytes hashed against the committed digest and the bytes shown to the reader MUST
  * come from the same function -- a display that re-serializes by a different rule
- * than JSON.stringify(p, Object.keys(p).sort()) could show content that doesn't
- * match what was actually verified. */
+ * than the RFC 8785 JCS canonicalization canonicalPayloadText uses could show
+ * content that doesn't match what was actually verified. In particular a
+ * `JSON.stringify(p, Object.keys(p).sort())` key-allow-list replacer drops every
+ * nested-object key (rendering nested objects as `{}`); that is the bug this
+ * helper replaced, not the rule to restore. */
 var PAYLOAD_TRUNCATE_BYTES=8192;
 function canonicalPayloadText(payload){
   return AacCrypto.canonicalPayloadText(payload);
@@ -2103,8 +2106,11 @@ function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").rep
  * the digest recompute; see test_bundle_js_shared_helpers_match_capsule_js). The
  * bytes hashed against the committed digest and the bytes shown to the reader MUST
  * come from the same function -- a display that re-serializes by a different rule
- * than JSON.stringify(p, Object.keys(p).sort()) could show content that doesn't
- * match what was actually verified. */
+ * than the RFC 8785 JCS canonicalization canonicalPayloadText uses could show
+ * content that doesn't match what was actually verified. In particular a
+ * `JSON.stringify(p, Object.keys(p).sort())` key-allow-list replacer drops every
+ * nested-object key (rendering nested objects as `{}`); that is the bug this
+ * helper replaced, not the rule to restore. */
 var PAYLOAD_TRUNCATE_BYTES=8192;
 function canonicalPayloadText(payload){
   return AacCrypto.canonicalPayloadText(payload);

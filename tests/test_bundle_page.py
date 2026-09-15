@@ -613,12 +613,17 @@ def test_oversized_payload_truncates_with_note(js_paths):
 def test_canonicalization_shared_with_digest_path(js_paths):
     """The exact bytes canonicalPayloadText produces for display must be the
     exact bytes verifyCapsuleDigests hashed -- one helper, not two rules that
-    could silently diverge."""
+    could silently diverge. The nested object below is the regression guard: a
+    `JSON.stringify(p, Object.keys(p).sort())` key-allow-list replacer (the bug
+    the JCS helper replaced) renders every nested object as `{}`, so it would not
+    equal the full JCS bytes and this assertion would fail."""
     import hashlib
 
-    payload = {"z": [3, 2, 1], "a": "first"}
+    payload = {"z": [3, 2, 1], "a": "first", "per_axis": {"policy": {"pass": True, "note": "kept"}}}
     canon_from_js = _run_js(js_paths, {"fn": "canonicalPayloadText", "payload": payload})
     assert canon_from_js == json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    # the nested keys must survive canonicalization, not collapse to {}
+    assert '"policy":{"note":"kept","pass":true}' in canon_from_js
 
     digest = hashlib.sha256(canon_from_js.encode()).hexdigest()
     cap = json.loads(json.dumps(CAPSULE_A))
