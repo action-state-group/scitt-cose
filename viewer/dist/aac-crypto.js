@@ -1607,7 +1607,7 @@
     init_token();
   });
 
-  // node_modules/@action-state-group/cll/dist/chunk-MN3HRA2Y.js
+  // node_modules/@action-state-group/cll/dist/chunk-X37KTVJ5.js
   function shape(leaves) {
     const meta = [], peaks = [], positions = [];
     for (let i = 0;i < leaves; i += 1) {
@@ -1760,7 +1760,7 @@
     }
     if (leafStart >= lo && leafEnd <= hi)
       return;
-    const half = span >> 1;
+    const half = 2 ** (height - 1);
     rangeWitnesses(nodes, pos - span, height - 1, leafStart, lo, hi, out);
     rangeWitnesses(nodes, pos - 1, height - 1, leafStart + half, lo, hi, out);
   }
@@ -1792,7 +1792,7 @@
         return false;
       if (proof.size !== Number(size) || proof.from_index !== Number(fromIndex) || proof.to_index !== Number(toIndex))
         return false;
-      if (size < 0n || fromIndex < 0n || toIndex < fromIndex)
+      if (size < 0n || size >= 2n ** 50n || fromIndex < 0n || toIndex < fromIndex)
         return false;
       if (!Array.isArray(proof.witness) || !Array.isArray(bodyDigests))
         return false;
@@ -1822,7 +1822,7 @@
         }
         if (height === 0)
           return hash(Uint8Array.of(0), bodyDigests[leafStart2 - lo]);
-        const half = span >> 1, left = await reconstruct(pos - span, height - 1, leafStart2), right = await reconstruct(pos - 1, height - 1, leafStart2 + half);
+        const half = 2 ** (height - 1), left = await reconstruct(pos - span, height - 1, leafStart2), right = await reconstruct(pos - 1, height - 1, leafStart2 + half);
         return parent(hash, left, right, pos);
       };
       const reconstructedPeaks = [];
@@ -1952,7 +1952,7 @@
       };
     }
   };
-  var init_chunk_MN3HRA2Y = __esm(() => {
+  var init_chunk_X37KTVJ5 = __esm(() => {
     init_cborg();
   });
 
@@ -1981,7 +1981,7 @@
     return value;
   }, hash = async (...parts) => new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", join(...parts))), MmrTree2, rootFromPeaks2 = (peaks) => rootFromPeaks(hash, peaks), verifyInclusionValue2 = (root, size, leafIndex, value, proof) => verifyInclusionValue(hash, root, size, leafIndex, value, proof), verifyHexInclusion2 = (root, size, leafIndex, identity, proof) => verifyHexInclusion(hash, root, size, leafIndex, identity, proof), verifyConsistency2 = (oldRoot, newRoot, proof) => verifyConsistency(hash, oldRoot, newRoot, proof), verifyRange2 = (root, size, fromIndex, toIndex, bodyDigests, proof) => verifyRange(hash, root, size, fromIndex, toIndex, bodyDigests, proof);
   var init_browser = __esm(() => {
-    init_chunk_MN3HRA2Y();
+    init_chunk_X37KTVJ5();
     MmrTree2 = class extends MmrTree {
       constructor(nodes = []) {
         super(hash, nodes);
@@ -2770,8 +2770,9 @@
     };
   }
   async function rangeValid(root, first, last, certificate, proof) {
+    const leaves = leafCount(BigInt(proof.size));
     const raw = certificate.body_digests;
-    if (proof.fromSeq !== first || proof.toSeq !== last || proof.fromIndex !== first - 1 || proof.toIndex !== last - 1 || !Array.isArray(raw) || raw.length !== last - first + 1 || !raw.every(isHex64))
+    if (leaves === undefined || leaves !== BigInt(last) || proof.fromSeq !== first || proof.toSeq !== last || proof.fromIndex !== first - 1 || proof.toIndex !== last - 1 || !Array.isArray(raw) || raw.length !== last - first + 1 || !raw.every(isHex64))
       return false;
     return verifyRange2(root, BigInt(proof.size), BigInt(proof.fromIndex), BigInt(proof.toIndex), raw.map(hex2), proof.proof);
   }
