@@ -7,6 +7,6 @@
     "check": "npm run build && ! rg -q 'node:' dist/aac-crypto.js"
   },
   "dependencies": {
-    "@action-state-group/agent-action-capsule": "file:vendor/agent-action-capsule-4c6c6ec.tgz"
+    "@action-state-group/agent-action-capsule": "file:vendor/agent-action-capsule-af14f41.tgz"
   }
 }
