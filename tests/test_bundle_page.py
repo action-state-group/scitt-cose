@@ -298,7 +298,6 @@ def test_withheld_field_renders_as_provable_commitment_never_absent(js_paths):
 
 @pytestmark_node
 def test_revealed_field_recomputes_and_matches(js_paths):
-    import hashlib
 
     payload = "hello agent input"
     digest = _jcs_digest(payload)
@@ -313,7 +312,6 @@ def test_revealed_field_recomputes_and_matches(js_paths):
 
 @pytestmark_node
 def test_verify_capsule_digests_confirms_a_genuine_match(js_paths):
-    import hashlib
 
     payload = "hello agent input"
     digest = _jcs_digest(payload)
@@ -470,7 +468,6 @@ def test_ritual_integrity_stage_passes_on_genuine_records(js_paths):
 def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
     """Disclosure Envelope acceptance: capsule_id is identical across
     withheld/match/mismatch — a disclosure never touches the anchored bytes."""
-    import hashlib
 
     payload = "hello agent input"
     digest = _jcs_digest(payload)
@@ -505,7 +502,6 @@ def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
 
 @pytestmark_node
 def test_payload_cell_renders_on_genuine_match(js_paths):
-    import hashlib
 
     payload = {"b": 2, "a": 1}
     digest = _jcs_digest(payload)
@@ -517,7 +513,12 @@ def test_payload_cell_renders_on_genuine_match(js_paths):
 
     html = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": entry, "recomputedDigest": entry["_recomputedDigest"]})
     assert "<details" in html
-    assert '"a": 1' in html and '"b": 2' in html  # pretty-printed, sorted keys
+    # The payload cell renders the canonical JCS bytes (compact, sorted keys) —
+    # the exact preimage the committed digest is computed over — via
+    # canonicalPayloadText, not a re-pretty-printed copy. This is the
+    # nested-safe form the DE-3 fix routed through (a spaced pretty-print used a
+    # replacer array that dropped nested keys).
+    assert '{"a":1,"b":2}' in html  # canonical JCS, sorted keys, no spaces
     assert f"committed <code>{digest}</code>" in html
     assert f"recomputed <code>{entry['_recomputedDigest']}</code>" in html
     assert "truncated" not in html
@@ -525,7 +526,6 @@ def test_payload_cell_renders_on_genuine_match(js_paths):
 
 @pytestmark_node
 def test_payload_cell_renders_text_not_json_for_string_payload(js_paths):
-    import hashlib
 
     payload = "hello agent input"
     digest = _jcs_digest(payload)
@@ -565,7 +565,6 @@ def test_payload_cell_renders_nothing_when_withheld(js_paths):
 def test_bundle_privlog_renders_payload_per_record(js_paths):
     """Bundle path: one record with a genuine match, one withheld — each
     record's row must reflect its own reveal state independently."""
-    import hashlib
 
     payload = "record zero payload"
     digest = _jcs_digest(payload)
