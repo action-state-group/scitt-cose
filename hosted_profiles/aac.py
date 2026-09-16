@@ -426,14 +426,56 @@ def _check_authenticity(capsules: list[dict]) -> RitualStage:
     return RitualStage("Authenticity", "skip", AUTHENTICITY_SELF_ASSERTED_DETAIL)
 
 
+#: RECEIPT grade (register row 5) -> its rendered word — words, not codes,
+#: for this ritual's detail text. A grade absent from this map (unknown
+#: value, or the witness didn't supply one) renders as "ungraded", never
+#: silently as either known grade. Kept in sync with the identical map in
+#: ``capsule_emit.witness``/``capsule_emit_mesh.history_card`` — this file
+#: is the AAC-profile renderer, not the neutral ``scitt_cose`` package (see
+#: this module's docstring), so it is allowed to know this vocabulary; the
+#: neutral package itself never names or interprets label -65537.
+_RECEIPT_GRADE_WORDS = {
+    "mmr-verified": "consistency-verified",
+    "countersigned-observed": "existence-and-time",
+}
+
+
+def _witness_grade_words(receipt_grades: dict[str, str | None] | None) -> str:
+    """`", " + "` a per-witness grade-words clause (e.g. `": consistency-
+    verified (anchor.example), existence-and-time (rekor.example)"`), or
+    `""` when no grade data was supplied. A `held` witness count with no
+    grade words attached is NOT read as consistency-verified — it is read
+    as exactly what it says, a count -- see :func:`_check_witness`."""
+    if not receipt_grades:
+        return ""
+    from urllib.parse import urlsplit
+
+    parts = []
+    for ts_url in sorted(receipt_grades):
+        grade = receipt_grades[ts_url]
+        word = _RECEIPT_GRADE_WORDS.get(grade, "ungraded")
+        host = urlsplit(ts_url).hostname or ts_url
+        parts.append(f"{word} ({host})")
+    return ": " + ", ".join(parts)
+
+
 def _check_witness(witness: dict | None) -> RitualStage:
     """Report declared witness state — never disproven by absence or timeout.
 
     ``witness`` shape: ``{"held": int, "configured": int, "reachable": bool,
-    "verified": bool | None}``. Absent → "skip" (no witness data provided).
-    Unreachable → "skip" ("unreachable is never rendered as disproven").
-    An explicit ``verified: False`` (a fetched receipt that failed its
-    inclusion-proof check) is the one real "fail" path.
+    "verified": bool | None, "receipt_grades": {ts_url: str | None} | None}``.
+    Absent → "skip" (no witness data provided). Unreachable → "skip"
+    ("unreachable is never rendered as disproven"). An explicit
+    ``verified: False`` (a fetched receipt that failed its inclusion-proof
+    check) is the one real "fail" path.
+
+    ``receipt_grades``, when supplied, is each held witness's OWN receipt
+    grade (register row 5) — appended in WORDS, never codes (see
+    :func:`_witness_grade_words`). This is the per-witness fact beside the
+    held/configured COUNT above; a count alone never implies consistency
+    was checked, and a checkpoint whose only receipt grades
+    ``countersigned-observed`` must never read as consistency-verified just
+    because it is held.
     """
     if witness is None:
         return RitualStage("Witness", "skip", "no witness data provided")
@@ -447,11 +489,12 @@ def _check_witness(witness: dict | None) -> RitualStage:
         )
     held = witness.get("held", 0)
     configured = witness.get("configured") or held or 1
+    grade_words = _witness_grade_words(witness.get("receipt_grades"))
     if held < configured:
         return RitualStage(
-            "Witness", "skip", f"witnessed {held} of {configured} · retrying — rung held"
+            "Witness", "skip", f"witnessed {held} of {configured} · retrying — rung held{grade_words}"
         )
-    return RitualStage("Witness", "pass", f"witnessed {held} of {configured}")
+    return RitualStage("Witness", "pass", f"witnessed {held} of {configured}{grade_words}")
 
 
 def evaluate_ritual(

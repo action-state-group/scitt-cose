@@ -1144,6 +1144,27 @@ async function checkAuthenticity(capsules){
     detail:"signature verifies against a key supplied with the record — this shows the bytes are unaltered since signing, not who signed them"};
 }
 
+/* RECEIPT grade (register row 5) -> its rendered word -- words, not codes,
+ * for checkWitness's detail text. A grade this map doesn't recognize (or a
+ * witness that supplied none) renders "ungraded", never silently coerced
+ * into either real grade word. Mirrors hosted_profiles/aac.py's
+ * _RECEIPT_GRADE_WORDS -- keep both in sync. */
+var RECEIPT_GRADE_WORDS={"mmr-verified":"consistency-verified","countersigned-observed":"existence-and-time"};
+
+function witnessGradeWords(receiptGrades){
+  if(!receiptGrades)return"";
+  var urls=Object.keys(receiptGrades).sort();
+  if(!urls.length)return"";
+  var parts=urls.map(function(u){
+    var grade=receiptGrades[u];
+    var word=RECEIPT_GRADE_WORDS[grade]||"ungraded";
+    var host=u;
+    try{host=new URL(u).hostname||u;}catch(ex){}
+    return word+" ("+host+")";
+  });
+  return": "+parts.join(", ");
+}
+
 function checkWitness(w,total){
   /* `total` is the number of records in this bundle. The anchor-status call
    * checks only the FOCAL capsule (the one named in the URL path), so
@@ -1157,12 +1178,13 @@ function checkWitness(w,total){
   var held=w.held||0;
   var checked=w.configured||0;
   var n=(typeof total==="number"&&total>0)?total:(checked||1);
+  var gradeWords=witnessGradeWords(w.receipt_grades);
   if(checked<n){
     return{status:"skip",
       detail:"witnessed "+held+" of "+n+" — only "+checked+" record"+(checked===1?"":"s")+" in this bundle "+(checked===1?"was":"were")+" checked against the log; the rest are unchecked, not unwitnessed"};
   }
-  if(held<n)return{status:"skip",detail:"witnessed "+held+" of "+n+" · retrying — rung held"};
-  return{status:"pass",detail:"witnessed "+held+" of "+n};
+  if(held<n)return{status:"skip",detail:"witnessed "+held+" of "+n+" · retrying — rung held"+gradeWords};
+  return{status:"pass",detail:"witnessed "+held+" of "+n+gradeWords};
 }
 
 
