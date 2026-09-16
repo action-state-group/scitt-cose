@@ -118,7 +118,7 @@ def test_tampered_capsule_fails_closed(js_paths):
     finding: a denial silently reading as an approval."""
     got = _run_js(js_paths, {"fn": "verifyCapsuleId", "capsule": _load_capsule("capsule-2-tampered")})
     assert got["ok"] is False
-    assert got["stated"] == "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd"
+    assert got["stated"] == "6ebe48d528c2eaf997a8d633fc733f02b42d2e466f632b31427609cdc0860ffa"
     assert got["recomputed"] != got["stated"]
 
 
@@ -194,7 +194,7 @@ def test_bundle_ritual_integrity_fails_with_stated_vs_recomputed_in_the_finding(
     integrity_stage = next(s for s in summary["stages"] if s["name"] == "Integrity")
     assert integrity_stage["status"] == "fail"
     assert summary["finding"] is not None
-    stated = "08bec0383378c13cc8046964b3d4ffb8ebca2c573f3b26305f026bed0aa8b4cd"
+    stated = "6ebe48d528c2eaf997a8d633fc733f02b42d2e466f632b31427609cdc0860ffa"
     assert stated in summary["finding"]["meta"]
     assert stated not in summary["finding"]["meta"].split("recomputed")[-1]  # recomputed id differs
     # Sequence must still pass -- chain.parent_capsule_id is unchanged by the tamper

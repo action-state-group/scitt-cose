@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 from typing import Any
 
 from scitt_cose._status import DRAFT_TRACKING_NOTICE
@@ -557,6 +558,13 @@ _CAPSULE_CSS = """
 .reg-prop{font-family:var(--mono);font-size:11px;background:var(--paper-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;white-space:nowrap;display:inline-block;margin-bottom:2px}
 """
 
+#: Browser bundle built from viewer/vendor/agent-action-capsule-4c6c6ec.tgz.
+#: It is loaded before either presentation controller so their crypto calls
+#: share the canonical TypeScript implementation.
+AAC_CRYPTO_JS = (Path(__file__).resolve().parent.parent / "viewer" / "dist" / "aac-crypto.js").read_text(
+    encoding="utf-8"
+)
+
 #: JS for the capsule verification page (served at /static/capsule.js).
 CAPSULE_JS = r"""
 /* Agent Action Capsule — P1 verification surface client.
@@ -589,73 +597,8 @@ var KNOWN_TYPES={"capsule":1,"offer_terms":1,"wicket_manifest":1,"response":1,
  * everything after the _MM_RENDER_JS splice below is a NON-raw Python
  * string, which silently halves literal backslashes. Do not move this block
  * past that splice point. */
-var CHAIN_LINKAGE_FIELDS={"capsule_id":1,"chain":1};
-
-function CapsuleIdError(msg){this.message=msg;this.name="CapsuleIdError";}
-
-function _capIdNormalize(v){
-  if(Array.isArray(v))return v.map(_capIdNormalize);
-  if(v&&typeof v==="object"){
-    var out={};
-    Object.keys(v).forEach(function(k){
-      var nv=_capIdNormalize(v[k]);
-      if(nv===null||nv===undefined)return;
-      if(Array.isArray(nv)&&nv.length===0)return;
-      if(nv&&typeof nv==="object"&&!Array.isArray(nv)&&Object.keys(nv).length===0)return;
-      out[k]=nv;
-    });
-    return out;
-  }
-  return v;
-}
-
-function _capIdJcsString(s){
-  var out=['"'];
-  for(var ch of s){
-    var o=ch.codePointAt(0);
-    if(ch==='"')out.push('\\"');
-    else if(ch==="\\")out.push("\\\\");
-    else if(o===0x08)out.push("\\b");
-    else if(o===0x09)out.push("\\t");
-    else if(o===0x0A)out.push("\\n");
-    else if(o===0x0C)out.push("\\f");
-    else if(o===0x0D)out.push("\\r");
-    else if(o<0x20)out.push("\\u"+o.toString(16).padStart(4,"0"));
-    else out.push(ch);
-  }
-  out.push('"');
-  return out.join("");
-}
-
-function _capIdJcsValue(v){
-  if(v===null||v===undefined)return"null";
-  if(v===true)return"true";
-  if(v===false)return"false";
-  if(typeof v==="string")return _capIdJcsString(v);
-  if(typeof v==="number"){
-    if(!Number.isInteger(v))throw new CapsuleIdError("float in digest-bearing field");
-    if(v>Number.MAX_SAFE_INTEGER||v<-Number.MAX_SAFE_INTEGER)throw new CapsuleIdError("integer outside safe range");
-    return String(v);
-  }
-  if(Array.isArray(v))return"["+v.map(_capIdJcsValue).join(",")+"]";
-  if(typeof v==="object"){
-    var keys=Object.keys(v).sort();
-    return"{"+keys.map(function(k){return _capIdJcsString(k)+":"+_capIdJcsValue(v[k]);}).join(",")+"}";
-  }
-  throw new CapsuleIdError("value not JSON-serializable: "+typeof v);
-}
-
-async function _capIdSha256Hex(bytes){
-  var buf=await crypto.subtle.digest("SHA-256",bytes);
-  return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
-}
-
 async function computeCapsuleId(capsule){
-  if(!capsule||typeof capsule!=="object"||Array.isArray(capsule))throw new CapsuleIdError("capsule must be a JSON object");
-  var canonical={};
-  Object.keys(capsule).forEach(function(k){if(!CHAIN_LINKAGE_FIELDS[k])canonical[k]=capsule[k];});
-  var jcsStr=_capIdJcsValue(_capIdNormalize(canonical));
-  return await _capIdSha256Hex(new TextEncoder().encode(jcsStr));
+  return await AacCrypto.computeCapsuleId(capsule);
 }
 
 async function verifyCapsuleId(cap){
@@ -664,8 +607,9 @@ async function verifyCapsuleId(cap){
   if(!isH64(stated))return{ok:null,stated:stated,recomputed:null};
   if(typeof crypto==="undefined"||!crypto.subtle)return{ok:null,stated:stated,recomputed:null};
   try{
+    var class1=await AacCrypto.verifyClass1(c);
     var recomputed=await computeCapsuleId(c);
-    return{ok:recomputed===stated,stated:stated,recomputed:recomputed};
+    return{ok:class1.ok&&recomputed===stated,stated:stated,recomputed:recomputed};
   }catch(ex){
     return{ok:false,stated:stated,recomputed:null,error:ex.message};
   }
@@ -716,11 +660,14 @@ function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").rep
  * the digest recompute; see test_bundle_js_shared_helpers_match_capsule_js). The
  * bytes hashed against the committed digest and the bytes shown to the reader MUST
  * come from the same function -- a display that re-serializes by a different rule
- * than JSON.stringify(p, Object.keys(p).sort()) could show content that doesn't
- * match what was actually verified. */
+ * than the RFC 8785 JCS canonicalization canonicalPayloadText uses could show
+ * content that doesn't match what was actually verified. In particular a
+ * `JSON.stringify(p, Object.keys(p).sort())` key-allow-list replacer drops every
+ * nested-object key (rendering nested objects as `{}`); that is the bug this
+ * helper replaced, not the rule to restore. */
 var PAYLOAD_TRUNCATE_BYTES=8192;
 function canonicalPayloadText(payload){
-  return typeof payload==="string"?payload:JSON.stringify(payload,Object.keys(payload).sort());
+  return AacCrypto.canonicalPayloadText(payload);
 }
 function payloadPreview(payload){
   var t=canonicalPayloadText(payload);
@@ -730,7 +677,7 @@ function payloadCellHtml(entry,recomputedDigest){
   if(entry.withheld||entry._revPayload==null||entry.matchOk!==true)return"";
   var full=typeof entry._revPayload==="string"
     ?entry._revPayload
-    :JSON.stringify(entry._revPayload,Object.keys(entry._revPayload).sort(),2);
+    :canonicalPayloadText(entry._revPayload);
   var bytes=new TextEncoder().encode(full);
   var truncated=bytes.length>PAYLOAD_TRUNCATE_BYTES;
   var shown=truncated?new TextDecoder("utf-8").decode(bytes.slice(0,PAYLOAD_TRUNCATE_BYTES)):full;
@@ -884,10 +831,8 @@ function renderPrivlog(g){
    * (not just a local var) so the payload cell can gate on it once resolved. */
   if(crypto&&crypto.subtle){
     g.privlog.forEach(function(e){
-      if(!e._revPayload||e.withheld)return;
-      var _bytes=new TextEncoder().encode(canonicalPayloadText(e._revPayload));
-      crypto.subtle.digest("SHA-256",_bytes).then(function(buf){
-        var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
+      if(!e._revPayload||e.withheld||e._de3)return;
+      AacCrypto.jsonDigest(e._revPayload).then(function(hex){
         e.matchOk=(hex===e.digest);
         var row=el.querySelector("tr[data-dig='"+e.digest+"']");
         if(!row)return;
@@ -901,8 +846,16 @@ function renderPrivlog(g){
   }
 }
 
-function renderAac(data){
-  var g=parseAac(data);renderGraph(g);renderPrivlog(g);
+async function renderAac(data){
+  var g=parseAac(data);
+  var envelope=await AacCrypto.verifyDisclosureEnvelope(data&&data.capsule?data:{capsule:data,disclosures:{}});
+  var findings={};
+  envelope.disclosureFindings.forEach(function(f){findings[f.member]=f.code;});
+  g.privlog.forEach(function(e){
+    var member=e.id==="agent input"?"agent_input":e.id==="agent output"?"agent_output":null;
+    if(member&&!e.withheld){e.matchOk=(findings[member]==="disclosure_match");e._de3=true;}
+  });
+  renderGraph(g);renderPrivlog(g);
 }
 
 /* ---------- regulatory-context panel ----------
@@ -2089,6 +2042,12 @@ if(typeof globalThis !== "undefined"){ globalThis.MMR = MMR; }
 #: _CAPSULE_CSS's .ritual-stages/.records-table/.pltable/.anchor-banner
 #: classes (same visual language as the single-capsule verify page).
 _BUNDLE_CSS = """
+.records-tree,.records-tree ul{list-style:none;margin:0;padding-left:0}
+.records-tree ul{margin-left:10px;border-left:1px solid var(--line);padding-left:14px}
+.records-tree li{margin:4px 0;line-height:1.7}
+.rt-kind{font-size:10px;font-weight:700;text-transform:uppercase;padding:1px 6px;border-radius:5px;margin-right:6px}
+.rt-aggregate{background:#ece3ff;color:#6b3fd0}.rt-report{background:#dff0ff;color:#1e6fb0}.rt-interaction{background:#eef0f4;color:#555}.rt-missing{background:#fbeecb;color:#8a6d1a}
+.rt-at{color:var(--muted);font-size:12px}.rt-note{font-size:12px}.rt-cycle,.rt-missing{color:var(--muted);font-style:italic}
 .share-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
 .share-row .mono{font-size:11.5px;color:var(--muted);word-break:break-all}
 .share-row .btnrow{display:flex;gap:10px;flex-shrink:0}
@@ -2147,11 +2106,14 @@ function safe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").rep
  * the digest recompute; see test_bundle_js_shared_helpers_match_capsule_js). The
  * bytes hashed against the committed digest and the bytes shown to the reader MUST
  * come from the same function -- a display that re-serializes by a different rule
- * than JSON.stringify(p, Object.keys(p).sort()) could show content that doesn't
- * match what was actually verified. */
+ * than the RFC 8785 JCS canonicalization canonicalPayloadText uses could show
+ * content that doesn't match what was actually verified. In particular a
+ * `JSON.stringify(p, Object.keys(p).sort())` key-allow-list replacer drops every
+ * nested-object key (rendering nested objects as `{}`); that is the bug this
+ * helper replaced, not the rule to restore. */
 var PAYLOAD_TRUNCATE_BYTES=8192;
 function canonicalPayloadText(payload){
-  return typeof payload==="string"?payload:JSON.stringify(payload,Object.keys(payload).sort());
+  return AacCrypto.canonicalPayloadText(payload);
 }
 function payloadPreview(payload){
   var t=canonicalPayloadText(payload);
@@ -2161,7 +2123,7 @@ function payloadCellHtml(entry,recomputedDigest){
   if(entry.withheld||entry._revPayload==null||entry.matchOk!==true)return"";
   var full=typeof entry._revPayload==="string"
     ?entry._revPayload
-    :JSON.stringify(entry._revPayload,Object.keys(entry._revPayload).sort(),2);
+    :canonicalPayloadText(entry._revPayload);
   var bytes=new TextEncoder().encode(full);
   var truncated=bytes.length>PAYLOAD_TRUNCATE_BYTES;
   var shown=truncated?new TextDecoder("utf-8").decode(bytes.slice(0,PAYLOAD_TRUNCATE_BYTES)):full;
@@ -2174,73 +2136,8 @@ function payloadCellHtml(entry,recomputedDigest){
 
 /* === PORTED FROM CAPSULE_JS (verbatim) — capsule_id recompute (RFC 8785 JCS
  * + SHA-256), see test_bundle_js_shared_helpers_match_capsule_js === */
-var CHAIN_LINKAGE_FIELDS={"capsule_id":1,"chain":1};
-
-function CapsuleIdError(msg){this.message=msg;this.name="CapsuleIdError";}
-
-function _capIdNormalize(v){
-  if(Array.isArray(v))return v.map(_capIdNormalize);
-  if(v&&typeof v==="object"){
-    var out={};
-    Object.keys(v).forEach(function(k){
-      var nv=_capIdNormalize(v[k]);
-      if(nv===null||nv===undefined)return;
-      if(Array.isArray(nv)&&nv.length===0)return;
-      if(nv&&typeof nv==="object"&&!Array.isArray(nv)&&Object.keys(nv).length===0)return;
-      out[k]=nv;
-    });
-    return out;
-  }
-  return v;
-}
-
-function _capIdJcsString(s){
-  var out=['"'];
-  for(var ch of s){
-    var o=ch.codePointAt(0);
-    if(ch==='"')out.push('\\"');
-    else if(ch==="\\")out.push("\\\\");
-    else if(o===0x08)out.push("\\b");
-    else if(o===0x09)out.push("\\t");
-    else if(o===0x0A)out.push("\\n");
-    else if(o===0x0C)out.push("\\f");
-    else if(o===0x0D)out.push("\\r");
-    else if(o<0x20)out.push("\\u"+o.toString(16).padStart(4,"0"));
-    else out.push(ch);
-  }
-  out.push('"');
-  return out.join("");
-}
-
-function _capIdJcsValue(v){
-  if(v===null||v===undefined)return"null";
-  if(v===true)return"true";
-  if(v===false)return"false";
-  if(typeof v==="string")return _capIdJcsString(v);
-  if(typeof v==="number"){
-    if(!Number.isInteger(v))throw new CapsuleIdError("float in digest-bearing field");
-    if(v>Number.MAX_SAFE_INTEGER||v<-Number.MAX_SAFE_INTEGER)throw new CapsuleIdError("integer outside safe range");
-    return String(v);
-  }
-  if(Array.isArray(v))return"["+v.map(_capIdJcsValue).join(",")+"]";
-  if(typeof v==="object"){
-    var keys=Object.keys(v).sort();
-    return"{"+keys.map(function(k){return _capIdJcsString(k)+":"+_capIdJcsValue(v[k]);}).join(",")+"}";
-  }
-  throw new CapsuleIdError("value not JSON-serializable: "+typeof v);
-}
-
-async function _capIdSha256Hex(bytes){
-  var buf=await crypto.subtle.digest("SHA-256",bytes);
-  return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
-}
-
 async function computeCapsuleId(capsule){
-  if(!capsule||typeof capsule!=="object"||Array.isArray(capsule))throw new CapsuleIdError("capsule must be a JSON object");
-  var canonical={};
-  Object.keys(capsule).forEach(function(k){if(!CHAIN_LINKAGE_FIELDS[k])canonical[k]=capsule[k];});
-  var jcsStr=_capIdJcsValue(_capIdNormalize(canonical));
-  return await _capIdSha256Hex(new TextEncoder().encode(jcsStr));
+  return await AacCrypto.computeCapsuleId(capsule);
 }
 
 async function verifyCapsuleId(cap){
@@ -2249,8 +2146,9 @@ async function verifyCapsuleId(cap){
   if(!isH64(stated))return{ok:null,stated:stated,recomputed:null};
   if(typeof crypto==="undefined"||!crypto.subtle)return{ok:null,stated:stated,recomputed:null};
   try{
+    var class1=await AacCrypto.verifyClass1(c);
     var recomputed=await computeCapsuleId(c);
-    return{ok:recomputed===stated,stated:stated,recomputed:recomputed};
+    return{ok:class1.ok&&recomputed===stated,stated:stated,recomputed:recomputed};
   }catch(ex){
     return{ok:false,stated:stated,recomputed:null,error:ex.message};
   }
@@ -2443,6 +2341,18 @@ function encodeFragment(obj){
  * bytes.fromhex(record.capsule_id), so no extra data is needed beyond
  * what bundle.records already carries. */
 async function checkCompleteness(bundle){
+  /* Evidence Bundle v2 owns graph closure, interval coverage and every
+   * record's membership independently.  Keep the legacy certificate path
+   * below only for already-issued capsule-ledger bundles. */
+  if(bundle&&bundle.bundle_kind==="evidence-bundle/v2"){
+    var verified=await AacCrypto.verifyBundle(bundle);
+    var interval=verified.intervalCoverage, members=verified.perRecordMembership;
+    if(interval.status==="pass"&&members.status==="pass")
+      return{status:"pass",detail:"interval endpoints verified — graph closure and per-record membership are independently verified"};
+    if(interval.status==="withheld"||members.status==="withheld")
+      return{status:"skip",detail:"completeness evidence withheld — interval coverage and per-record membership are not cryptographically proven here"};
+    return{status:"fail",detail:"evidence-bundle completeness verification failed: "+interval.findings.concat(members.findings).join(", ")};
+  }
   var cc=bundle.completeness_certificate;
   var records=bundle.records||[];
   if(!records.length)return{status:"skip",detail:"empty bundle — nothing to certify"};
@@ -2494,12 +2404,19 @@ async function checkCompleteness(bundle){
 async function verifyCapsuleDigests(cap,disclosures){
   var g=parseAac(disclosures?{capsule:cap,disclosures:disclosures}:cap);
   if(typeof crypto==="undefined"||!crypto.subtle)return g;  // no WebCrypto: leave matchOk null (skip, not a fabricated pass)
+  var envelope=await AacCrypto.verifyDisclosureEnvelope({capsule:cap,disclosures:disclosures||{}});
+  var de3={};
+  envelope.disclosureFindings.forEach(function(f){de3[f.member]=f.code;});
   for(var i=0;i<g.privlog.length;i++){
     var e=g.privlog[i];
     if(e.withheld||e._revPayload==null)continue;
-    var bytes=new TextEncoder().encode(canonicalPayloadText(e._revPayload));
-    var buf=await crypto.subtle.digest("SHA-256",bytes);
-    var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");
+    var member=e.id==="agent input"?"agent_input":e.id==="agent output"?"agent_output":null;
+    if(member){
+      e.matchOk=(de3[member]==="disclosure_match");
+      e._recomputedDigest=e.matchOk?e.digest:null;
+      continue;
+    }
+    var hex=await AacCrypto.jsonDigest(e._revPayload);
     e.matchOk=(hex===e.digest);
     e._recomputedDigest=hex;
   }
@@ -2717,26 +2634,49 @@ function renderPrivlog(rows){
   // digest pass here; the table above already reflects the real verdict.
 }
 
-function renderRecordsTable(records,integrity){
+function renderRecordsTable(records,integrity,bundle){
   var el=$("recordsTableContent");if(!el)return;
   var notes=annotateRecords(records,integrity);
-  var gaps=findChainGaps(records),gapAt={};
-  gaps.forEach(function(g){gapAt[g.afterIdx]=g;});
-  var h="<table class='records-table'><thead><tr><th>#</th><th>capsule_id</th><th>action_type</th><th>note</th></tr></thead><tbody>";
+  // Render the records as a PROVENANCE TREE from the bundle root, following each
+  // record's references[] (acted_on) and chain parent, rather than a flat list.
+  var byId={},noteFor={};
   records.forEach(function(cap,i){
-    if(gapAt[i]){
-      var gp=gapAt[i];
-      h+="<tr class='rec-row rec-gap'><td>—</td><td colspan='2'>gap — missing parent <code>"+safe(gp.missingParent.slice(0,8))+"…</code></td><td>⌗ chain_gap</td></tr>";
-    }
+    byId[cap.capsule_id]=cap;
     var n=notes[i];
-    var noteText=n.note==="digest_mismatch"?"✕ digest_mismatch":
+    noteFor[cap.capsule_id]=n.note==="digest_mismatch"?"✕ digest_mismatch":
       n.note==="cites an altered record"?"✓ verifies · cites an altered record":"✓ verifies";
-    h+="<tr class='rec-row"+(n.isAltered?" rec-altered":(n.citesAltered?" rec-flagged":""))+"'>"+
-      "<td>"+(i+1)+"</td><td><code>"+safe((cap.capsule_id||"").slice(0,16))+"…</code></td>"+
-      "<td><code>"+safe(cap.action_type||"")+"</code></td><td>"+noteText+"</td></tr>";
   });
-  h+="</tbody></table>";
-  el.innerHTML=h;
+  var disc=(bundle&&bundle.disclosures)||{};
+  function kindOf(id){
+    var ai=(disc[id]||{}).agent_input,sv=(ai&&ai.spec_version)||"";
+    return sv.indexOf("evaluation-summary")===0?"aggregate":sv.indexOf("evaluation-report")===0?"report":byId[id]?"interaction":"missing";
+  }
+  function children(id){
+    var c=byId[id];if(!c)return [];var kids=[];
+    (c.references||[]).forEach(function(r){if(r&&r.digest&&r.type==="agent-action-capsule")kids.push(r.digest);});
+    if(c.chain&&c.chain.parent_capsule_id)kids.push(c.chain.parent_capsule_id);
+    return kids;
+  }
+  function node(id,seen){
+    var cap=byId[id],k=kindOf(id);
+    var label="<span class='rt-kind rt-"+k+"'>"+k+"</span> <code>"+safe(id.slice(0,16))+"…</code>";
+    if(cap)label+=" <span class='rt-at'>"+safe(cap.action_type||"")+"</span> <span class='rt-note'>"+(noteFor[id]||"")+"</span>";
+    else label+=" <span class='rt-missing'>declared missing</span>";
+    if(seen[id])return "<li>"+label+" <span class='rt-cycle'>(shown above)</span></li>";
+    seen[id]=true;
+    var kids=cap?children(id):[],h="<li>"+label;
+    if(kids.length){h+="<ul>";kids.forEach(function(c){h+=node(c,seen);});h+="</ul>";}
+    return h+"</li>";
+  }
+  var root=bundle&&bundle.root;
+  if(root&&byId[root]){
+    el.innerHTML="<ul class='records-tree'>"+node(root,{})+"</ul>";
+  }else{
+    // no resolvable root (e.g. a flat slice): fall back to a simple list
+    el.innerHTML="<ul class='records-tree'>"+records.map(function(cap,i){
+      return "<li><code>"+safe((cap.capsule_id||"").slice(0,16))+"…</code> <span class='rt-at'>"+safe(cap.action_type||"")+"</span> <span class='rt-note'>"+(noteFor[cap.capsule_id]||"")+"</span></li>";
+    }).join("")+"</ul>";
+  }
 }
 
 function renderRitual(summary){
@@ -2800,7 +2740,7 @@ async function loadBundle(data,fragmentB64u){
 
   var privlog=await buildBundlePrivlog(records,data.disclosures);
   renderPrivlog(privlog);
-  renderRecordsTable(records,integrity);
+  renderRecordsTable(records,integrity,data);
 
   var completeness=await checkCompleteness(data);
   renderCompletenessCard(completeness);
@@ -3323,6 +3263,7 @@ def render_capsule_page(capsule_id: str) -> str:
   </div>
 </footer>
 
+<script src="/static/aac-crypto.js"></script>
 <script src="/static/capsule.js"></script>
 </body>
 </html>
@@ -3698,9 +3639,9 @@ def render_bundle_page(*, offline: bool = False) -> str:
       trivially embeddable by a future producer-side ``--with-viewer`` flag.
     """
     scripts = (
-        f"<script>{MMR_JS}</script>\n<script>{BUNDLE_JS}</script>"
+        f"<script>{AAC_CRYPTO_JS}</script>\n<script>{BUNDLE_JS}</script>"
         if offline
-        else '<script src="/static/mmr.js"></script>\n<script src="/static/bundle.js"></script>'
+        else '<script src="/static/aac-crypto.js"></script>\n<script src="/static/bundle.js"></script>'
     )
     body = _bundle_page_body(embed_placeholder=offline)
     return f"""<!DOCTYPE html>
@@ -3953,6 +3894,8 @@ def make_handler(verify_rpm: int | None = None):
                 self._send_json(200, {"ok": True})
             elif self.path == "/static/verify.js":
                 self._send_js(200, VERIFY_JS)
+            elif self.path == "/static/aac-crypto.js":
+                self._send_js(200, AAC_CRYPTO_JS)
             elif self.path == "/static/capsule.js":
                 self._send_js(200, CAPSULE_JS)
             elif self.path == "/static/mmr.js":
@@ -4098,6 +4041,9 @@ def make_asgi_app(verify_rpm: int | None = None):
             return
         if method == "GET" and path == "/static/verify.js":
             await send_js(200, VERIFY_JS)
+            return
+        if method == "GET" and path == "/static/aac-crypto.js":
+            await send_js(200, AAC_CRYPTO_JS)
             return
         if method == "GET" and path == "/static/capsule.js":
             await send_js(200, CAPSULE_JS)

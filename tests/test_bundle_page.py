@@ -31,6 +31,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from hosted_profiles.hosted import (
+    AAC_CRYPTO_JS,
     BUNDLE_JS,
     CAPSULE_JS,
     MMR_JS,
@@ -81,12 +82,9 @@ def test_bundle_js_shared_helpers_match_capsule_js():
         BUNDLE_JS, "function _capMismatched(cap){", chain_end
     )
 
-    # capsule_id recompute (RFC 8785 JCS + SHA-256) — same drift-guard: both
-    # files carry a byte-identical hand-port of agent_action_capsule.canonical.
-    capid_end = "return{ok:false,stated:stated,recomputed:null,error:ex.message};\n  }\n}"
-    assert _slice_between(CAPSULE_JS, "var CHAIN_LINKAGE_FIELDS=", capid_end) == _slice_between(
-        BUNDLE_JS, "var CHAIN_LINKAGE_FIELDS=", capid_end
-    )
+    # capsule_id/JCS parity is no longer an inline-source comparison: both
+    # controllers call the one built canonical-library asset.  The Node
+    # harness exercises that asset directly in test_capsule_id_recompute.py.
 
     # disclosed-payload rendering (canonicalPayloadText/payloadPreview/payloadCellHtml) —
     # same drift-guard: the bytes hashed and the bytes shown must come from one helper,
@@ -114,7 +112,7 @@ def test_hosted_bundle_page_is_csp_safe():
     import re
 
     html = render_bundle_page()
-    assert '<script src="/static/mmr.js">' in html
+    assert '<script src="/static/aac-crypto.js">' in html
     assert '<script src="/static/bundle.js">' in html
     assert not re.search(r"<script[^>]*>[^<]", html)  # no inline script bodies
     assert "<link" not in html
@@ -141,7 +139,7 @@ def test_bundle_page_links_trust_model_doc_in_both_modes():
 def test_offline_bundle_shell_is_self_contained_and_reusable_template():
     html = render_bundle_page(offline=True)
     assert "<script src=" not in html  # nothing external — fully inlined
-    assert MMR_JS in html
+    assert AAC_CRYPTO_JS in html
     assert BUNDLE_JS in html
     # 3 occurrences: 1 embed point (first in document order) + 2 internal
     # BUNDLE_JS references (the sentinel check + the download button's own
@@ -278,6 +276,15 @@ CAPSULE_A = {
 }
 
 
+def _jcs_digest(value: object) -> str:
+    """Digest the whole JSON value exactly as the canonical browser library."""
+    import hashlib
+
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+
+
 @pytestmark_node
 def test_withheld_field_renders_as_provable_commitment_never_absent(js_paths):
     """A withheld field must show up in the privilege log as a WITHHELD
@@ -291,10 +298,9 @@ def test_withheld_field_renders_as_provable_commitment_never_absent(js_paths):
 
 @pytestmark_node
 def test_revealed_field_recomputes_and_matches(js_paths):
-    import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     envelope = {"capsule": cap, "disclosures": {"agent_input": payload}}
@@ -306,10 +312,9 @@ def test_revealed_field_recomputes_and_matches(js_paths):
 
 @pytestmark_node
 def test_verify_capsule_digests_confirms_a_genuine_match(js_paths):
-    import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
@@ -463,10 +468,9 @@ def test_ritual_integrity_stage_passes_on_genuine_records(js_paths):
 def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
     """Disclosure Envelope acceptance: capsule_id is identical across
     withheld/match/mismatch — a disclosure never touches the anchored bytes."""
-    import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
 
@@ -498,10 +502,9 @@ def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
 
 @pytestmark_node
 def test_payload_cell_renders_on_genuine_match(js_paths):
-    import hashlib
 
     payload = {"b": 2, "a": 1}
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
@@ -510,7 +513,12 @@ def test_payload_cell_renders_on_genuine_match(js_paths):
 
     html = _run_js(js_paths, {"fn": "payloadCellHtml", "entry": entry, "recomputedDigest": entry["_recomputedDigest"]})
     assert "<details" in html
-    assert '"a": 1' in html and '"b": 2' in html  # pretty-printed, sorted keys
+    # The payload cell renders the canonical JCS bytes (compact, sorted keys) —
+    # the exact preimage the committed digest is computed over — via
+    # canonicalPayloadText, not a re-pretty-printed copy. This is the
+    # nested-safe form the DE-3 fix routed through (a spaced pretty-print used a
+    # replacer array that dropped nested keys).
+    assert '{"a":1,"b":2}' in html  # canonical JCS, sorted keys, no spaces
     assert f"committed <code>{digest}</code>" in html
     assert f"recomputed <code>{entry['_recomputedDigest']}</code>" in html
     assert "truncated" not in html
@@ -518,10 +526,9 @@ def test_payload_cell_renders_on_genuine_match(js_paths):
 
 @pytestmark_node
 def test_payload_cell_renders_text_not_json_for_string_payload(js_paths):
-    import hashlib
 
     payload = "hello agent input"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     cap = json.loads(json.dumps(CAPSULE_A))
     cap["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
     g = _run_js(js_paths, {"fn": "verifyCapsuleDigests", "data": cap, "disclosures": {"agent_input": payload}})
@@ -558,10 +565,9 @@ def test_payload_cell_renders_nothing_when_withheld(js_paths):
 def test_bundle_privlog_renders_payload_per_record(js_paths):
     """Bundle path: one record with a genuine match, one withheld — each
     record's row must reflect its own reveal state independently."""
-    import hashlib
 
     payload = "record zero payload"
-    digest = hashlib.sha256(payload.encode()).hexdigest()
+    digest = _jcs_digest(payload)
     rec0 = json.loads(json.dumps(CAPSULE_A))
     rec0["capsule_id"] = "1" * 64
     rec0["model_attestation"]["compute_attestation"]["agent_input_digest"] = digest
@@ -607,12 +613,17 @@ def test_oversized_payload_truncates_with_note(js_paths):
 def test_canonicalization_shared_with_digest_path(js_paths):
     """The exact bytes canonicalPayloadText produces for display must be the
     exact bytes verifyCapsuleDigests hashed -- one helper, not two rules that
-    could silently diverge."""
+    could silently diverge. The nested object below is the regression guard: a
+    `JSON.stringify(p, Object.keys(p).sort())` key-allow-list replacer (the bug
+    the JCS helper replaced) renders every nested object as `{}`, so it would not
+    equal the full JCS bytes and this assertion would fail."""
     import hashlib
 
-    payload = {"z": [3, 2, 1], "a": "first"}
+    payload = {"z": [3, 2, 1], "a": "first", "per_axis": {"policy": {"pass": True, "note": "kept"}}}
     canon_from_js = _run_js(js_paths, {"fn": "canonicalPayloadText", "payload": payload})
     assert canon_from_js == json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    # the nested keys must survive canonicalization, not collapse to {}
+    assert '"policy":{"note":"kept","pass":true}' in canon_from_js
 
     digest = hashlib.sha256(canon_from_js.encode()).hexdigest()
     cap = json.loads(json.dumps(CAPSULE_A))
