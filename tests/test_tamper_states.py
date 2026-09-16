@@ -130,6 +130,64 @@ def test_witness_downgrade_upgrades_to_pass_when_all_report():
     assert _stage(summary.stages, "Witness").status == "pass"
 
 
+def test_witness_with_no_grade_data_renders_a_plain_count_no_grade_claim():
+    """Backward-compat: a witness dict with no `receipt_grades` key (every
+    existing fixture, and every caller before [grade-vocabulary-reconcile])
+    renders the exact same plain count string as before -- no implicit
+    grade claim appears just because grade data was never supplied."""
+    bundle, _, _, _ = _load("witness_downgrade")
+    summary, _ = _run(bundle, {"held": 3, "configured": 3, "reachable": True})
+    w = _stage(summary.stages, "Witness")
+    assert w.detail == "witnessed 3 of 3"
+
+
+def test_witness_grade_words_render_beside_the_count_not_instead_of_it():
+    """The gate item: a checkpoint whose one held receipt grades
+    `countersigned-observed` (existence + time) must render as
+    `existence-and-time` in words -- never as `consistency-verified` just
+    because the witness is `held`. A `mmr-verified` receipt renders
+    `consistency-verified`. Two receipts list both, one clause each."""
+    bundle, _, _, _ = _load("witness_downgrade")
+
+    rekor_only, _ = _run(
+        bundle,
+        {"held": 1, "configured": 1, "reachable": True,
+         "receipt_grades": {"https://rekor.example": "countersigned-observed"}},
+    )
+    w = _stage(rekor_only.stages, "Witness")
+    assert w.status == "pass"
+    assert w.detail == "witnessed 1 of 1: existence-and-time (rekor.example)"
+    assert "consistency-verified" not in w.detail
+
+    both, _ = _run(
+        bundle,
+        {"held": 2, "configured": 2, "reachable": True,
+         "receipt_grades": {
+             "https://anchor.example": "mmr-verified",
+             "https://rekor.example": "countersigned-observed",
+         }},
+    )
+    w2 = _stage(both.stages, "Witness")
+    assert w2.detail == (
+        "witnessed 2 of 2: consistency-verified (anchor.example), existence-and-time (rekor.example)"
+    )
+
+
+def test_witness_grade_words_ungraded_never_masquerades_as_a_real_grade():
+    """A receipt with no grade label at all (`None`, e.g. a pre-label
+    witness) renders "ungraded" -- never silently omitted (which would
+    read as "nothing to report") and never coerced into either real grade
+    word."""
+    bundle, _, _, _ = _load("witness_downgrade")
+    summary, _ = _run(
+        bundle,
+        {"held": 1, "configured": 1, "reachable": True,
+         "receipt_grades": {"https://old-ts.example": None}},
+    )
+    w = _stage(summary.stages, "Witness")
+    assert w.detail == "witnessed 1 of 1: ungraded (old-ts.example)"
+
+
 # ---------------------------------------------------------------------------
 # offline_pass
 # ---------------------------------------------------------------------------
