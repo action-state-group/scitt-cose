@@ -299,6 +299,15 @@ def build_receipt(
     either) -- so a caller aiming for RFC 9943 conformance must supply all
     three. This library does not enforce that; it stays profile-agnostic, the
     same discipline as ``statement.build_signed_statement``.
+
+    ``sub`` in particular: RFC 9943 Figure 10 + §3 define it as the
+    REGISTERED STATEMENT'S OWN subject -- what the Statement (and therefore
+    the Receipt) is made about -- never the identity of whoever submitted
+    it (that belongs in the Statement's own ``iss``, a separate concern this
+    library also does not interpret). A caller conflating "subject" with
+    "submitter" produces a receipt that asserts the wrong thing about the
+    entry it covers; this library will happily sign whatever string is
+    passed here, so getting that distinction right is the caller's job.
     """
     if not 0 <= leaf_index < len(tree_entries_hex):
         raise CoseError(f"leaf_index {leaf_index} out of range for {len(tree_entries_hex)} entries")
