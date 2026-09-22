@@ -1,0 +1,13 @@
+{
+  "description": "Synthetic EdDSA receipt with both iat and grade signed into the protected header.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "02",
+  "tree_size": 5,
+  "leaf_index": 2,
+  "ok": true,
+  "root": "b855b42d6c30f5b087e05266783fbd6e394f7b926013ccaa67700a8b0c5a596f",
+  "iat": 1700000000,
+  "grade": "mmr-verified",
+  "witness_time_established": true,
+  "grade_cryptographically_bound": true
+}

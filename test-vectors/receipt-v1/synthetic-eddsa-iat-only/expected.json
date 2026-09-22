@@ -1,0 +1,13 @@
+{
+  "description": "Synthetic EdDSA receipt with iat signed but no grade label -- witness_time_established true, grade_cryptographically_bound false, independently (never coupled).",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": true,
+  "root": "9bcd51240af4005168f033121ba85be5a6ed4f0e6a5fac262066729b8fbfdecb",
+  "iat": 1700000900,
+  "grade": null,
+  "witness_time_established": true,
+  "grade_cryptographically_bound": false
+}

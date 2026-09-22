@@ -1,0 +1,14 @@
+{
+  "description": "iat altered in the PROTECTED header after signing (not re-signed) -- proves iat is actually covered by the signature, not just carried alongside it. Must fail signature.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "signature"
+}

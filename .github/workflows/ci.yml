@@ -23,12 +23,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+      - uses: dtolnay/rust-toolchain@stable
       - name: Install
         run: pip install -e ".[dev,serve]"
-      - name: Tests (Go cross-language check REQUIRED, never skipped)
+      - name: Tests (Go + Rust cross-language checks REQUIRED, never skipped)
         run: python -m pytest -q
         env:
           SCITT_REQUIRE_GO: "1"
+          SCITT_REQUIRE_RUST: "1"
       - name: Lint
         run: python -m ruff check .
 
@@ -59,6 +61,20 @@ jobs:
         run: |
           go vet ./...
           go build ./...
+
+  rust-verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Build + test + lint the independent Rust receipt verifier
+        working-directory: rust/scitt-cose
+        run: |
+          cargo build --locked
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
 
   fuzz:
     # Bounded differential fuzz: seed from the v1 vectors, mutate, run every
@@ -109,8 +125,12 @@ jobs:
         with:
           go-version: stable
           cache: false
+      - uses: dtolnay/rust-toolchain@stable
       - name: Published vector bytes are immutable (append-only promise, enforced)
         working-directory: test-vectors
+        run: sha256sum -c SHA256SUMS
+      - name: Published receipt-v1 vector bytes are immutable (append-only promise, enforced)
+        working-directory: test-vectors/receipt-v1
         run: sha256sum -c SHA256SUMS
       - name: Install (runtime deps only — the vector path needs nothing else)
         run: pip install .
@@ -123,6 +143,9 @@ jobs:
       - name: Go clean-room runner — same manifest, same files
         working-directory: scitt-cose-go-verify
         run: go test ./... -run TestVectors -v
+      - name: Rust clean-room runner — v1 + receipt-v1, same files
+        working-directory: rust/scitt-cose
+        run: cargo test --locked --test vectors
 
   neutrality-gate:
     # The shipped tree must contain no downstream/reserved code references.

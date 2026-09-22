@@ -1,0 +1,14 @@
+{
+  "description": "grade altered in the PROTECTED header after signing (not re-signed) -- same proof as fail-tampered-iat, for grade. Must fail signature.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "signature"
+}
