@@ -1,0 +1,13 @@
+{
+  "description": "Synthetic ES256 receipt with both iat and grade signed into the protected header.",
+  "alg": "ES256",
+  "leaf_entry_hex": "03",
+  "tree_size": 6,
+  "leaf_index": 3,
+  "ok": true,
+  "root": "bb36e7d3d4cee5720cbd323d02fab15962e2ba1dadf5f8fc6eeef4fd6ad056a8",
+  "iat": 1700000500,
+  "grade": "countersigned-observed",
+  "witness_time_established": true,
+  "grade_cryptographically_bound": true
+}

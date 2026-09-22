@@ -316,6 +316,14 @@ self-consistency:
   library emits, agrees on the reconstructed Merkle root, and rejects tampered
   inputs. CI runs it with `SCITT_REQUIRE_GO=1`, so the cross-check can never
   silently skip. (`tests/test_crosslang_go.py`)
+- **A second, receipt-only cross-language check: Rust.** `rust/scitt-cose`
+  (on `coset` + `ed25519-dalek`/`p256`, with its own clean-room RFC 9162
+  Merkle fold in `rust/scitt-cose/src/merkle.rs`) independently verifies
+  receipts this library emits, including the `iat`/`grade` protected-header
+  labels and the two booleans (`witness_time_established`,
+  `grade_cryptographically_bound`) derived from them. Receipt-only by
+  design — it never reads a Signed Statement. CI runs it with
+  `SCITT_REQUIRE_RUST=1`. (`tests/test_crosslang_rust.py`)
 - **The standard's own test vectors.** The Merkle code is checked against the
   published RFC 6962 / RFC 9162 reference vectors (8-leaf root `5dc9da79…`, the
   canonical inclusion/consistency proofs) — external values, not ours.
@@ -454,11 +462,21 @@ or from the published package (the runner ships in **scitt-cose ≥ 0.1.0**):
 `pip install "scitt-cose>=0.1.0"`, download `test-vectors/`, then
 `python -m scitt_cose.vectors path/to/test-vectors` (add `--json` for a
 machine-readable report). The Go clean-room implementation runs the same
-manifest (`go test ./...` in `scitt-cose-go-verify/`). The append-only promise
-is enforced, not just stated: `test-vectors/SHA256SUMS` pins every published
-byte and CI fails on any mutation. A mismatch against your implementation is
-exactly the report we want — please open an issue. Details and the stability
-promise: [`test-vectors/README.md`](test-vectors/README.md).
+manifest (`go test ./...` in `scitt-cose-go-verify/`); the Rust clean-room
+implementation runs it too (`cargo test --test vectors` in
+`rust/scitt-cose/`). The append-only promise is enforced, not just stated:
+`test-vectors/SHA256SUMS` pins every published byte and CI fails on any
+mutation. A mismatch against your implementation is exactly the report we
+want — please open an issue. Details and the stability promise:
+[`test-vectors/README.md`](test-vectors/README.md).
+
+A second, receipt-only vector set,
+[`test-vectors/receipt-v1/`](test-vectors/receipt-v1/), exercises the `iat`
+and private-use `grade` (`-65537`) protected-header labels — including a
+real captured receipt from a live TRACE-registry witness alongside synthetic
+EdDSA/ES256 vectors and two post-signature tamper vectors. Same append-only
+promise, own `SHA256SUMS`. Details:
+[`test-vectors/receipt-v1/README.md`](test-vectors/receipt-v1/README.md).
 
 ## Tests
 

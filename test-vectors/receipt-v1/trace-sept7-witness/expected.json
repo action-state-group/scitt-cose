@@ -1,0 +1,14 @@
+{
+  "description": "REAL COSE Receipt from the Action State Group TRACE-registry witness, captured 2026-09-07 (agentrust-io/trace-registry docs/evidence/witness-2026-09-07/). Pre-dates both iat and grade: neither label is present, so both limits are false PERMANENTLY for this exact receipt, not pending a witness upgrade (see that packet's README).",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "dee1a92dad155b56f99cf2284e166e3b6b935528e6d27dec8a4f67bbed6dfab6",
+  "tree_size": 937,
+  "leaf_index": 936,
+  "ok": true,
+  "root": "f8ee69f33629abc413a9b5530f9166230c8efd3b29f052216f22fb2412e1ef91",
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "provenance": "agentrust-io/trace-registry docs/evidence/witness-2026-09-07/witness-post.json"
+}

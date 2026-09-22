@@ -1,0 +1,37 @@
+{
+  "version": "receipt-v1",
+  "stability": "append-only",
+  "scope": "Receipt-only vectors (no Signed Statement) exercising the iat (CWT claims label 15, claim 6) and private-use grade label -65537 in the receipt's PROTECTED header. See rust/scitt-cose (the receipt-only Rust verifier) and the TRACE registry's verify_witness_receipt.py, which independently converged on the same two labels.",
+  "vectors": [
+    {
+      "id": "trace-sept7-witness",
+      "dir": "receipt-v1/trace-sept7-witness",
+      "ok": true
+    },
+    {
+      "id": "synthetic-eddsa-iat-grade",
+      "dir": "receipt-v1/synthetic-eddsa-iat-grade",
+      "ok": true
+    },
+    {
+      "id": "synthetic-es256-iat-grade",
+      "dir": "receipt-v1/synthetic-es256-iat-grade",
+      "ok": true
+    },
+    {
+      "id": "synthetic-eddsa-iat-only",
+      "dir": "receipt-v1/synthetic-eddsa-iat-only",
+      "ok": true
+    },
+    {
+      "id": "fail-tampered-iat",
+      "dir": "receipt-v1/fail-tampered-iat",
+      "ok": false
+    },
+    {
+      "id": "fail-tampered-grade",
+      "dir": "receipt-v1/fail-tampered-grade",
+      "ok": false
+    }
+  ]
+}
