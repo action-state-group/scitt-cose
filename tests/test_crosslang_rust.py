@@ -100,7 +100,10 @@ def rust_verifier(tmp_path_factory: pytest.TempPathFactory) -> str:
     out_dir = tmp_path_factory.mktemp("rust-target")
     try:
         proc = subprocess.run(
-            [cargo, "build", "--offline", "--target-dir", str(out_dir), "--bin", "scitt-cose-rust-verify"],
+            # No --offline: CI has no pre-warmed cargo cache, so an offline build
+            # fails to resolve deps (e.g. coset). The dedicated rust job builds
+            # --locked; here we let cargo fetch on demand so the cross-lang gate runs.
+            [cargo, "build", "--locked", "--target-dir", str(out_dir), "--bin", "scitt-cose-rust-verify"],
             cwd=str(_RUST_CRATE_DIR),
             capture_output=True,
             text=True,
