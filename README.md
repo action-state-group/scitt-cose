@@ -420,7 +420,7 @@ It can also **ride along** inside an existing ASGI app via
 logic, shared deployment, still standalone code. The full design, submitter-safety
 constraints, and proposed deployment shape are in
 [`docs/hosted-verifier-design.md`](docs/hosted-verifier-design.md). A hosted
-instance is live at <https://verify.actionstate.ai> — this package unchanged
+instance is live at <https://verify.agentactioncapsule.org> — this package unchanged
 (the parity-tested wrappers, deployed); its landing page renders the
 verifier-vs-Transparency-Service boundary table and states the privacy posture.
 You don't need it: the verifier runs anywhere.

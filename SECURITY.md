@@ -17,7 +17,7 @@ acknowledge reports within 72 hours.
 - The `scitt_cose` Python package (statement/receipt verification, Merkle
   primitives, the stdlib/ASGI hosted wrappers) and the Go cross-verifier in
   `scitt-cose-go-verify/`.
-- The hosted convenience endpoint (`verify.actionstate.ai`) runs this same
+- The hosted convenience endpoint (`verify.agentactioncapsule.org`) runs this same
   library unchanged. It is stateless and retains nothing; reports about the
   hosted deployment are in scope and reach the same operators.
 
