@@ -637,7 +637,7 @@ def test_capsule_js_has_reg_panel_logic():
 
 
 # ---------------------------------------------------------------------------
-# [ldg-viewer-disclosed-payload-render]: privilege log renders the disclosed
+# Privilege log renders the disclosed
 # payload, gated on a genuine digest match, with the same canonicalization
 # the digest recompute uses.
 # ---------------------------------------------------------------------------
@@ -662,7 +662,7 @@ def test_capsule_js_has_disclosed_payload_rendering():
 # compute_attestation agent_input / agent_output digest parsing (Goose fixture)
 # ---------------------------------------------------------------------------
 
-# Real goose-demo ledger record (leaf-199, capsule_id from _work/goose-demo/goose-session-ledger.jsonl).
+# Real goose-demo ledger record (leaf-199, capsule_id from the goose-session-ledger).
 # No subject_digest, no effect request/response_digest — only agent_input_digest + agent_output_digest.
 _GOOSE_LEAF_199 = {
     "spec_version": "draft-mih-scitt-agent-action-capsule-02",

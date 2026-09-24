@@ -1,0 +1,7 @@
+# leak-lint exact-text allowlist.
+#
+# Format: each non-comment, non-blank line is the EXACT stripped text of one line that
+# leak_lint.py would otherwise flag. Never a line number -- line numbers rot the moment the
+# surrounding file is edited. Add an entry only for a genuine historical record (e.g. a
+# completed changelog entry documenting a fix by name), never to silence a live leak -- an
+# allowlist seeded with real drift teaches the next person the lint is advisory.

@@ -20,8 +20,8 @@ synthetic): the 3-capsule dapr-agents-capsule demo chain run on
 2026-08-03 against anchor.agentactioncapsule.org (capsule-emit repo,
 examples/dapr-agents-capsule/run-transcript.md — leaves 242/243/244), plus
 one hand-tampered variant of capsule-2 (see capsule-2-tampered.json's own
-comment-equivalent in PROVENANCE.md) built for
-[aac-viewer-recompute-capsule-id]'s negative-fixture requirement: same
+comment-equivalent in PROVENANCE.md) built for the viewer's
+negative-fixture requirement: same
 capsule_id, disposition flipped from {decision:reject, verdict_class:blocked}
 to {decision:accept, verdict_class:executed} -- the exact "denial reads as
 approval" attack the task documents.

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# leak-lint — fail the build if internal coordination-layer text (bracketed task ids, queue
+# vocabulary, private-workspace paths, or named-decider governance prose) reaches this public
+# repo. No secret needed (unlike neutrality.yml, whose reserved-term list is intentionally kept
+# out of the repo) -- the patterns this check bans are generic ops-vocabulary shapes, not a
+# list that itself needs hiding -- so this runs on plain pull_request like hostname-lint.yml.
+name: leak-lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  leak-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python .github/leak_lint.py .

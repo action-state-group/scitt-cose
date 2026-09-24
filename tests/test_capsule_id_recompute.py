@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""[aac-viewer-recompute-capsule-id] — the viewer must recompute capsule_id
+"""The viewer must recompute capsule_id
 from the fragment body (RFC 8785 JCS + SHA-256, agent-action-capsule's
 canonical.compute_capsule_id) and refuse to show a pass for a body that does
 not hash to its own stated capsule_id.
