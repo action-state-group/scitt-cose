@@ -123,6 +123,24 @@ def test_bracketed_id_threshold_excludes_two_segment_and_pip_extra(tmp_path):
     assert result.returncode == 0, result.stdout
 
 
+def test_bracketed_id_does_not_fire_on_hyphenated_pip_extra(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(
+        repo,
+        "tests/test_optional.py",
+        "\n".join(
+            [
+                'af = pytest.importorskip("agent_framework", '
+                'reason="needs capsule-emit[msft-agent-framework]")',
+                "",
+            ]
+        ),
+    )
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout
+
+
 def test_bracketed_id_does_not_fire_on_hex_regex_character_class(tmp_path):
     repo = _init_repo(tmp_path)
     _write(
@@ -198,6 +216,27 @@ def test_allowlist_exact_text_suppresses_a_hit(tmp_path):
         repo,
         ".github/leak_lint_allowlist.txt",
         "Historical record: [an-old-fixed-task-id] was closed.\n",
+    )
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout
+
+
+def test_allowlist_accepts_a_markdown_heading_line(tmp_path):
+    # A CHANGELOG.md entry is itself a Markdown heading ("### Fixed — ..."). The allowlist
+    # loader's comment-detection must not treat that leading "#"/"##"/"###" as a `# comment`
+    # and silently drop the entry from the loaded set -- that would make it impossible to ever
+    # allowlist the exact kind of historical-record line this file exists to hold.
+    repo = _init_repo(tmp_path)
+    _write(
+        repo,
+        "CHANGELOG.md",
+        "### Fixed — old bug closed out ([an-old-fixed-task-id])\n",
+    )
+    _write(
+        repo,
+        ".github/leak_lint_allowlist.txt",
+        "### Fixed — old bug closed out ([an-old-fixed-task-id])\n",
     )
     _commit_all(repo)
     result = _run(repo)

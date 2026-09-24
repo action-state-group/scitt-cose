@@ -111,6 +111,14 @@ def _tracked_files(root: Path) -> list[Path]:
     return [root / p for p in out.stdout.splitlines() if p]
 
 
+#: A comment line in the allowlist file is `#` followed by whitespace or end-of-line -- NOT
+#: just `#` as the first character. A bare `startswith("#")` check would also swallow any
+#: allowlisted line that is itself a Markdown heading (e.g. a CHANGELOG.md entry: `### Fixed —
+#: ...`), which is exactly the historical-record text this allowlist exists to hold -- silently
+#: dropping it from the loaded set and making it impossible to ever allowlist a changelog line.
+_COMMENT_LINE = re.compile(r"^#(\s|$)")
+
+
 def _load_allowlist(root: Path) -> set[str]:
     p = root / ".github" / "leak_lint_allowlist.txt"
     if not p.exists():
@@ -118,7 +126,7 @@ def _load_allowlist(root: Path) -> set[str]:
     return {
         line.rstrip("\n")
         for line in p.read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
+        if line.strip() and not _COMMENT_LINE.match(line.lstrip())
     }
 
 
