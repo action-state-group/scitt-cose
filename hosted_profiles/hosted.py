@@ -2807,7 +2807,15 @@ def _referrer_domain(referer: str) -> str | None:
     try:
         from urllib.parse import urlparse
         host = urlparse(referer).hostname or ""
-        if not host or host in ("verify.actionstate.ai", "localhost", "127.0.0.1"):
+        # Both hostnames are live (dual domain mapping onto the same service, same
+        # pattern as witness/anchor) -- recognizing only one as same-origin miscounts
+        # same-site navigation on the other as an external referral.
+        if not host or host in (
+            "verify.agentactioncapsule.org",
+            "verify.actionstate.ai",
+            "localhost",
+            "127.0.0.1",
+        ):
             return None
         parts = host.rstrip(".").split(".")
         return ".".join(parts[-2:]) if len(parts) >= 2 else host
