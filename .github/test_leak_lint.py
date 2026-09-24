@@ -80,6 +80,31 @@ def test_bracketed_id_does_not_fire_on_markdown_links(tmp_path):
     assert result.returncode == 0, result.stdout
 
 
+def test_bracketed_id_reference_definition_exempt_only_at_line_start(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(
+        repo,
+        "NOTES.md",
+        "\n".join(
+            [
+                # A genuine markdown reference-link DEFINITION: the id-shaped bracket is the
+                # first thing on the line, followed by `:` then a URL -- exempt.
+                "[some-fake-reference-id]: https://example.invalid/target",
+                # The SAME shape (bracket immediately followed by `:`) but NOT at the start of
+                # the line -- prose, not a reference definition, must still be flagged. This
+                # is the case a blanket "never follows `:`" rule used to miss.
+                '"""[some-fake-internal-id]: does X, then Y."""',
+                "",
+            ]
+        ),
+    )
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout
+    assert "some-fake-internal-id" in result.stdout
+    assert "some-fake-reference-id" not in result.stdout
+
+
 def test_bracketed_id_threshold_excludes_two_segment_and_pip_extra(tmp_path):
     repo = _init_repo(tmp_path)
     _write(

@@ -493,7 +493,7 @@ def test_disclosure_envelope_wrapper_never_changes_capsule_id(js_paths):
 
 
 # ---------------------------------------------------------------------------
-# [ldg-viewer-disclosed-payload-render]: disclosed-payload rendering in the
+# Disclosed-payload rendering in the
 # privilege log — render the payload only on a genuine match, never on a
 # mismatch or a withheld row, with the committed/recomputed digests shown
 # alongside it and the same canonicalization used for the hash.
