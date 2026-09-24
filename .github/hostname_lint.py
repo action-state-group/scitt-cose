@@ -61,7 +61,9 @@ def main() -> int:
     for f in _tracked_files(root):
         if f.suffix not in SCAN_SUFFIXES:
             continue
-        if f.name in ("hostname_lint.py", "hostname_lint_allowlist.txt"):
+        # This check's own files legitimately name the disallowed pattern in prose
+        # (this docstring, the allowlist's comments, the workflow's explanatory header).
+        if f.name in ("hostname_lint.py", "hostname_lint_allowlist.txt", "hostname-lint.yml"):
             continue
         try:
             text = f.read_text(errors="ignore")
