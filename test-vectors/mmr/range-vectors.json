@@ -1,5 +1,5 @@
 {
-  "_provenance": "Self-generated (not upstream) -- 9 leaves, real leaf_hash, arbitrary body digests, minted by cll.checkpoint.core.range_proof and confirmed to verify (positives) or correctly fail (negatives) under the Python reference before export. Pins the ported verifyRange *behavior*: [cll-range-proof-per-record-membership] -- every leaf in the claimed range participates in rebuilding the root, not just the two boundary leaves, so a deleted or replaced interior record is caught.",
+  "_provenance": "Self-generated (not upstream) -- 9 leaves, real leaf_hash, arbitrary body digests, minted by cll.checkpoint.core.range_proof and confirmed to verify (positives) or correctly fail (negatives) under the Python reference before export. Pins the ported verifyRange *behavior*: every leaf in the claimed range participates in rebuilding the root, not just the two boundary leaves, so a deleted or replaced interior record is caught.",
   "body_digests": [
     "c2bfef99422082a359a5f3d3d902d4809038cf10e500d7ec16170aea760f7f20",
     "663a85a5bf4a6c150bbfb735abdff85f10e02dd9fa4f8eca49a99001b8d33196",

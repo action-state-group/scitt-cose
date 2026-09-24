@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Authenticity is three-valued in both the Python and browser (CAPSULE_JS)
 verify surfaces — a verifying signature over a self-asserted key must render
-as a qualified "skip", never a green "pass" (the [viewer-authenticity-tiering]
-decision). This exercises the *real* CAPSULE_JS ``checkAuthenticity`` in Node
+as a qualified "skip", never a green "pass". This exercises the *real* CAPSULE_JS ``checkAuthenticity`` in Node
 (real ``crypto.subtle`` Ed25519 verification, not a reimplementation) against
 genuine COSE_Sign1 statements built with this repo's own signer, and checks
 it against ``hosted_profiles.aac._check_authenticity`` for parity.

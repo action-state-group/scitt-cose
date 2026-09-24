@@ -110,7 +110,7 @@ def test_negative_consistency_cases_are_rejected(proof_vectors):
 # Pinned by calling capsule_emit.checkpoint.emit.CheckpointRecord(**same
 # fields).digest() directly -- the Option-C single-commitment shape
 # (v, kind, log_id, mmr_size, root, prev_size, prev_root, key_id, timestamp;
-# no peaks_digest, per [ldg-checkpoint-single-commitment]). Confirms
+# no peaks_digest). Confirms
 # Checkpoint.signing_body()/digest() here are a byte-identical port, not
 # just structurally similar.
 

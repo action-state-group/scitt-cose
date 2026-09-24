@@ -638,16 +638,10 @@ def test_ccf_sandbox_live() -> None:
         try:
             import sys as _sys  # noqa: PLC0415
 
-            for _p in (
-                os.environ.get("SCITT_CCF_PYSCITT_PATH", ""),
-                "/Users/intangible/dev/_work/scitt-ccf-ledger/pyscitt",
-            ):
+            for _p in (os.environ.get("SCITT_CCF_PYSCITT_PATH", ""),):
                 if _p and _p not in _sys.path:
                     _sys.path.insert(0, _p)
-            for _p in (
-                os.environ.get("SCITT_CCF_TEST_PATH", ""),
-                "/Users/intangible/dev/_work/scitt-ccf-ledger/test",
-            ):
+            for _p in (os.environ.get("SCITT_CCF_TEST_PATH", ""),):
                 if _p and _p not in _sys.path:
                     _sys.path.insert(0, _p)
 

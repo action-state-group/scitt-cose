@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""[verify-envelope-unwrap-fix] — Disclosure-Envelope unwrap gaps in the verify viewer.
+"""Disclosure-Envelope unwrap gaps in the verify viewer.
 
 Both bugs shared one root cause: hosted.py's viewer code read fields directly
 off the raw top-level fragment; for a Disclosure-Envelope fragment
