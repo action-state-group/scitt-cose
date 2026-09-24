@@ -637,7 +637,7 @@ def test_capsule_js_has_reg_panel_logic():
 
 
 # ---------------------------------------------------------------------------
-# [ldg-viewer-disclosed-payload-render]: privilege log renders the disclosed
+# Privilege log renders the disclosed
 # payload, gated on a genuine digest match, with the same canonicalization
 # the digest recompute uses.
 # ---------------------------------------------------------------------------

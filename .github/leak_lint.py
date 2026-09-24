@@ -66,10 +66,8 @@ SCAN_SUFFIXES = (
 # tags structurally), each segment 2+ chars (excludes a hex regex character class like
 # `[0-9a-f]`, which the hyphen-as-range-operator would otherwise fake as 2 hyphen-separated
 # segments -- a real task id is always built from meaningful words, never single hex digits),
-# 3+ segments (excludes 2-segment TOML headers like [build-system]), and never immediately
-# followed by `(`, `:`, or `[` -- which is what an inline link, a reference definition, or the
-# first half of a `[text][ref]` pair look like.
-BRACKET_ID = re.compile(r"\[[a-z0-9]{2,}(?:-[a-z0-9]{2,}){2,}\](?![(:\[])")
+# 3+ segments (excludes 2-segment TOML headers like [build-system]).
+BRACKET_ID = re.compile(r"\[[a-z0-9]{2,}(?:-[a-z0-9]{2,}){2,}\]")
 
 # Rule 2 -- ops/lane vocabulary. Literal substrings, matched case-sensitively as written in the
 # spec (avoids false positives like an unrelated product's own "inbox" or "outbox" feature named
@@ -124,9 +122,44 @@ def _load_allowlist(root: Path) -> set[str]:
     }
 
 
+def _has_bracket_id_leak(line: str) -> bool:
+    """True if `line` contains a bracketed id that is NOT a markdown link/reference/citation.
+
+    Checked per-match rather than with a single blanket lookahead, because the exempt shapes
+    need different context:
+      - a pip extra, e.g. `capsule-emit[msft-agent-framework]`: exempt whenever the match is
+        immediately preceded by an identifier character (letter/digit/`_`/`-`) with no
+        separating whitespace -- that is the `package[extra]` shape, indistinguishable from a
+        real id by bracket content alone once the extra name itself has 3+ hyphenated words. A
+        real id reference in prose is always set off by whitespace, a paren, a backtick, or
+        the start of the line/string before the bracket.
+      - inline link `[text](url)` or the first half of `[text][ref]`: exempt whenever the
+        match is immediately followed by `(` or `[`, regardless of position in the line.
+      - reference-link DEFINITION `[ref]: url`: exempt only when the id-shaped bracket is the
+        first thing on the line (only whitespace before it) and is followed by `:` -- that is
+        the actual markdown reference-definition shape. An id followed by `:` in the MIDDLE of
+        a sentence (e.g. a docstring's opening line naming the id it documents, then a colon)
+        is not a reference definition and must still be flagged; a blanket "never follows `:`" rule
+        (an earlier version of this check) missed exactly this shape.
+      - uppercase citation tags (`[RFC2119]`, `[I-D.foo]`): excluded structurally by
+        BRACKET_ID's lowercase-only character class, not handled here.
+    """
+    for m in BRACKET_ID.finditer(line):
+        before = line[m.start() - 1 : m.start()]
+        if before and (before.isalnum() or before in "_-"):
+            continue
+        after = line[m.end() : m.end() + 1]
+        if after in "([":
+            continue
+        if after == ":" and line[: m.start()].strip() == "":
+            continue
+        return True
+    return False
+
+
 def _classify(line: str) -> list[str]:
     hits = []
-    if BRACKET_ID.search(line):
+    if _has_bracket_id_leak(line):
         hits.append("bracketed-id")
     if any(term in line for term in OPS_VOCAB):
         hits.append("ops-vocab")
