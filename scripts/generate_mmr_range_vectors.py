@@ -4,7 +4,7 @@
 vanilla-JS range-membership port (``hosted_profiles.hosted``'s ``MMR_JS``'s
 ``verifyRange``) against checkpointed-local-log's Python reference
 (``cll.checkpoint.core.range_proof``/``verify_range``), the CLL vectors this
-task ([cll-range-proof-per-record-membership]) mints.
+script mints.
 
 Not run in CI, no runtime dependency from scitt-cose on checkpointed-local-log
 (``scitt_cose.cll.verify_range`` is a byte-identical PORT, never an import --
@@ -140,8 +140,8 @@ def generate_range_vectors(core, MemoryNodeStore) -> dict:
             "Self-generated (not upstream) -- 9 leaves, real leaf_hash, arbitrary body "
             "digests, minted by cll.checkpoint.core.range_proof and confirmed to verify "
             "(positives) or correctly fail (negatives) under the Python reference before "
-            "export. Pins the ported verifyRange *behavior*: [cll-range-proof-per-record-"
-            "membership] -- every leaf in the claimed range participates in rebuilding the "
+            "export. Pins the ported verifyRange *behavior*: "
+            "every leaf in the claimed range participates in rebuilding the "
             "root, not just the two boundary leaves, so a deleted or replaced interior "
             "record is caught."
         ),
