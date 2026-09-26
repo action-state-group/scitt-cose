@@ -91,16 +91,16 @@ HDR_KID = 4
 #: SINGLE SOURCE: this value was previously defined independently in
 #: capsule-anchor (``_COSE_GRADE_LABEL``) and (per report) in a downstream
 #: verifier's ``PRIVATE_GRADE``. capsule-anchor now imports ``HDR_GRADE`` from
-#: here instead of hand-maintaining its own copy -- see
-#: [anchor-rfc9943-and-docs-truth].
+#: here instead of hand-maintaining its own copy, so the label has exactly
+#: one definition.
 #:
 #: MIGRATION PLAN: if this value is ever reassigned (e.g. IANA registers
 #: ``-65537`` for an unrelated purpose, or a spec-required registration for a
 #: "grade" claim lands under a different label), the deploying party posts a
 #: label-table migration note to every known downstream verifier BEFORE
 #: changing this constant in a release -- the same discipline used for the
-#: 2026-09 iat/grade rollout (capsule-anchor's
-#: [witness-receipt-signed-time-and-grade]). Never silently reassigned.
+#: 2026-09 iat/grade rollout (capsule-anchor's signed-time-and-grade
+#: receipt change). Never silently reassigned.
 HDR_GRADE = -65537
 
 #: Protected-header labels the receipt layer understands, for RFC 9052 §3.1

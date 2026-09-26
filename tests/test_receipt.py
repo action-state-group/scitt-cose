@@ -332,7 +332,7 @@ def test_unknown_protected_label_in_ext_map(eddsa_keys):
 
 
 # --- RFC 9943 §6 receipt claims: iss / sub / kid ---------------------------
-# [anchor-rfc9943-and-docs-truth] -- additive, backward-compatible (all three
+# Additive, backward-compatible (all three
 # stay optional here; a caller supplying none of them gets the exact
 # pre-existing wire shape, see test_build_receipt_without_claims_unchanged).
 

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # capsule-id test vectors — provenance
 
-Fixtures for `[aac-viewer-recompute-capsule-id]` — the capsule_id-vs-body
+Fixtures for the capsule_id-vs-body
 recompute check added to `CAPSULE_JS`/`BUNDLE_JS`. Generated/pinned by
 `scripts/generate_capsule_id_vectors.py`.
 
@@ -37,8 +37,7 @@ witnessed value. This reproduces the headline finding: a denial silently
 reads as an approval when the viewer never recomputes `capsule_id` from the
 fragment body.
 
-**Scope note:** the filed reproduction (`asg/inbox.md
-[aac-viewer-recompute-capsule-id]`) also describes changing
+**Scope note:** the filed reproduction also describes changing
 `model_attestation.compute_attestation.agent_input.amount` from `"48500.00"`
 to `"25000.00"` on a revealed `agent_input` field. The real capsule-2 body
 recovered here has `agent_input`/`agent_output` **withheld** (digest-only,
@@ -49,7 +48,7 @@ re-running the live demo to mint a new one was explicitly out of scope
 exercise the check under test (any single-field change breaks the RFC 8785
 JCS digest identically, regardless of which field), and is the exact,
 verified, real-data reproduction of the finding's core claim ("a denial
-reads as an approval"). Reported as a scope note in the outbox, not hidden.
+reads as an approval"). Reported as a scope note, not hidden.
 
 ## Regenerating
 

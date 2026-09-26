@@ -132,7 +132,7 @@ def test_witness_downgrade_upgrades_to_pass_when_all_report():
 
 def test_witness_with_no_grade_data_renders_a_plain_count_no_grade_claim():
     """Backward-compat: a witness dict with no `receipt_grades` key (every
-    existing fixture, and every caller before [grade-vocabulary-reconcile])
+    existing fixture, and every caller written before that key was added)
     renders the exact same plain count string as before -- no implicit
     grade claim appears just because grade data was never supplied."""
     bundle, _, _, _ = _load("witness_downgrade")
