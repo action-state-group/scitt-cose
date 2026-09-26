@@ -3,9 +3,9 @@
 """hostname-lint — fail the build if a stale verify.*/witness.*actionstate.* reference appears.
 
 Canonical hosts (2026-09-23, corrected same day by Steven): verify and witness are NEUTRAL and
-live on agentactioncapsule.org; countersign is OPERATED and stays on actionstate -- see
-_work/countersign-service-deploy-plan-2026-09-17.md, section "Money-path / boundary", in the
-action-state-ops workspace. This repo has drifted back to the old verify.actionstate.ai host
+live on agentactioncapsule.org; countersign is OPERATED and stays on actionstate -- the
+surfaces anyone can check are served from the neutral standard's domain, and only the operated
+service stays on the operator's. This repo has drifted back to the old verify.actionstate.ai host
 twice already (see PR #38); this check exists so a third recurrence fails CI instead of shipping.
 
 Disallowed: verify.actionstate.<tld>, witness.actionstate.<tld> (case-insensitive, any TLD).
