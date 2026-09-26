@@ -22,16 +22,16 @@ capsule_id: 6549127e35a6750b217520354929423a85f695acaa9decabace521bc8e7dcc8a
 All three are registered against the live SCITT transparency service
 (`ts.agentactioncapsule.org`). Real inclusion proofs are stored as base64 in `fixtures/anchor_results.json` (receipt_b64 per capsule; .cose binaries are gitignored).
 
-**Permalinks** (live after verify.actionstate.ai P1 deploys):
+**Permalinks** (live after verify.agentactioncapsule.org P1 deploys):
 
 | Capsule | Permalink stub |
 |---------|---------------|
-| A — query | `https://verify.actionstate.ai/c/6549127e35a6750b217520354929423a85f695acaa9decabace521bc8e7dcc8a` |
-| B — approved | `https://verify.actionstate.ai/c/fcdc47760e6c9b8f96b9b776e2003e2eb17bb659750b8f010b16a2b1375d63f8` |
-| C — denied | `https://verify.actionstate.ai/c/56bebce8ec982f7d8f5c1a4d62be58a33930994e96e384804c28bbdd9e1bc419` |
+| A — query | `https://verify.agentactioncapsule.org/c/6549127e35a6750b217520354929423a85f695acaa9decabace521bc8e7dcc8a` |
+| B — approved | `https://verify.agentactioncapsule.org/c/fcdc47760e6c9b8f96b9b776e2003e2eb17bb659750b8f010b16a2b1375d63f8` |
+| C — denied | `https://verify.agentactioncapsule.org/c/56bebce8ec982f7d8f5c1a4d62be58a33930994e96e384804c28bbdd9e1bc419` |
 
 **Reveal variant** (Capsule A with PII disclosed for the "withheld ≠ hidden" beat):
-`https://verify.actionstate.ai/c/6549127e35a6750b217520354929423a85f695acaa9decabace521bc8e7dcc8a?reveal=reveal_a.json`
+`https://verify.agentactioncapsule.org/c/6549127e35a6750b217520354929423a85f695acaa9decabace521bc8e7dcc8a?reveal=reveal_a.json`
 (exact query param depends on P1 UX decision)
 
 ---

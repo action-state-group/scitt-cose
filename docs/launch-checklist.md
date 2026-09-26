@@ -65,7 +65,7 @@ nothing publishes after it without re-running it.
       & governance section): **built by Action State Group**, **neutral by
       design** (test-enforced), **foundation intent, foundation unnamed**. ✔ in-tree
 
-## 4. Hosted endpoint (verify.actionstate.ai) — parallel track
+## 4. Hosted endpoint (verify.agentactioncapsule.org) — parallel track
 
 - [x] Deploy the container (`Dockerfile` in this repo) behind TLS + edge rate
       limiting + body-size cap, per `docs/hosted-verifier-design.md`.
@@ -90,6 +90,13 @@ nothing publishes after it without re-running it.
 - [x] Confirm access logs carry no request bodies (design constraint).
       **Verified: Cloud Run request logs carry method + URL + status only;
       app access logging is silenced by design.**
+- [x] **2026-09-23 — canonical host corrected to `verify.agentactioncapsule.org`**
+      (the neutral domain; the checks above ran against `verify.actionstate.ai`
+      when that was the only mapping, 2026-06-10 — left as-is, a dated record of
+      what was actually verified that day, not rewritten). Both hostnames serve
+      the same Cloud Run service today (dual domain mapping, same pattern as
+      `witness`/`anchor`); `verify.actionstate.ai` is no longer the documented
+      canonical reference.
 - [ ] On repo extraction / name claim (§2): update `REPO_URL` and the
       `pip install` lines in `hosted_profiles/hosted.py` — the landing page's
       repo link must point at the real public repo before the flip.

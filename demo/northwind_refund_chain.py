@@ -23,7 +23,7 @@ Outputs (in --output directory):
 Run once to generate; the witness results are committed so the demo can
 reproduce the same permalinks without re-witnessing.
 
-HOLD on publish-permalinks until verify.actionstate.ai P1 deploys.
+HOLD on publish-permalinks until verify.agentactioncapsule.org P1 deploys.
 """
 from __future__ import annotations
 
@@ -471,8 +471,8 @@ def main(argv: list[str] | None = None) -> None:
         "scenario": "disputed-refund-chain",
         "demo_note": "All content is SYNTHETIC — fictional bank, fictional parties.",
         "permalink_note": (
-            "HOLD on publishing permalinks until verify.actionstate.ai P1 deploys. "
-            "Permalink format will be: https://verify.actionstate.ai/c/<capsule_id>"
+            "HOLD on publishing permalinks until verify.agentactioncapsule.org P1 deploys. "
+            "Permalink format will be: https://verify.agentactioncapsule.org/c/<capsule_id>"
         ),
         "capsules": {},
     }
@@ -502,7 +502,7 @@ def main(argv: list[str] | None = None) -> None:
     # Add permalink stubs (will be live after P1 deploy)
     for _label, meta in anchor_results["capsules"].items():
         meta["permalink_stub"] = (
-            f"https://verify.actionstate.ai/c/{meta['capsule_id']}"
+            f"https://verify.agentactioncapsule.org/c/{meta['capsule_id']}"
         )
 
     (out / "anchor_results.json").write_text(
@@ -525,7 +525,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"  {f.relative_to(out.parent)}")
     print(
         "\nPermalink format (HOLD until P1 deploy): "
-        "https://verify.actionstate.ai/c/<capsule_id>"
+        "https://verify.agentactioncapsule.org/c/<capsule_id>"
     )
 
 

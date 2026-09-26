@@ -264,12 +264,18 @@ def test_instrumentation_referrer_domain_counted():
 
 
 def test_instrumentation_same_origin_not_counted():
-    """Same-origin and localhost referrers are NOT counted as third-party."""
+    """Same-origin and localhost referrers are NOT counted as third-party.
+
+    verify.agentactioncapsule.org (canonical) and verify.actionstate.ai (still live,
+    dual domain mapping onto the same service) must BOTH be recognized same-origin --
+    recognizing only one miscounts same-site navigation on the other as external.
+    """
     len(_REFERRER_COUNTER)
+    _instrument_capsule_view("https://verify.agentactioncapsule.org/v/abc")
     _instrument_capsule_view("https://verify.actionstate.ai/v/abc")
     _instrument_capsule_view("http://localhost:8080/")
     # No new domains should appear for same-origin hits
-    same_origin_domains = {"verify.actionstate.ai", "localhost"}
+    same_origin_domains = {"verify.agentactioncapsule.org", "verify.actionstate.ai", "localhost"}
     assert not same_origin_domains.intersection(_REFERRER_COUNTER)
 
 

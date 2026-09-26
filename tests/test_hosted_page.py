@@ -98,7 +98,7 @@ def test_landing_page_self_hosted_js_no_inline_scripts():
         "https://agentactioncapsule.org",
         "https://agentactioncapsule.org/docs/",
         "https://anchor.agentactioncapsule.org",
-        "https://verify.actionstate.ai",
+        "https://verify.agentactioncapsule.org",
         "https://github.com/action-state-group",
         "https://github.com/ietf-wg-scitt/examples",
         "https://datatracker.ietf.org/doc/draft-mih-scitt-agent-action-capsule/",

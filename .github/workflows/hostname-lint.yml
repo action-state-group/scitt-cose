@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# hostname-lint — catches a verify.actionstate.ai / witness.actionstate.ai regression (this repo's
+# root.html drifted back to the old host twice already; PR #38 caught it once but never merged).
+# No secret involved (a domain name is not reserved vocabulary), so this runs on plain
+# pull_request -- unlike neutrality.yml it does not need pull_request_target's fork-secret
+# plumbing.
+name: hostname-lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hostname-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python .github/hostname_lint.py .
