@@ -63,11 +63,45 @@ _MAX_INCLUSION_PROOFS = 16
 
 #: CWT Claims protected-header label (RFC 8392 §3.1 / COSE header label 15).
 #: When present in the receipt's protected header, the map may include RFC 8392
-#: claim 6 (``iat``, issued-at, an integer Unix timestamp). This library
-#: surfaces the value as-is; interpretation is the caller's responsibility.
+#: claim 6 (``iat``, issued-at, an integer Unix timestamp), claim 1 (``iss``,
+#: issuer) and claim 2 (``sub``, subject) -- RFC 9943 §6 makes ``iss``/``sub``
+#: MUST for a Receipt (a Receipt IS a Signed Statement). This library
+#: surfaces these values as-is; interpretation is the caller's responsibility.
 HDR_CWT_CLAIMS = 15
 #: CWT claim number for issued-at (RFC 8392 §3.1.6).
 CWT_CLAIM_IAT = 6
+#: CWT claim numbers for issuer / subject (RFC 8392 §3.1.1 / §3.1.2).
+CWT_CLAIM_ISS = 1
+CWT_CLAIM_SUB = 2
+#: COSE header label for the key identifier (RFC 9052 §3.1). RFC 9943 line 912
+#: makes this a MUST on a Receipt when neither ``x5t`` nor ``x5chain`` is
+#: present -- this library carries neither, so a conformant caller always
+#: supplies ``kid``.
+HDR_KID = 4
+
+#: Protected-header label for a witness's private-use "grade" claim (e.g.
+#: capsule-anchor's ``mmr-verified`` / ``countersigned-observed``). This is
+#: NOT an IANA-registered COSE header label -- ``-65537`` is a negative
+#: integer in COSE's private-use space (RFC 9052 §2, "Values less than -65536
+#: are reserved for Private Use"), picked to avoid collision with any
+#: registered label. This library does not interpret grade values; it is
+#: surfaced like any other unrecognized protected label via
+#: ``ReceiptResult.protected_header_ext``.
+#:
+#: SINGLE SOURCE: this value was previously defined independently in
+#: capsule-anchor (``_COSE_GRADE_LABEL``) and (per report) in a downstream
+#: verifier's ``PRIVATE_GRADE``. capsule-anchor now imports ``HDR_GRADE`` from
+#: here instead of hand-maintaining its own copy -- see
+#: [anchor-rfc9943-and-docs-truth].
+#:
+#: MIGRATION PLAN: if this value is ever reassigned (e.g. IANA registers
+#: ``-65537`` for an unrelated purpose, or a spec-required registration for a
+#: "grade" claim lands under a different label), the deploying party posts a
+#: label-table migration note to every known downstream verifier BEFORE
+#: changing this constant in a release -- the same discipline used for the
+#: 2026-09 iat/grade rollout (capsule-anchor's
+#: [witness-receipt-signed-time-and-grade]). Never silently reassigned.
+HDR_GRADE = -65537
 
 #: Protected-header labels the receipt layer understands, for RFC 9052 §3.1
 #: crit enforcement: alg (1), crit (2) itself, vds (395) which this layer
@@ -100,13 +134,21 @@ class ReceiptResult:
     Present only when the receipt's signer included it; this library surfaces
     the raw value without interpretation.
 
+    ``issuer`` / ``subject`` — the CWT claims map's ``iss`` (claim 1) / ``sub``
+    (claim 2), or ``None`` if absent. Same discipline as ``iat``: surfaced
+    as-is, no interpretation. RFC 9943 §6 makes both MUST on a Receipt; this
+    library still returns ``None`` for a receipt that omits them rather than
+    failing verification, since enforcing that MUST is a profile decision, not
+    a wire-parsing one.
+
     ``protected_header_ext`` — a ``dict`` of any protected-header labels that
     are not in the set this verifier actively processes (alg/1, crit/2,
     vds/395, CWT_Claims/15). This gives callers transparent access to
-    profile-specific or private-use labels (e.g. negative label numbers) that
-    were signed into the receipt without the neutral lib needing to understand
-    their semantics. Keys are the raw integer or string labels; values are the
-    decoded CBOR values.
+    profile-specific or private-use labels (e.g. ``kid``/4, or negative
+    private-use label numbers like a grade claim) that were signed into the
+    receipt without the neutral lib needing to understand their semantics.
+    Keys are the raw integer or string labels; values are the decoded CBOR
+    values.
     """
 
     ok: bool = False
@@ -115,6 +157,8 @@ class ReceiptResult:
     leaf_index: int | None = None
     errors: list = field(default_factory=list)
     iat: int | None = None
+    issuer: str | None = None
+    subject: str | None = None
     protected_header_ext: dict = field(default_factory=dict)
 
 
@@ -236,6 +280,9 @@ def build_receipt(
     alg: str,
     log_private_key_pem: PemLike,
     detached: bool = True,
+    iss: str | None = None,
+    sub: str | None = None,
+    kid: bytes | None = None,
 ) -> bytes:
     """Mint a COSE Receipt for one leaf of an RFC 9162 Merkle tree.
 
@@ -243,6 +290,24 @@ def build_receipt(
     entry at ``leaf_index`` (which must equal ``leaf_entry_hex``), then signs a
     COSE_Sign1 over the root with the log key. By default the payload (the root)
     is detached.
+
+    ``iss``/``sub``/``kid`` are ADDITIVE and OPTIONAL (``None`` omits each) --
+    a call passing none of them produces the exact pre-existing wire shape,
+    byte-identical to before. RFC 9943 §6 makes ``iss`` (CWT claim 1) and
+    ``sub`` (CWT claim 2) MUST for a Receipt, and line 912 makes ``kid`` a MUST
+    when neither ``x5t`` nor ``x5chain`` is present (this library never sets
+    either) -- so a caller aiming for RFC 9943 conformance must supply all
+    three. This library does not enforce that; it stays profile-agnostic, the
+    same discipline as ``statement.build_signed_statement``.
+
+    ``sub`` in particular: RFC 9943 Figure 10 + §3 define it as the
+    REGISTERED STATEMENT'S OWN subject -- what the Statement (and therefore
+    the Receipt) is made about -- never the identity of whoever submitted
+    it (that belongs in the Statement's own ``iss``, a separate concern this
+    library also does not interpret). A caller conflating "subject" with
+    "submitter" produces a receipt that asserts the wrong thing about the
+    entry it covers; this library will happily sign whatever string is
+    passed here, so getting that distinction right is the caller's job.
     """
     if not 0 <= leaf_index < len(tree_entries_hex):
         raise CoseError(f"leaf_index {leaf_index} out of range for {len(tree_entries_hex)} entries")
@@ -253,7 +318,16 @@ def build_receipt(
     audit_path = merkle.inclusion_proof(tree_entries_hex, leaf_index)
     inclusion_blob = _encode_inclusion_proof(len(tree_entries_hex), leaf_index, audit_path)
 
-    protected = {HDR_VDS: VDS_RFC9162_SHA256}
+    protected: dict = {HDR_VDS: VDS_RFC9162_SHA256}
+    claims: dict = {}
+    if iss is not None:
+        claims[CWT_CLAIM_ISS] = iss
+    if sub is not None:
+        claims[CWT_CLAIM_SUB] = sub
+    if claims:
+        protected[HDR_CWT_CLAIMS] = claims
+    if kid is not None:
+        protected[HDR_KID] = kid
     unprotected = {HDR_VDP: {VDP_INCLUSION_PROOFS: [inclusion_blob]}}
 
     return sign_sign1(
@@ -318,13 +392,19 @@ def verify_receipt(
         result.errors.append("protected header missing alg (label 1)")
         return result
 
-    # Surface iat from the protected CWT claims map (label 15, claim 6).
+    # Surface iat/iss/sub from the protected CWT claims map (label 15).
     # Read-only — no interpretation; None when absent.
     cwt_claims = protected.get(HDR_CWT_CLAIMS)
     if isinstance(cwt_claims, dict):
         iat_val = cwt_claims.get(CWT_CLAIM_IAT)
         if isinstance(iat_val, int) and not isinstance(iat_val, bool):
             result.iat = iat_val
+        iss_val = cwt_claims.get(CWT_CLAIM_ISS)
+        if isinstance(iss_val, str):
+            result.issuer = iss_val
+        sub_val = cwt_claims.get(CWT_CLAIM_SUB)
+        if isinstance(sub_val, str):
+            result.subject = sub_val
 
     # Collect unrecognized protected-header labels so callers can inspect any
     # profile-specific or private-use labels the signer added, without the
@@ -452,7 +532,11 @@ __all__ = [
     "HDR_VDS",
     "HDR_VDP",
     "HDR_CWT_CLAIMS",
+    "HDR_KID",
+    "HDR_GRADE",
     "CWT_CLAIM_IAT",
+    "CWT_CLAIM_ISS",
+    "CWT_CLAIM_SUB",
     "VDS_RFC9162_SHA256",
     "VDS_CCF_LEDGER_SHA256",
     "VDP_INCLUSION_PROOFS",

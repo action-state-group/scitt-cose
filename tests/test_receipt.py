@@ -9,7 +9,11 @@ from scitt_cose import merkle
 from scitt_cose.cose_sign1 import CoseError
 from scitt_cose.receipt import (
     CWT_CLAIM_IAT,
+    CWT_CLAIM_ISS,
+    CWT_CLAIM_SUB,
     HDR_CWT_CLAIMS,
+    HDR_GRADE,
+    HDR_KID,
     HDR_VDP,
     HDR_VDS,
     VDS_RFC9162_SHA256,
@@ -304,12 +308,13 @@ def test_unknown_protected_label_in_ext_map(eddsa_keys):
     """An unrecognized private-use protected label appears in protected_header_ext
     with its raw value and does NOT break verification.
 
-    Uses label -65537 (a private-use negative int, not named or interpreted by
-    this library) as a generic example of any profile-specific signed field.
-    The neutral lib surfaces it as-is; callers interpret it independently.
+    Uses ``HDR_GRADE`` (-65537, the single-sourced private-use witness grade
+    label -- see the module docstring) as a generic example of any
+    profile-specific signed field. The neutral lib surfaces it as-is; callers
+    interpret it independently.
     """
     priv, pub = eddsa_keys
-    private_label = -65537
+    private_label = HDR_GRADE
     private_value = b"some-opaque-value"
 
     receipt, entries, leaf = _build_receipt_with_protected(
@@ -324,3 +329,108 @@ def test_unknown_protected_label_in_ext_map(eddsa_keys):
     assert r.protected_header_ext[private_label] == private_value
     # iat unaffected
     assert r.iat is None
+
+
+# --- RFC 9943 §6 receipt claims: iss / sub / kid ---------------------------
+# [anchor-rfc9943-and-docs-truth] -- additive, backward-compatible (all three
+# stay optional here; a caller supplying none of them gets the exact
+# pre-existing wire shape, see test_build_receipt_without_claims_unchanged).
+
+
+def test_build_receipt_with_iss_sub_kid(alg_keys):
+    """build_receipt threads iss/sub/kid into the protected header, and they
+    round-trip through verify_receipt -- proving they are SIGNED (covered by
+    the COSE_Sign1 signature over the protected bstr), not just present."""
+    alg, priv, pub = alg_keys
+    es = _entries(5)
+    idx = 2
+    kid_bytes = bytes.fromhex("39bb654c9dc0afe1")
+
+    receipt = build_receipt(
+        leaf_entry_hex=es[idx], leaf_index=idx, tree_entries_hex=es,
+        alg=alg, log_private_key_pem=priv,
+        iss="did:web:witness.example",
+        sub="entry:deadbeef",
+        kid=kid_bytes,
+    )
+    r = verify_receipt(receipt, leaf_entry_hex=es[idx], log_public_key_pem=pub)
+    assert r.ok, r.errors
+    assert r.issuer == "did:web:witness.example"
+    assert r.subject == "entry:deadbeef"
+    # kid (label 4) is not a CWT claim -- it surfaces via the generic
+    # unrecognized-protected-label passthrough, same as any private-use label.
+    assert r.protected_header_ext[HDR_KID] == kid_bytes
+
+
+def test_build_receipt_without_claims_unchanged(alg_keys):
+    """Omitting iss/sub/kid produces the exact pre-existing wire shape --
+    byte-identical to a call before this change, same discipline as iat."""
+    alg, priv, pub = alg_keys
+    es = _entries(5)
+    idx = 2
+    receipt = build_receipt(
+        leaf_entry_hex=es[idx], leaf_index=idx, tree_entries_hex=es,
+        alg=alg, log_private_key_pem=priv,
+    )
+    protected = cbor2.loads(cbor2.loads(receipt).value[0])
+    assert HDR_CWT_CLAIMS not in protected
+    assert HDR_KID not in protected
+    r = verify_receipt(receipt, leaf_entry_hex=es[idx], log_public_key_pem=pub)
+    assert r.ok, r.errors
+    assert r.issuer is None
+    assert r.subject is None
+
+
+@pytest.mark.parametrize("tamper_claim", [CWT_CLAIM_ISS, CWT_CLAIM_SUB])
+def test_tampered_cwt_claim_fails_signature(eddsa_keys, tamper_claim):
+    """Mutant check: flipping iss or sub AFTER signing (protected header
+    tampered, signature left alone) must fail verification -- proving both
+    claims are covered by the COSE_Sign1 signature, not just carried
+    unauthenticated in the payload or response body."""
+    priv, pub = eddsa_keys
+    receipt, entries, leaf = _build_receipt_with_protected(
+        {HDR_CWT_CLAIMS: {CWT_CLAIM_ISS: "did:web:witness.example", CWT_CLAIM_SUB: "entry:original"}},
+        alg="EdDSA", priv=priv, pub=pub,
+    )
+    # Sanity: the untampered receipt verifies.
+    ok = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    assert ok.ok, ok.errors
+
+    outer = cbor2.loads(receipt)
+    protected = cbor2.loads(outer.value[0])
+    protected[HDR_CWT_CLAIMS] = dict(protected[HDR_CWT_CLAIMS])
+    protected[HDR_CWT_CLAIMS][tamper_claim] = "tampered-value"
+    tampered_protected_bstr = cbor2.dumps(protected)
+    tampered = cbor2.CBORTag(
+        outer.tag, [tampered_protected_bstr, outer.value[1], outer.value[2], outer.value[3]]
+    )
+    tampered_bytes = cbor2.dumps(tampered)
+
+    bad = verify_receipt(tampered_bytes, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    assert not bad.ok
+    assert any("signature did not verify" in e for e in bad.errors)
+
+
+def test_tampered_kid_fails_signature(eddsa_keys):
+    """Mutant check: flipping kid (label 4, protected -- not a CWT claim)
+    AFTER signing must fail verification the same way iss/sub tampering does."""
+    priv, pub = eddsa_keys
+    kid_bytes = bytes.fromhex("39bb654c9dc0afe1")
+    receipt, entries, leaf = _build_receipt_with_protected(
+        {HDR_KID: kid_bytes}, alg="EdDSA", priv=priv, pub=pub,
+    )
+    ok = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    assert ok.ok, ok.errors
+
+    outer = cbor2.loads(receipt)
+    protected = cbor2.loads(outer.value[0])
+    protected[HDR_KID] = bytes.fromhex("ffffffffffffffff")
+    tampered_protected_bstr = cbor2.dumps(protected)
+    tampered = cbor2.CBORTag(
+        outer.tag, [tampered_protected_bstr, outer.value[1], outer.value[2], outer.value[3]]
+    )
+    tampered_bytes = cbor2.dumps(tampered)
+
+    bad = verify_receipt(tampered_bytes, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    assert not bad.ok
+    assert any("signature did not verify" in e for e in bad.errors)
