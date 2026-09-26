@@ -3746,10 +3746,10 @@ def _b64(value: str) -> bytes:
         return base64.b64decode(s + pad)
 
 
-#: The 9 fields a CLL checkpoint's signature covers, sorted-key + compact
-#: JSON (must match capsule-anchor's ``_checkpoint_signing_body`` /
-#: ``capsule_emit.checkpoint.emit.CheckpointRecord.signing_body()`` byte for
-#: byte, or every real checkpoint fails to verify here).
+#: The 9 fields a CLL checkpoint's signature covers, serialised as sorted-key,
+#: compact-separator JSON -- the ``CheckpointRecord.signing_body()`` of the CLL
+#: reference emitter. ``tests/test_checkpoint_verify.py`` pins this against
+#: the upstream conformance vectors in ``tests/fixtures/cll-checkpoint/``.
 _CHECKPOINT_JSON_SIGNING_FIELDS = (
     "v", "kind", "log_id", "mmr_size", "root",
     "prev_size", "prev_root", "key_id", "timestamp",
@@ -3762,20 +3762,28 @@ def _checkpoint_json_hex_ok(s: object, n_bytes: int) -> bool:
     return isinstance(s, str) and len(s) == n_bytes * 2 and all(c in "0123456789abcdefABCDEF" for c in s)
 
 
+def checkpoint_json_digest_hex(cp: dict[str, Any]) -> str:
+    """Steps 2-3 of :func:`verify_checkpoint_json`: the lowercase-hex sha256
+    of the checkpoint's 9-field signing body. Fields other than the 9 signed
+    ones are ignored."""
+    body = {k: cp[k] for k in _CHECKPOINT_JSON_SIGNING_FIELDS}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def verify_checkpoint_json(checkpoint_text: str, pubkey_hex: str | None) -> dict[str, Any]:
     """Verify a CLL checkpoint minted as deterministic JSON + a bare Ed25519
-    signature (the ``json-ed25519`` wire form -- COSE_Sign1 checkpoints are a
-    separate, not-yet-supported form here; see ``docs/checkpoint-wire.md``
-    for the split). This checks ONLY the checkpoint's own signature over its
-    9-field signing body -- it never contacts any witness, so it CANNOT
+    signature (the ``json-ed25519`` wire form; COSE_Sign1 checkpoints are not
+    supported here yet). This checks ONLY the checkpoint's own signature over
+    its 9-field signing body -- it never contacts any witness, so it CANNOT
     confirm the checkpoint was actually countersigned/observed by a
-    particular log. See the ``notes`` in the returned dict for that
-    distinction, always stated, never implied.
+    particular log. When the signature verifies, the returned ``reasons``
+    say so explicitly.
 
-    Algorithm (must match capsule-anchor's ``checkpoint_json.py`` /
-    ``service._checkpoint_digest`` exactly):
+    Algorithm (the CLL reference emitter's ``CheckpointRecord.digest()`` and
+    ``verify_checkpoint_signature_offline``; pinned by
+    ``test_upstream_vector_*`` in ``tests/test_checkpoint_verify.py``):
       1. Parse JSON, require the 9 signing fields + ``signature`` (hex).
-      2. ``signing_body = json.dumps(sorted 9-field dict, sort_keys=True,
+      2. ``signing_body = json.dumps(9-field dict, sort_keys=True,
          separators=(",", ":")).encode()``
       3. ``digest_hex = sha256(signing_body).hexdigest()`` (64 hex chars)
       4. The signature is Ed25519 over ``digest_hex.encode("ascii")`` --
@@ -3829,8 +3837,7 @@ def verify_checkpoint_json(checkpoint_text: str, pubkey_hex: str | None) -> dict
     except ValueError as exc:
         return {"signature_verified": False, "reasons": [f"signature is not valid hex: {exc}"], "covers": covers}
 
-    signing_body = json.dumps(cp, sort_keys=True, separators=(",", ":")).encode()
-    digest_hex = hashlib.sha256(signing_body).hexdigest()
+    digest_hex = checkpoint_json_digest_hex(cp)
 
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey

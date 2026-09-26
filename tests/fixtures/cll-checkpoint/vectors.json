@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "spec": "Checkpointed Local Log (CLL) checkpoint record -- signing body, digest, and Ed25519 signature. Rust and Python are two implementations of one spec; these vectors are the contract.",
+  "signing_key_seed_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+  "signing_key_seed_note": "deterministic fixture seed (32 bytes of 0x07) -- NOT a real credential; Ed25519 signing is fully deterministic (RFC 8032), so this seed plus each case's signing_body reproduces signature_hex byte-for-byte in any conformant Ed25519 implementation.",
+  "key_id": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+  "leaf_identity_note": "root/consistency_proof values reused verbatim from mmr-conformance-vectors/vectors.json's root-2-leaves, root-7-leaves, and consistency-2-to-7-leaves cases (seq range 1..7, leaf_identity seed 'asg-ledger-mmr-vector-leaf-{seq}').",
+  "count": 2,
+  "cases": [
+    {
+      "v": 1,
+      "kind": "mmr_checkpoint",
+      "log_id": "asg-cll-conformance-log",
+      "mmr_size": 3,
+      "root": "f7b19d3f831d2cddfe91865465a8beb649e4bf16c3aa2fde7378e7ee2e215694",
+      "prev_size": 0,
+      "prev_root": "",
+      "key_id": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "signature": "d87ebe1073b2651d586b6e6f7e86cb3ec9f3fc156502f77447f7e6dc2aa663ce167bca99105ebcc11eb155398cec715667defa809cdeb8c4bdfc84636cda9a03",
+      "digest_hex": "15f02f4df50cd006f2f347497d5c660918a436eaec6f0de0ff3df2db286401ce",
+      "entry_digest_hex": "564052a097ea76e0c9146249fe6f20ce90db84664f2c50703cd125bb01ad97f2",
+      "name": "checkpoint-first-2-leaves",
+      "description": "First checkpoint for the log (prev_size=0, no consistency_proof)."
+    },
+    {
+      "v": 1,
+      "kind": "mmr_checkpoint",
+      "log_id": "asg-cll-conformance-log",
+      "mmr_size": 11,
+      "root": "a0c0e8e7d78bf06dee4c988a228ff034dca8a25964a4af89a3d7d11670f31d10",
+      "prev_size": 3,
+      "prev_root": "f7b19d3f831d2cddfe91865465a8beb649e4bf16c3aa2fde7378e7ee2e215694",
+      "key_id": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+      "timestamp": "2026-01-01T00:05:00Z",
+      "signature": "3c4e395bcdf2dbd81682cf226aff73e6713642ec8c0a299342b9bb71c5fc1b334ed5df8c0d4beebdea817ba66cd07c5cc467c05c0fd085d6f71662672f65de04",
+      "digest_hex": "c1315594f38233dca589993c11319014286ce01a3bfe9c3526a58891ad8c19c3",
+      "entry_digest_hex": "3c987a1074cfb4ff7692465b350602e2cf3ac00a963de100eb0614c172b39573",
+      "name": "checkpoint-chained-2-to-7-leaves",
+      "description": "Second checkpoint, chained from checkpoint-first-2-leaves via an MMR consistency proof bridging size_a=3 (2 leaves) to size_b=11 (7 leaves).",
+      "consistency_proof": {
+        "v": 1,
+        "kind": "consistency",
+        "size_a": 3,
+        "size_b": 11,
+        "old_peaks": [
+          "f7b19d3f831d2cddfe91865465a8beb649e4bf16c3aa2fde7378e7ee2e215694"
+        ],
+        "witness": [
+          [
+            "05c9493be026d8315757aa79d5bea709b5e51fb8ce61c011a55bb78a04ce20c1"
+          ]
+        ],
+        "new_peaks": [
+          "44588de7a213cb67d681fd0822d22f57248a50b5cab4d5579c1d9162403b6755",
+          "0989e85a9157a320fda8aa5ce675e16246273f3ecc3002d56ce57166e016fd6d",
+          "209f48917e02c4d5c95fc3e9f33d9d763cca7b1e1a3e745397f942efc8ac4e92"
+        ]
+      }
+    }
+  ]
+}

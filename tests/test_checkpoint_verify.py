@@ -2,27 +2,65 @@
 """Checkpoint drop-zone verification — the ``json-ed25519`` wire form.
 
 This checks ONLY the checkpoint's own Ed25519 signature over its 9-field
-signing body. The algorithm (sorted-key/compact-separator JSON, sha256 hex
-digest, sign over the hex STRING's ascii bytes) must match capsule-anchor's
-``checkpoint_json.py`` / ``service._checkpoint_digest`` exactly, or every
-real checkpoint fails to verify here. Test vectors are self-generated
-(we don't hold any real witness's private key) — that's fine, since the
-point is pinning OUR reimplementation of the shared algorithm, not
-round-tripping a specific partner's bytes.
+signing body (sorted-key/compact-separator JSON, sha256 hex digest, signed
+over the hex STRING's ascii bytes).
+
+Two kinds of vectors:
+
+* ``test_upstream_vector_*`` use the CLL checkpoint conformance vectors,
+  vendored byte-verbatim in ``tests/fixtures/cll-checkpoint/`` (provenance
+  and digest in that directory's README). The CLL reference emitter produced
+  every digest and signature there; nothing in them came from this repo, so
+  these tests are what show this verifier agrees with that emitter.
+* Every other test signs with a fresh key generated here. Those vectors are
+  self-generated, so they exercise the verifier's failure paths (tampering,
+  wrong key, missing key, malformed input) but prove nothing about agreement
+  with any other implementation.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from hosted_profiles.hosted import verify_checkpoint_json, verify_payload
+from hosted_profiles.hosted import (
+    checkpoint_json_digest_hex,
+    verify_checkpoint_json,
+    verify_payload,
+)
+
+_UPSTREAM_VECTORS = Path(__file__).parent / "fixtures" / "cll-checkpoint" / "vectors.json"
+#: Raw SHA-256 of the vendored file, as recorded in its README.
+_UPSTREAM_VECTORS_SHA256 = "e7d2813e8eca011e7d6016ac89ac0f20fb4f74772eb7fa436cc7482290a7a2a2"
+_WIRE_FIELDS = (
+    "v", "kind", "log_id", "mmr_size", "root",
+    "prev_size", "prev_root", "key_id", "timestamp", "signature",
+)
+
+
+def _load_upstream() -> dict:
+    raw = _UPSTREAM_VECTORS.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == _UPSTREAM_VECTORS_SHA256, (
+        "vendored CLL checkpoint vectors changed; re-vendor from upstream and "
+        "update the digest in the README and here together"
+    )
+    return json.loads(raw)
+
+
+_UPSTREAM = _load_upstream()
+_UPSTREAM_CASES = _UPSTREAM["cases"]
+
+
+def _wire(case: dict) -> dict:
+    """The checkpoint as it travels: the 9 signed fields + ``signature``,
+    without the vector file's expected-value and description keys."""
+    return {k: case[k] for k in _WIRE_FIELDS}
 
 
 def _sign_checkpoint(priv: Ed25519PrivateKey, cp: dict) -> dict:
-    import hashlib
-
     signing_body = json.dumps(cp, sort_keys=True, separators=(",", ":")).encode()
     digest_hex = hashlib.sha256(signing_body).hexdigest()
     sig = priv.sign(digest_hex.encode("ascii"))
@@ -53,7 +91,7 @@ def checkpoint_fields():
     }
 
 
-def test_real_checkpoint_verifies(keypair, checkpoint_fields):
+def test_self_signed_checkpoint_verifies(keypair, checkpoint_fields):
     priv, pub_hex = keypair
     signed = _sign_checkpoint(priv, checkpoint_fields)
     result = verify_checkpoint_json(json.dumps(signed), pub_hex)
@@ -89,8 +127,8 @@ def test_mutant_wrong_pubkey_fails(keypair, checkpoint_fields):
 
 def test_no_pubkey_never_reports_success(keypair, checkpoint_fields):
     """A missing key must report 'not checked' (None), never True — a
-    checker that defaults to pass on missing input is the exact false-
-    assurance bug class QUEUE_PROTOCOL 7a exists to catch."""
+    checker that defaults to pass on missing input is the false-assurance
+    bug class this check exists to catch."""
     priv, _pub_hex = keypair
     signed = _sign_checkpoint(priv, checkpoint_fields)
     result = verify_checkpoint_json(json.dumps(signed), None)
@@ -143,6 +181,30 @@ def test_verified_checkpoint_never_claims_witness_countersign(keypair, checkpoin
     priv, pub_hex = keypair
     signed = _sign_checkpoint(priv, checkpoint_fields)
     result = verify_checkpoint_json(json.dumps(signed), pub_hex)
+    assert result["signature_verified"] is True
     joined = " ".join(result["reasons"]).lower()
-    assert "does not confirm" in joined or "does not" in joined
-    assert "countersign" in joined or "witness" in joined
+    assert "does not confirm any witness" in joined
+
+
+def test_upstream_vectors_present():
+    """Guard against the parametrized tests below collecting zero cases."""
+    assert len(_UPSTREAM_CASES) == _UPSTREAM["count"] == 2
+
+
+@pytest.mark.parametrize("case", _UPSTREAM_CASES, ids=[c["name"] for c in _UPSTREAM_CASES])
+def test_upstream_vector_digest_matches(case):
+    assert checkpoint_json_digest_hex(_wire(case)) == case["digest_hex"]
+
+
+@pytest.mark.parametrize("case", _UPSTREAM_CASES, ids=[c["name"] for c in _UPSTREAM_CASES])
+def test_upstream_vector_signature_verifies(case):
+    result = verify_checkpoint_json(json.dumps(_wire(case)), _UPSTREAM["key_id"])
+    assert result["signature_verified"] is True, result["reasons"]
+
+
+@pytest.mark.parametrize("case", _UPSTREAM_CASES, ids=[c["name"] for c in _UPSTREAM_CASES])
+def test_upstream_vector_tampered_field_fails(case):
+    wire = _wire(case)
+    wire["mmr_size"] += 1
+    result = verify_checkpoint_json(json.dumps(wire), _UPSTREAM["key_id"])
+    assert result["signature_verified"] is False
