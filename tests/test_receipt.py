@@ -2,6 +2,9 @@
 """COSE Receipt build/verify (detached + attached) and negatives."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import cbor2
 import pytest
 
@@ -434,3 +437,82 @@ def test_tampered_kid_fails_signature(eddsa_keys):
     bad = verify_receipt(tampered_bytes, leaf_entry_hex=leaf, log_public_key_pem=pub)
     assert not bad.ok
     assert any("signature did not verify" in e for e in bad.errors)
+
+
+# --- header claims are never surfaced from a receipt whose signature fails ---
+# Grade-forgery class: a receipt signed under an attacker's key can carry any
+# grade/iat it likes in its protected header. Verified under the real pinned
+# key it fails, and none of those claims may reach the caller.
+
+_GRADE = "mmr-verified"
+_GRADED_HEADER = {HDR_CWT_CLAIMS: {CWT_CLAIM_IAT: 1_700_001_000}, HDR_GRADE: _GRADE}
+
+
+def _assert_claims_withheld(r):
+    assert r.ok is False
+    assert HDR_GRADE not in r.protected_header_ext
+    assert r.protected_header_ext == {}
+    assert r.iat is None
+    assert r.issuer is None
+    assert r.subject is None
+    assert _GRADE not in repr(r)
+    assert any("claims withheld" in e for e in r.errors), r.errors
+
+
+def test_grade_not_exposed_when_signed_by_non_pinned_key(eddsa_keys, other_eddsa_keys):
+    _priv, real_pub = eddsa_keys
+    attacker_priv, attacker_pub = other_eddsa_keys
+    receipt, _entries_, leaf = _build_receipt_with_protected(
+        _GRADED_HEADER, alg="EdDSA", priv=attacker_priv, pub=attacker_pub,
+    )
+    r = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=real_pub)
+    _assert_claims_withheld(r)
+    assert any("signature did not verify" in e for e in r.errors)
+
+
+def test_grade_not_exposed_when_signature_bytes_corrupted(eddsa_keys):
+    priv, pub = eddsa_keys
+    receipt, _entries_, leaf = _build_receipt_with_protected(
+        _GRADED_HEADER, alg="EdDSA", priv=priv, pub=pub,
+    )
+    protected_bstr, unprotected, payload, sig = cbor2.loads(receipt).value
+    bad_sig = bytes([sig[0] ^ 0x01]) + sig[1:]
+    tampered = cbor2.dumps(cbor2.CBORTag(18, [protected_bstr, unprotected, payload, bad_sig]))
+    r = verify_receipt(tampered, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    _assert_claims_withheld(r)
+    assert any("signature did not verify" in e for e in r.errors)
+
+
+def test_grade_still_exposed_on_valid_receipt(eddsa_keys):
+    priv, pub = eddsa_keys
+    receipt, _entries_, leaf = _build_receipt_with_protected(
+        _GRADED_HEADER, alg="EdDSA", priv=priv, pub=pub,
+    )
+    r = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=pub)
+    assert r.ok, r.errors
+    assert r.protected_header_ext[HDR_GRADE] == _GRADE
+    assert r.iat == 1_700_001_000
+    assert not any("claims withheld" in e for e in r.errors)
+
+
+_RECEIPT_V1 = Path(__file__).resolve().parent.parent / "test-vectors" / "receipt-v1"
+
+
+@pytest.mark.parametrize(
+    "vid", sorted(p.name for p in _RECEIPT_V1.iterdir() if (p / "expected.json").is_file())
+)
+def test_frozen_receipt_v1_vectors_unchanged(vid):
+    """The published receipt-v1 vectors (incl. the pre-iat/grade real capture)
+    verify exactly as their frozen expected.json says: ok, iat, grade."""
+    d = _RECEIPT_V1 / vid
+    exp = json.loads((d / "expected.json").read_text())
+    r = verify_receipt(
+        (d / "receipt.cose").read_bytes(),
+        leaf_entry_hex=exp["leaf_entry_hex"],
+        log_public_key_pem=(d / "log-key.pub").read_bytes(),
+    )
+    assert r.ok is exp["ok"], r.errors
+    assert r.iat == exp["iat"]
+    assert r.protected_header_ext.get(HDR_GRADE) == exp["grade"]
+    if exp["ok"]:
+        assert r.root == exp["root"]

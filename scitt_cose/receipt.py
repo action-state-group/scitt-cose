@@ -118,6 +118,14 @@ _CCF_RECEIPT_UNDERSTOOD = _RECEIPT_UNDERSTOOD | frozenset({4, "ccf.v1"})
 
 PemLike = Union[bytes, str]
 
+#: Finding appended when the signature fails: the protected-header claims
+#: (iat/iss/sub and ``protected_header_ext``, which carries any grade) are
+#: left unset because nothing in an unverified header may be surfaced.
+_CLAIMS_WITHHELD = (
+    "protected header claims withheld (iat/iss/sub/protected_header_ext): "
+    "receipt signature did not verify"
+)
+
 
 @dataclass
 class ReceiptResult:
@@ -149,6 +157,10 @@ class ReceiptResult:
     receipt without the neutral lib needing to understand their semantics.
     Keys are the raw integer or string labels; values are the decoded CBOR
     values.
+
+    ``iat``, ``issuer``, ``subject`` and ``protected_header_ext`` are populated
+    ONLY when ``ok`` is ``True``. On any failure they stay ``None``/empty; a
+    failed signature additionally adds a "claims withheld" entry to ``errors``.
     """
 
     ok: bool = False
@@ -392,28 +404,6 @@ def verify_receipt(
         result.errors.append("protected header missing alg (label 1)")
         return result
 
-    # Surface iat/iss/sub from the protected CWT claims map (label 15).
-    # Read-only — no interpretation; None when absent.
-    cwt_claims = protected.get(HDR_CWT_CLAIMS)
-    if isinstance(cwt_claims, dict):
-        iat_val = cwt_claims.get(CWT_CLAIM_IAT)
-        if isinstance(iat_val, int) and not isinstance(iat_val, bool):
-            result.iat = iat_val
-        iss_val = cwt_claims.get(CWT_CLAIM_ISS)
-        if isinstance(iss_val, str):
-            result.issuer = iss_val
-        sub_val = cwt_claims.get(CWT_CLAIM_SUB)
-        if isinstance(sub_val, str):
-            result.subject = sub_val
-
-    # Collect unrecognized protected-header labels so callers can inspect any
-    # profile-specific or private-use labels the signer added, without the
-    # neutral lib ascribing any meaning to them (same discipline as vds/395).
-    _KNOWN_PROTECTED = frozenset({HDR_ALG, HDR_CRIT, HDR_VDS, HDR_CWT_CLAIMS})
-    result.protected_header_ext = {
-        k: v for k, v in protected.items() if k not in _KNOWN_PROTECTED
-    }
-
     if not isinstance(unprotected, dict):
         result.errors.append("unprotected header is not a map")
         return result
@@ -477,6 +467,7 @@ def verify_receipt(
             )
         except CoseError as exc:
             result.errors.append(f"receipt signature did not verify: {exc}")
+            result.errors.append(_CLAIMS_WITHHELD)
             return result
 
     elif vds == VDS_CCF_LEDGER_SHA256:
@@ -501,6 +492,7 @@ def verify_receipt(
             )
         except CoseError as exc:
             result.errors.append(f"receipt signature did not verify: {exc}")
+            result.errors.append(_CLAIMS_WITHHELD)
             return result
 
     else:
@@ -511,6 +503,31 @@ def verify_receipt(
             "expected RFC9162_SHA256 (vds=1) or CCF_LEDGER_SHA256 (vds=2)"
         )
         return result
+
+    # Header claims (iat/iss/sub, and the unrecognized labels incl. the -65537
+    # grade) are surfaced ONLY once the signature has verified under the pinned
+    # key: a claim from a receipt that failed verification is attacker-chosen
+    # and must never reach a caller, not even alongside ok=False.
+    # Read-only — no interpretation; None when absent.
+    cwt_claims = protected.get(HDR_CWT_CLAIMS)
+    if isinstance(cwt_claims, dict):
+        iat_val = cwt_claims.get(CWT_CLAIM_IAT)
+        if isinstance(iat_val, int) and not isinstance(iat_val, bool):
+            result.iat = iat_val
+        iss_val = cwt_claims.get(CWT_CLAIM_ISS)
+        if isinstance(iss_val, str):
+            result.issuer = iss_val
+        sub_val = cwt_claims.get(CWT_CLAIM_SUB)
+        if isinstance(sub_val, str):
+            result.subject = sub_val
+
+    # Collect unrecognized protected-header labels so callers can inspect any
+    # profile-specific or private-use labels the signer added, without the
+    # neutral lib ascribing any meaning to them (same discipline as vds/395).
+    _KNOWN_PROTECTED = frozenset({HDR_ALG, HDR_CRIT, HDR_VDS, HDR_CWT_CLAIMS})
+    result.protected_header_ext = {
+        k: v for k, v in protected.items() if k not in _KNOWN_PROTECTED
+    }
 
     result.ok = True
     return result
