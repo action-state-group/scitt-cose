@@ -270,6 +270,12 @@ _PAGE_CSS = """
   table.boundary tbody th{font-weight:600;white-space:nowrap;width:160px}
   table.boundary tbody td{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
   table.boundary tr:last-child th,table.boundary tr:last-child td{border-bottom:none}
+  @media(max-width:600px){
+    table.boundary{font-size:12.5px}
+    table.boundary tbody th{white-space:normal;width:auto}
+    table.boundary th,table.boundary td{padding:9px 8px;overflow-wrap:break-word}
+    table.boundary tbody td{font-size:11.5px}
+  }
   .twocol{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:6px}
   .lst h5{font-size:13px;font-weight:600;margin-bottom:10px}
   .lst ul{list-style:none;display:flex;flex-direction:column;gap:8px}
@@ -424,7 +430,9 @@ def _esc(s: str) -> str:
 # AAC Capsule Verification Surface — P1
 # ---------------------------------------------------------------------------
 
-#: Live transparency service this surface queries for inclusion proofs.
+#: Live transparency service this surface queries for inclusion proofs (API
+#: calls only). Page links use the canonical witness.agentactioncapsule.org; the
+#: legacy anchor.* name is kept here so this change moves no API traffic.
 _ANCHOR_BASE = "https://anchor.agentactioncapsule.org"
 
 #: Same vocabulary as agent_action_capsule.history's inclusion-proof visibility
@@ -3137,7 +3145,7 @@ def render_capsule_page(capsule_id: str) -> str:
     </a>
     <div class="nav-links">
       <a href="https://agentactioncapsule.org">Standard</a>
-      <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+      <a href="https://witness.agentactioncapsule.org">Transparency Log</a>
       <a href="/" class="active">Verifier</a>
       <a href="https://agentactioncapsule.org/docs/">Docs</a>
     </div>
@@ -3267,7 +3275,7 @@ def render_capsule_page(capsule_id: str) -> str:
           <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
         </a>
         <p>Stateless public verification surface for Agent Action Capsule records.
-        Anchor: <a href="https://anchor.agentactioncapsule.org">anchor.agentactioncapsule.org</a>.</p>
+        Witness: <a href="https://witness.agentactioncapsule.org">witness.agentactioncapsule.org</a>.</p>
       </div>
       <div class="foot-cols">
         <div class="foot-col">
@@ -3278,7 +3286,7 @@ def render_capsule_page(capsule_id: str) -> str:
         </div>
         <div class="foot-col">
           <h5>Services</h5>
-          <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+          <a href="https://witness.agentactioncapsule.org">Transparency Log</a>
           <a href="/">Verifier</a>
         </div>
         <div class="foot-col">
@@ -3345,7 +3353,7 @@ def render_landing_page() -> str:
     <a class="brand" href="https://agentactioncapsule.org"><span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span></a>
     <div class="nav-links">
       <a href="https://agentactioncapsule.org">Standard</a>
-      <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+      <a href="https://witness.agentactioncapsule.org">Transparency Log</a>
       <a class="active" href="/">Verifier</a>
       <a href="https://agentactioncapsule.org/docs/">Docs</a>
       <a class="nav-ghost" href="https://github.com/action-state-group">Source ↗</a>
@@ -3423,7 +3431,7 @@ def render_landing_page() -> str:
 {rows}
       </tbody>
     </table>
-    <p style="font-size:14px;color:var(--muted);margin-top:14px">A verifier that starts storing submissions, issuing receipts, or anchoring has silently become a Transparency Service with all of its obligations. This one has no write path, no persistence, and no key custody — by construction. To run a real log, see <a href="https://anchor.agentactioncapsule.org" style="color:var(--accent)">the transparency service ↗</a>.</p>
+    <p style="font-size:14px;color:var(--muted);margin-top:14px">A verifier that starts storing submissions, issuing receipts, or anchoring has silently become a Transparency Service with all of its obligations. This one has no write path, no persistence, and no key custody — by construction. To run a real log, see <a href="https://witness.agentactioncapsule.org" style="color:var(--accent)">the transparency service ↗</a>.</p>
   </div>
 </section>
 
@@ -3480,7 +3488,7 @@ def render_landing_page() -> str:
         </div>
         <div class="foot-col">
           <h5>Services</h5>
-          <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+          <a href="https://witness.agentactioncapsule.org">Transparency Log</a>
           <a href="/">Verifier</a>
         </div>
         <div class="foot-col">
@@ -3529,7 +3537,7 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
     </a>
     <div class="nav-links">
       <a href="https://agentactioncapsule.org">Standard</a>
-      <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+      <a href="https://witness.agentactioncapsule.org">Transparency Log</a>
       <a href="/">Verifier</a>
       <a href="/bundle" class="active">Bundle</a>
       <a href="https://agentactioncapsule.org/docs/">Docs</a>
@@ -3629,7 +3637,7 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
         </div>
         <div class="foot-col">
           <h5>Services</h5>
-          <a href="https://anchor.agentactioncapsule.org">Transparency Log</a>
+          <a href="https://witness.agentactioncapsule.org">Transparency Log</a>
           <a href="/">Verifier</a>
         </div>
         <div class="foot-col">

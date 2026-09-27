@@ -123,7 +123,7 @@ def test_hosted_bundle_page_is_csp_safe():
         REPO_URL,
         "https://agentactioncapsule.org",
         "https://agentactioncapsule.org/docs/",
-        "https://anchor.agentactioncapsule.org",
+        "https://witness.agentactioncapsule.org",
         f"{REPO_URL}/blob/main/docs/verification-trust-model.md",
     }
     assert not (external - allowed), external - allowed

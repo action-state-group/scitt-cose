@@ -24,6 +24,8 @@ from ._status import (
     DRAFT_COSE_MERKLE_TREE_PROOFS,
     DRAFT_SCITT_ARCHITECTURE,
     DRAFT_TRACKING_NOTICE,
+    RFC_COSE_RECEIPTS,
+    RFC_SCITT_ARCHITECTURE,
     SUBSTRATE_RFCS,
 )
 from .cose_sign1 import CoseError, Sign1, sign_sign1, verify_sign1
@@ -52,6 +54,8 @@ __all__ = [
     "DRAFT_TRACKING_NOTICE",
     "DRAFT_SCITT_ARCHITECTURE",
     "DRAFT_COSE_MERKLE_TREE_PROOFS",
+    "RFC_SCITT_ARCHITECTURE",
+    "RFC_COSE_RECEIPTS",
     "SUBSTRATE_RFCS",
     # COSE_Sign1
     "sign_sign1",

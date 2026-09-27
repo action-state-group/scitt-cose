@@ -54,10 +54,9 @@ def test_landing_page_renders_boundary_table():
     # Every capability statement is on the page too.
     for line in CAPABILITIES["does"] + CAPABILITIES["does_not"]:
         assert line in html
-    # Draft-tracking honesty is on the page — stated positively, with no
-    # mention of unassigned RFC numbers in any form.
-    assert "NOT yet published as RFCs" in html
-    assert "9942" not in html
+    # Standards status is on the page: both documents are published RFCs.
+    assert "RFC 9942 (COSE Receipts)" in html
+    assert "NOT yet published" not in html
     # Interactive page: no inline scripts (externalized to /static/verify.js);
     # no external stylesheet fetches; no Google Fonts or CDN resources.
     assert '<script src="/static/verify.js">' in html
@@ -97,7 +96,7 @@ def test_landing_page_self_hosted_js_no_inline_scripts():
         REPO_URL,
         "https://agentactioncapsule.org",
         "https://agentactioncapsule.org/docs/",
-        "https://anchor.agentactioncapsule.org",
+        "https://witness.agentactioncapsule.org",
         "https://verify.agentactioncapsule.org",
         "https://github.com/action-state-group",
         "https://github.com/ietf-wg-scitt/examples",
@@ -411,3 +410,41 @@ def test_static_js_route():
         t.join(timeout=10)
     finally:
         httpd.server_close()
+
+
+def test_pages_link_witness_not_legacy_anchor_host():
+    """witness.agentactioncapsule.org is the canonical name; anchor.* is legacy.
+
+    Every page this surface renders links the witness host and never links the
+    legacy one (the API base, _ANCHOR_BASE, is a fetch target, not a link).
+    """
+    import re
+
+    from hosted_profiles.hosted import render_bundle_page, render_capsule_page
+
+    pages = {
+        "landing": render_landing_page(),
+        "capsule": render_capsule_page("a" * 64),
+        "bundle": render_bundle_page(),
+        "bundle-offline": render_bundle_page(offline=True),
+    }
+    for name, html in pages.items():
+        hrefs = re.findall(r'href="([^"]*)"', html)
+        assert not [h for h in hrefs if "anchor.agentactioncapsule.org" in h], name
+        assert "Anchor: <a" not in html, name
+    assert "https://witness.agentactioncapsule.org" in pages["landing"]
+    assert "Witness: <a" in pages["capsule"] + pages["landing"]
+
+
+def test_boundary_table_fits_phone_width():
+    """At <=600px the boundary table's row headers must wrap: `nowrap` plus a
+    fixed 160px column pushed the table to 457px at a 375px viewport (measured
+    in headless Chromium; after this rule it is 375px)."""
+    import re
+
+    html = render_landing_page()
+    mobile = re.search(r"@media\(max-width:600px\)\{(.*?)\n  \}", html, re.S)
+    assert mobile, "no <=600px rule for the boundary table"
+    rule = mobile.group(1)
+    assert "table.boundary tbody th{white-space:normal;width:auto}" in rule
+    assert "overflow-wrap:break-word" in rule

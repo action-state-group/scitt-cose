@@ -27,7 +27,7 @@ use `python-cwt` or any other COSE library.
   key — EdDSA and ES256 — and report its issuer / subject / content-type / alg.
 - Verify a **COSE Receipt** carrying either of two verifiable data structures:
   **`RFC9162_SHA256`** (vds = 1, the tree algorithm registered by
-  draft-ietf-cose-merkle-tree-proofs) or **CCF `ccf.v1`** (vds = 2, Microsoft
+  RFC 9942) or **CCF `ccf.v1`** (vds = 2, Microsoft
   CCF's Merkle format, used by scitt-ccf-ledger v7+) — the RFC 9162 SHA-256
   inclusion proof *and* the log's signature over the reconstructed root — i.e.
   *"this statement is provably in the log"* — **without trusting the log
@@ -189,7 +189,7 @@ scitt-cose --statement stmt.cose --receipt receipt.cose \
 | Statements | `build_signed_statement`, `parse_signed_statement`, `attach_receipts`, `extract_receipts` |
 | Merkle | `leaf_hash`, `merkle_root`, `inclusion_proof`, `verify_inclusion`, `consistency_proof`, `verify_consistency` |
 | Receipts | `build_receipt`, `verify_receipt`, `ReceiptResult` |
-| Status | `DRAFT_TRACKING_NOTICE`, `DRAFT_SCITT_ARCHITECTURE`, `DRAFT_COSE_MERKLE_TREE_PROOFS`, `SUBSTRATE_RFCS` |
+| Status | `DRAFT_TRACKING_NOTICE`, `RFC_SCITT_ARCHITECTURE`, `RFC_COSE_RECEIPTS`, `SUBSTRATE_RFCS` (`DRAFT_*` names kept as aliases) |
 
 ### Failure contract
 
@@ -246,8 +246,9 @@ claims map; this library always reads and writes the claims at **15**.
 
 ### Receipt vdp encoding (honest caveat)
 
-The Receipt's verifiable-data-proof shape tracks
-**draft-ietf-cose-merkle-tree-proofs-18**:
+The Receipt's verifiable-data-proof shape is
+**[RFC 9942](https://www.rfc-editor.org/rfc/rfc9942)** (COSE Receipts; unchanged
+from draft-ietf-cose-merkle-tree-proofs-18, which this library was first built against):
 
 - protected `1` = alg, protected `395` = vds (`1` = `RFC9162_SHA256`);
 - unprotected `396` = vdp map with key `-1` → array of inclusion-proof bstrs;
@@ -256,22 +257,18 @@ The Receipt's verifiable-data-proof shape tracks
 
 `verify_receipt` reads **vds from the protected header only** (it is
 security-relevant and must be integrity-protected), reconstructs the root from
-the proof, and verifies the COSE_Sign1 over that root with the log key. Because
-the underlying documents are **drafts, not RFCs**, this exact CBOR shape is
-**validated by round-trip in this library's own tests**, not against a frozen
-RFC. Treat the wire shape as draft-tracking.
+the proof, and verifies the COSE_Sign1 over that root with the log key. This
+exact CBOR shape is **validated by round-trip in this library's own tests** and
+against the code points RFC 9942 registers (vds 395, vdp 396, `RFC9162_SHA256` = 1).
 
 ## Standards status / honesty
 
 The **SCITT Architecture** is now **[RFC 9943](https://www.rfc-editor.org/rfc/rfc9943)**
 (published June 2026). This library implements RFC 9943 as its normative SCITT base.
 
-This library also tracks one IETF document that remains an **Active Internet-Draft
-(Work in Progress)** in the **RFC Editor Queue**, NOT yet published as an RFC
-(status audited at ship date; re-verify at publish time):
-
-- `draft-ietf-cose-merkle-tree-proofs-18` — *COSE Receipts / COSE Merkle Tree
-  Proofs* (Datatracker: Active Internet-Draft, RFC Ed Queue)
+**COSE Receipts** is **[RFC 9942](https://www.rfc-editor.org/rfc/rfc9942)**
+(formerly `draft-ietf-cose-merkle-tree-proofs-18`). This library implements its
+Receipt encoding and the `RFC9162_SHA256` verifiable data structure.
 
 No unassigned RFC number is claimed anywhere (enforced by a test that scans
 shipped source + docs).

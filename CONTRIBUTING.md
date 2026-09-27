@@ -17,9 +17,9 @@ keep it small, neutral, and verifiable are very welcome.
 3. **Minimal dependencies.** Runtime imports are `cbor2`, `cryptography`, and
    the standard library — nothing else. A test enforces this
    (`tests/test_iana_codepoints.py`); don't add a COSE library at runtime.
-4. **Standards honesty.** The SCITT architecture and COSE Receipts documents
-   are Internet-Drafts (RFC Editor Queue), not published RFCs. Never claim an
-   unassigned RFC number; a test scans shipped source and docs for exactly this
+4. **Standards honesty.** The SCITT Architecture (RFC 9943) and COSE Receipts
+   (RFC 9942) are published RFCs. Never claim an unassigned RFC number; a test
+   scans shipped source and docs for exactly this
    (`tests/test_cli_and_status.py`). Wire code points are asserted against the
    IANA registries, not a library's enum.
 5. **Conformance is external.** Correctness claims rest on agreement with
