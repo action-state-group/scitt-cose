@@ -141,10 +141,12 @@ fn assert_matches(id: &str) {
         result.grade_cryptographically_bound, expected.grade_cryptographically_bound,
         "{id}: grade_cryptographically_bound"
     );
+    // iat/grade are checked on EVERY vector: the fail-* expected.json files
+    // freeze them as null, i.e. never surfaced from an unverified receipt.
+    assert_eq!(result.iat, expected.iat, "{id}: iat");
+    assert_eq!(result.grade, expected.grade, "{id}: grade");
     if expected.ok {
         assert_eq!(result.root.map(hex::encode), expected.root, "{id}: root");
-        assert_eq!(result.iat, expected.iat, "{id}: iat");
-        assert_eq!(result.grade, expected.grade, "{id}: grade");
     } else if let Some(needle) = &expected.failure_contains {
         assert!(
             result.errors.iter().any(|e| e.contains(needle.as_str())),
@@ -191,4 +193,66 @@ fn receipt_v1_tampered_grade_fails_signature() {
     assert!(!result.ok);
     assert!(!result.grade_cryptographically_bound);
     assert_matches("fail-tampered-grade");
+}
+
+// --- header claims are never surfaced from a receipt whose signature fails --
+// Grade-forgery class, mirroring the Python tests: a receipt carrying grade
+// "mmr-verified" that does not verify under the pinned key must expose no
+// grade/iat, and must say the claims were withheld.
+
+const CLAIMS_WITHHELD: &str = "protected header claims withheld";
+
+fn assert_claims_withheld(result: &scitt_cose_receipt::ReceiptResult) {
+    assert!(!result.ok, "errors={:?}", result.errors);
+    assert_eq!(result.iat, None);
+    assert_eq!(result.grade, None);
+    assert!(!result.witness_time_established);
+    assert!(!result.grade_cryptographically_bound);
+    assert!(!format!("{result:?}").contains("mmr-verified"));
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("signature did not verify")),
+        "errors={:?}",
+        result.errors
+    );
+    assert!(
+        result.errors.iter().any(|e| e.contains(CLAIMS_WITHHELD)),
+        "errors={:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn grade_not_exposed_when_signed_by_non_pinned_key() {
+    // A graded receipt (iat + "mmr-verified") signed by one key, verified
+    // under a DIFFERENT pinned Ed25519 key (the real TRACE witness key).
+    let graded = repo_root().join("test-vectors/receipt-v1/synthetic-eddsa-iat-grade");
+    let pinned = repo_root().join("test-vectors/receipt-v1/trace-sept7-witness/log-key.pub");
+    let receipt = std::fs::read(graded.join("receipt.cose")).unwrap();
+    let result = scitt_cose_receipt::verify_receipt(&receipt, &[0x02], &read_pem(&pinned));
+    assert_claims_withheld(&result);
+}
+
+#[test]
+fn grade_not_exposed_when_signature_bytes_corrupted() {
+    let dir = repo_root().join("test-vectors/receipt-v1/synthetic-eddsa-iat-grade");
+    let receipt = std::fs::read(dir.join("receipt.cose")).unwrap();
+    // The signature is the last element of the COSE_Sign1 array, so its
+    // final byte is the receipt's final byte.
+    let mut tampered = receipt.clone();
+    *tampered.last_mut().unwrap() ^= 0x01;
+    let result =
+        scitt_cose_receipt::verify_receipt(&tampered, &[0x02], &read_pem(&dir.join("log-key.pub")));
+    assert_claims_withheld(&result);
+}
+
+#[test]
+fn grade_still_exposed_on_valid_receipt() {
+    let (_, result) = run_receipt_v1("synthetic-eddsa-iat-grade");
+    assert!(result.ok, "errors={:?}", result.errors);
+    assert_eq!(result.grade.as_deref(), Some("mmr-verified"));
+    assert_eq!(result.iat, Some(1_700_000_000));
+    assert!(!result.errors.iter().any(|e| e.contains(CLAIMS_WITHHELD)));
 }

@@ -234,3 +234,33 @@ def test_tampered_iat_rejected_by_both_python_and_rust(rust_verifier, tmp_path):
     assert proc.returncode != 0
     assert rust_report["ok"] is False
     assert rust_report["witness_time_established"] is False
+
+
+def test_wrong_key_grade_not_printed_by_rust_or_python(rust_verifier, tmp_path):
+    """Grade-forgery guard, both verifiers: a receipt carrying iat + grade
+    "mmr-verified", signed by a key other than the pinned one, must come back
+    ok=false with iat/grade null (Rust JSON) / absent (Python result)."""
+    from scitt_cose.receipt import verify_receipt as py_verify_receipt
+
+    attacker_priv, _attacker_pub = _pem("EdDSA")
+    _real_priv, real_pub = _pem("EdDSA")
+    entries = [bytes([i]).hex() for i in range(4)]
+    receipt = _build_receipt_with_claims(
+        leaf_entry_hex=entries[1], leaf_index=1, tree_entries_hex=entries,
+        alg="EdDSA", log_private_key_pem=attacker_priv, iat=1700000000, grade="mmr-verified",
+    )
+
+    py_res = py_verify_receipt(receipt, leaf_entry_hex=entries[1], log_public_key_pem=real_pub)
+    assert py_res.ok is False
+    assert py_res.iat is None
+    assert HDR_GRADE not in py_res.protected_header_ext
+
+    r = _write(tmp_path, "r.cose", receipt)
+    k = _write(tmp_path, "log.pem", real_pub)
+    proc, rust_report = _run_rust(rust_verifier, r, k, entries[1])
+    assert proc.returncode != 0
+    assert rust_report["ok"] is False
+    assert rust_report["iat"] is None
+    assert rust_report["grade"] is None
+    assert "mmr-verified" not in proc.stdout
+    assert any("claims withheld" in e for e in rust_report["errors"]), rust_report
