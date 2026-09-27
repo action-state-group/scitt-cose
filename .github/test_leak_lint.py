@@ -159,6 +159,34 @@ def test_bracketed_id_does_not_fire_on_hex_regex_character_class(tmp_path):
     assert result.returncode == 0, result.stdout
 
 
+def test_bracketed_id_does_not_fire_on_html_attribute_selectors(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(
+        repo,
+        "report.test.ts",
+        "\n".join(
+            [
+                "const d = root.querySelector('[data-report-date]');",
+                "const rows = root.querySelectorAll('[data-case-id-row]');",
+                'const tip = el.closest("[aria-describedby-id]");',
+                "",
+            ]
+        ),
+    )
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout
+
+
+def test_attribute_selector_exemption_does_not_hide_a_real_task_id(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(repo, "notes.ts", "// fixed per [mesh-report-date-fix]\nconst d = q('[data-report-date]');\n")
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout
+    assert "mesh-report-date-fix" in result.stdout
+
+
 # ---- rule 2: ops/lane vocabulary -------------------------------------------------------------
 
 def test_ops_vocab_mutant_fails_then_passes(tmp_path):
