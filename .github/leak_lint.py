@@ -151,13 +151,18 @@ def _has_bracket_id_leak(line: str) -> bool:
         (an earlier version of this check) missed exactly this shape.
       - uppercase citation tags (`[RFC2119]`, `[I-D.foo]`): excluded structurally by
         BRACKET_ID's lowercase-only character class, not handled here.
+      - HTML attribute selectors, e.g. `querySelector('[data-report-date]')` or
+        `[aria-describedby-id]`: exempt when the bracket content starts with `data-` or
+        `aria-`. Those prefixes are reserved by HTML for attributes, so no task id uses them.
     """
     for m in BRACKET_ID.finditer(line):
+        if m.group(0)[1:].startswith(("data-", "aria-")):
+            continue
         before = line[m.start() - 1 : m.start()]
         if before and (before.isalnum() or before in "_-"):
             continue
         after = line[m.end() : m.end() + 1]
-        if after in "([":
+        if after and after in "([":
             continue
         if after == ":" and line[: m.start()].strip() == "":
             continue
