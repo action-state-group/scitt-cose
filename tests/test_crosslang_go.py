@@ -34,7 +34,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 
-from scitt_cose import build_receipt, build_signed_statement, merkle_root
+from scitt_cose import build_receipt, build_signed_statement, merkle_root, parse_signed_statement
 
 
 def _go_tool_dir() -> Path:
@@ -225,3 +225,77 @@ def test_receipt_wrong_leaf_rejected_by_go(go_verifier, tmp_path):
 
     assert proc.returncode != 0
     assert report["receipt"]["ok"] is False, report
+
+
+# --- Signed Statement: header claims only after the signature verifies ------
+
+_CLAIMS_WITHHELD_PREFIX = "protected header claims withheld"
+
+
+def _claims_statement(priv: bytes) -> bytes:
+    return build_signed_statement(
+        b'{"opaque":"bytes"}',
+        alg="EdDSA",
+        private_key_pem=priv,
+        issuer="https://issuer.example",
+        subject="urn:anything:goes",
+        content_type="application/widget+json",
+        extra_cwt_claims={"profile_thing": "abc"},
+    )
+
+
+def _corrupt_signature(stmt: bytes) -> bytes:
+    tag = cbor2.loads(stmt)
+    v = list(tag.value)
+    sig = bytearray(v[3])
+    sig[0] ^= 0x01
+    v[3] = bytes(sig)
+    return cbor2.dumps(cbor2.CBORTag(tag.tag, v))
+
+
+@pytest.mark.parametrize("case", ["wrong_key", "corrupted_signature"])
+def test_unverified_statement_withholds_claims_in_python_and_go(case, go_verifier, tmp_path):
+    """Python and Go agree: a statement that does not verify under the pinned
+    key yields no authenticated iss/sub/content_type/claims in either."""
+    priv, pub = _pem("EdDSA")
+    stmt = _claims_statement(priv)
+    if case == "wrong_key":
+        _, pub = _pem("EdDSA")
+    else:
+        stmt = _corrupt_signature(stmt)
+
+    py = parse_signed_statement(stmt, public_key_pem=pub)
+    assert py["signature_verified"] is False
+    assert py["issuer"] is None and py["subject"] is None
+    assert py["content_type"] is None and py["claims"] == {}
+
+    s = _write(tmp_path, "stmt.cose", stmt)
+    k = _write(tmp_path, "pub.pem", pub)
+    proc, report = _run_go(go_verifier, ["--statement", s, "--pubkey", k, "--alg", "EdDSA"])
+
+    assert proc.returncode != 0
+    assert report["valid"] is False, report
+    assert report["iss"] == "" and report["sub"] == ""
+    assert report["content_type"] == ""
+    assert "kid" not in report and "string_claims" not in report
+    assert _CLAIMS_WITHHELD_PREFIX in report["error"]
+
+
+def test_verified_statement_exposes_claims_in_python_and_go(go_verifier, tmp_path):
+    priv, pub = _pem("EdDSA")
+    stmt = _claims_statement(priv)
+
+    py = parse_signed_statement(stmt, public_key_pem=pub)
+    assert py["signature_verified"] is True
+
+    s = _write(tmp_path, "stmt.cose", stmt)
+    k = _write(tmp_path, "pub.pem", pub)
+    proc, report = _run_go(go_verifier, ["--statement", s, "--pubkey", k, "--alg", "EdDSA"])
+
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert report["valid"] is True
+    assert report["iss"] == py["issuer"] == "https://issuer.example"
+    assert report["sub"] == py["subject"] == "urn:anything:goes"
+    assert report["content_type"] == py["content_type"] == "application/widget+json"
+    assert report["string_claims"]["profile_thing"] == py["claims"]["profile_thing"] == "abc"
+    assert _CLAIMS_WITHHELD_PREFIX not in report.get("error", "")
