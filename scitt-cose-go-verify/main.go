@@ -150,8 +150,16 @@ func main() {
 	}
 }
 
-// verifyStatement verifies a COSE_Sign1 Signed Statement signature and extracts
-// the generic (profile-opaque) header + CWT claim fields.
+// claimsWithheld is the finding added when a statement's signature does not
+// verify under the pinned key. It mirrors the receipt finding in the Python
+// (_CLAIMS_WITHHELD) and Rust (CLAIMS_WITHHELD) verifiers, with the claim list
+// adapted to the fields this statement path surfaces.
+const claimsWithheld = "protected header claims withheld " +
+	"(content_type/kid/iss/sub/string_claims): statement signature did not verify"
+
+// verifyStatement verifies a COSE_Sign1 Signed Statement signature and, ONLY
+// when it verifies, extracts the generic (profile-opaque) header + CWT claim
+// fields. On a failed signature ContentType/Kid/Iss/Sub/StringClaims stay empty.
 func verifyStatement(out *result, statementPath, pubkeyPath, algName string) {
 	data, err := os.ReadFile(statementPath)
 	if err != nil {
@@ -165,11 +173,14 @@ func verifyStatement(out *result, statementPath, pubkeyPath, algName string) {
 	}
 
 	verifier := newVerifier(algName, pub)
-	verr := msg.Verify(nil, verifier)
-	out.Valid = verr == nil
-	if verr != nil {
-		out.Error = fmt.Sprintf("signature verification failed: %v", verr)
+	if verr := msg.Verify(nil, verifier); verr != nil {
+		// Nothing in an unverified protected header may be surfaced: the
+		// header-derived fields stay empty and the withholding is stated.
+		out.Valid = false
+		out.Error = fmt.Sprintf("signature verification failed: %v; %s", verr, claimsWithheld)
+		return
 	}
+	out.Valid = true
 
 	prot := rawProtectedMap(msg.Headers.RawProtected)
 	if ct, ok := stringAt(prot, hdrContentType); ok {

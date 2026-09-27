@@ -157,11 +157,15 @@ func TestVectors(t *testing.T) {
 				t.Errorf("statement valid=%v (%s), expected %v (a negative vector that verifies is a FAIL)",
 					stmt.Valid, stmt.Error, exp.StatementSigValid)
 			}
-			// Decoded protected-header agreement — only when the envelope
-			// decoded (Iss set). On a structural parse failure the binary
-			// emits empty fields and the verdict check above carries the
-			// error; comparing empties would bury the root cause.
-			if stmt.Iss != "" || stmt.Valid {
+			// Header claims are surfaced only after the signature verifies:
+			// an unverified statement must carry none of them.
+			if !stmt.Valid && (stmt.Iss != "" || stmt.Sub != "" || stmt.ContentType != "" ||
+				stmt.Kid != "" || len(stmt.StringClaims) != 0) {
+				t.Errorf("unverified statement surfaced header claims: %+v", stmt)
+			}
+			// Decoded protected-header agreement — only for a verified
+			// statement (the only case in which fields are populated).
+			if stmt.Valid {
 				if stmt.Iss != exp.ProtectedHeader.Statement.Issuer {
 					t.Errorf("iss=%q, expected %q", stmt.Iss, exp.ProtectedHeader.Statement.Issuer)
 				}
@@ -173,7 +177,7 @@ func TestVectors(t *testing.T) {
 						stmt.ContentType, exp.ProtectedHeader.Statement.ContentType)
 				}
 			} else if stmt.Error != "" {
-				t.Logf("statement did not decode: %s", stmt.Error)
+				t.Logf("statement did not verify: %s", stmt.Error)
 			}
 
 			// --- Receipt-only run -------------------------------------------
