@@ -295,6 +295,8 @@ def build_receipt(
     iss: str | None = None,
     sub: str | None = None,
     kid: bytes | None = None,
+    iat: int | None = None,
+    grade: str | None = None,
 ) -> bytes:
     """Mint a COSE Receipt for one leaf of an RFC 9162 Merkle tree.
 
@@ -320,6 +322,15 @@ def build_receipt(
     "submitter" produces a receipt that asserts the wrong thing about the
     entry it covers; this library will happily sign whatever string is
     passed here, so getting that distinction right is the caller's job.
+
+    ``iat``/``grade`` are likewise ADDITIVE and OPTIONAL (``None`` omits each;
+    both ``None`` is byte-identical to the pre-existing wire shape). ``iat``
+    (an integer Unix timestamp) goes into the same protected CWT claims map
+    (label 15, claim 6 per RFC 8392 §3.1.6) alongside any ``iss``/``sub``;
+    ``grade`` goes under the private-use protected label ``HDR_GRADE``
+    (-65537). Both are signed by the log key; this library does not
+    interpret either value. On verify they are surfaced only after the
+    signature checks (``ReceiptResult.iat`` / ``protected_header_ext``).
     """
     if not 0 <= leaf_index < len(tree_entries_hex):
         raise CoseError(f"leaf_index {leaf_index} out of range for {len(tree_entries_hex)} entries")
@@ -336,8 +347,12 @@ def build_receipt(
         claims[CWT_CLAIM_ISS] = iss
     if sub is not None:
         claims[CWT_CLAIM_SUB] = sub
+    if iat is not None:
+        claims[CWT_CLAIM_IAT] = iat
     if claims:
         protected[HDR_CWT_CLAIMS] = claims
+    if grade is not None:
+        protected[HDR_GRADE] = grade
     if kid is not None:
         protected[HDR_KID] = kid
     unprotected = {HDR_VDP: {VDP_INCLUSION_PROOFS: [inclusion_blob]}}

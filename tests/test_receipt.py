@@ -384,15 +384,19 @@ def test_build_receipt_without_claims_unchanged(alg_keys):
     assert r.subject is None
 
 
-@pytest.mark.parametrize("tamper_claim", [CWT_CLAIM_ISS, CWT_CLAIM_SUB])
+@pytest.mark.parametrize("tamper_claim", [CWT_CLAIM_ISS, CWT_CLAIM_SUB, CWT_CLAIM_IAT])
 def test_tampered_cwt_claim_fails_signature(eddsa_keys, tamper_claim):
-    """Mutant check: flipping iss or sub AFTER signing (protected header
-    tampered, signature left alone) must fail verification -- proving both
-    claims are covered by the COSE_Sign1 signature, not just carried
+    """Mutant check: flipping iss, sub or iat AFTER signing (protected header
+    tampered, signature left alone) must fail verification -- proving each
+    claim is covered by the COSE_Sign1 signature, not just carried
     unauthenticated in the payload or response body."""
     priv, pub = eddsa_keys
     receipt, entries, leaf = _build_receipt_with_protected(
-        {HDR_CWT_CLAIMS: {CWT_CLAIM_ISS: "did:web:witness.example", CWT_CLAIM_SUB: "entry:original"}},
+        {HDR_CWT_CLAIMS: {
+            CWT_CLAIM_ISS: "did:web:witness.example",
+            CWT_CLAIM_SUB: "entry:original",
+            CWT_CLAIM_IAT: 1_700_000_000,
+        }},
         alg="EdDSA", priv=priv, pub=pub,
     )
     # Sanity: the untampered receipt verifies.
@@ -493,6 +497,71 @@ def test_grade_still_exposed_on_valid_receipt(eddsa_keys):
     assert r.protected_header_ext[HDR_GRADE] == _GRADE
     assert r.iat == 1_700_001_000
     assert not any("claims withheld" in e for e in r.errors)
+
+
+def test_build_receipt_iat_grade_round_trip(alg_keys):
+    """``build_receipt(iat=, grade=)`` signs both into the protected header
+    alongside iss/sub (the existing CWT claims map is extended, not replaced),
+    and a valid receipt surfaces them: iat on the result, grade via
+    ``protected_header_ext``."""
+    alg, priv, pub = alg_keys
+    es = _entries(5)
+    receipt = build_receipt(
+        leaf_entry_hex=es[2], leaf_index=2, tree_entries_hex=es, alg=alg,
+        log_private_key_pem=priv, iss="did:web:witness.example", sub="entry:x",
+        iat=1_700_000_000, grade=_GRADE,
+    )
+    protected = cbor2.loads(cbor2.loads(receipt).value[0])
+    assert protected[HDR_CWT_CLAIMS] == {
+        CWT_CLAIM_ISS: "did:web:witness.example",
+        CWT_CLAIM_SUB: "entry:x",
+        CWT_CLAIM_IAT: 1_700_000_000,
+    }
+    assert protected[HDR_GRADE] == _GRADE
+    r = verify_receipt(receipt, leaf_entry_hex=es[2], log_public_key_pem=pub)
+    assert r.ok, r.errors
+    assert r.iat == 1_700_000_000
+    assert r.issuer == "did:web:witness.example"
+    assert r.subject == "entry:x"
+    assert r.protected_header_ext == {HDR_GRADE: _GRADE}
+
+
+def test_build_receipt_iat_grade_matches_frozen_vector_header(eddsa_keys):
+    """The kwargs produce the exact protected-header bytes of the frozen
+    ``synthetic-eddsa-iat-grade`` vector (key order 395, 15, -65537, 1), so the
+    library path and the hand-built vector generator agree on the wire."""
+    priv, _pub = eddsa_keys
+    d = _RECEIPT_V1 / "synthetic-eddsa-iat-grade"
+    exp = json.loads((d / "expected.json").read_text())
+    es = [bytes([i]).hex() for i in range(exp["tree_size"])]
+    receipt = build_receipt(
+        leaf_entry_hex=exp["leaf_entry_hex"], leaf_index=exp["leaf_index"],
+        tree_entries_hex=es, alg="EdDSA", log_private_key_pem=priv,
+        iat=exp["iat"], grade=exp["grade"],
+    )
+    frozen = cbor2.loads((d / "receipt.cose").read_bytes())
+    assert cbor2.loads(receipt).value[0] == frozen.value[0]
+
+
+def test_tampered_grade_value_fails_signature(eddsa_keys):
+    """Mutant check: changing the grade VALUE after ``build_receipt`` signed it
+    must fail verification and expose no header claims at all."""
+    priv, pub = eddsa_keys
+    es = _entries(4)
+    receipt = build_receipt(
+        leaf_entry_hex=es[1], leaf_index=1, tree_entries_hex=es, alg="EdDSA",
+        log_private_key_pem=priv, iat=1_700_001_000, grade="basic",
+    )
+    assert verify_receipt(receipt, leaf_entry_hex=es[1], log_public_key_pem=pub).ok
+    outer = cbor2.loads(receipt)
+    protected = dict(cbor2.loads(outer.value[0]))
+    protected[HDR_GRADE] = _GRADE
+    tampered = cbor2.dumps(
+        cbor2.CBORTag(outer.tag, [cbor2.dumps(protected), outer.value[1], outer.value[2], outer.value[3]])
+    )
+    r = verify_receipt(tampered, leaf_entry_hex=es[1], log_public_key_pem=pub)
+    _assert_claims_withheld(r)
+    assert any("signature did not verify" in e for e in r.errors)
 
 
 _RECEIPT_V1 = Path(__file__).resolve().parent.parent / "test-vectors" / "receipt-v1"
