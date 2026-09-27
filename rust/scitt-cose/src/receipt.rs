@@ -81,9 +81,11 @@ fn malformed(msg: impl Into<String>) -> ReceiptError {
 /// Outcome of [`verify_receipt`]. `ok` is `true` only when the inclusion
 /// proof reconstructs a root *and* the COSE_Sign1 over that root verifies
 /// under the supplied log key. On any failure `ok` is `false` and `errors`
-/// explains why; other fields may still be populated with what was read
-/// before the failing check (same "partial state, but only meaningful when
-/// `ok`" discipline as the Python `ReceiptResult`).
+/// explains why. `root`/`tree_size`/`leaf_index` may still carry what the
+/// inclusion proof yielded before the failing check, but the protected-header
+/// claims (`iat`, `grade`) are populated ONLY when `ok` is `true` -- a claim
+/// from a receipt that failed verification is never surfaced (same rule as
+/// the Python `ReceiptResult`).
 #[derive(Debug, Clone, Default)]
 pub struct ReceiptResult {
     pub ok: bool,
@@ -111,6 +113,10 @@ pub struct ReceiptResult {
 impl ReceiptResult {
     fn fail(mut self, msg: impl Into<String>) -> Self {
         self.ok = false;
+        self.iat = None;
+        self.grade = None;
+        self.witness_time_established = false;
+        self.grade_cryptographically_bound = false;
         self.errors.push(msg.into());
         self
     }
@@ -184,6 +190,12 @@ fn find_label(map: &[(i64, CborValue)], label: i64) -> Option<CborValue> {
         .map(|(_, v)| v.clone())
 }
 
+/// Finding added when the signature fails: the protected-header claims are
+/// withheld because nothing in an unverified header may be surfaced. Same
+/// text as the Python verifier's, so callers can match either.
+const CLAIMS_WITHHELD: &str =
+    "protected header claims withheld (iat/iss/sub/protected_header_ext): receipt signature did not verify";
+
 /// Verify a COSE Receipt for `leaf_entry` (raw bytes of the leaf entry, NOT
 /// its RFC 6962 leaf hash) under `log_public_key_pem` (a PEM
 /// SubjectPublicKeyInfo, EdDSA or ES256). Never panics -- every failure
@@ -218,8 +230,10 @@ pub fn verify_receipt(
         _ => return result.fail("protected header alg is not an integer code point"),
     };
 
-    // Surface iat/grade from the PROTECTED header, same trust discipline as
-    // root/tree_size/leaf_index below: read now, only meaningful once `ok`.
+    // Read iat/grade from the PROTECTED header into locals; they are copied
+    // onto the result only after the signature verifies (never on failure).
+    let mut iat: Option<i64> = None;
+    let mut grade: Option<String> = None;
     if let Some(claims) = find_label(&prot, HDR_CWT_CLAIMS)
         .as_ref()
         .and_then(CborValue::as_map)
@@ -229,7 +243,7 @@ pub fn verify_receipt(
             .find(|(k, _)| k.as_integer().map(i128::from) == Some(CWT_CLAIM_IAT as i128))
         {
             if let Some(n) = v.as_integer() {
-                result.iat = Some(i128::from(n) as i64);
+                iat = Some(i128::from(n) as i64);
             }
         }
     }
@@ -237,7 +251,7 @@ pub fn verify_receipt(
         .as_ref()
         .and_then(CborValue::as_text)
     {
-        result.grade = Some(g.to_string());
+        grade = Some(g.to_string());
     }
 
     if vds != VDS_RFC9162_SHA256 as i128 {
@@ -294,10 +308,14 @@ pub fn verify_receipt(
     result.root = Some(reconstructed);
 
     if let Err(e) = verify_signature(&sign1, alg_code, log_public_key_pem, &reconstructed) {
-        return result.fail(format!("receipt signature did not verify: {e}"));
+        return result
+            .fail(format!("receipt signature did not verify: {e}"))
+            .fail(CLAIMS_WITHHELD);
     }
 
     result.ok = true;
+    result.iat = iat;
+    result.grade = grade;
     result.witness_time_established = result.iat.is_some();
     result.grade_cryptographically_bound = result.grade.is_some();
     result
