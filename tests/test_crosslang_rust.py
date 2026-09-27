@@ -9,7 +9,8 @@ verification, with a clean-room RFC 9162 Merkle fold — see
 accept/reject, on the reconstructed Merkle root, and — the part this crate
 adds beyond the Go tool — on the `iat`/`grade` protected-header labels and
 their two derived booleans (`witness_time_established`,
-`grade_cryptographically_bound`).
+`grade_cryptographically_bound`). Receipts carrying `iat`/`grade` are minted
+with the library's own ``build_receipt(iat=, grade=)`` kwargs.
 
 Receipt-only: the Rust crate never reads a Signed Statement (out of its
 scope by design — see ``rust/scitt-cose/src/receipt.rs`` docs), so unlike
@@ -33,12 +34,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 
 from scitt_cose import build_receipt, merkle_root
-from scitt_cose.cose_sign1 import sign_sign1
-from scitt_cose.receipt import HDR_VDP, HDR_VDS, VDP_INCLUSION_PROOFS
-from scitt_cose.statement import HDR_CWT_CLAIMS
-
-CWT_IAT = 6  # RFC 8392 §3.1.6 (not yet exported pending PR #44's merge)
-HDR_GRADE = -65537
+from scitt_cose.receipt import CWT_CLAIM_IAT, HDR_CWT_CLAIMS, HDR_GRADE
 
 
 def _rust_crate_dir() -> Path:
@@ -65,30 +61,6 @@ def _pem(alg: str) -> tuple[bytes, bytes]:
     )
     pub = sk.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     return priv, pub
-
-
-def _build_receipt_with_claims(*, leaf_entry_hex, leaf_index, tree_entries_hex, alg,
-                                log_private_key_pem, iat=None, grade=None) -> bytes:
-    """Same construction `scripts/generate_receipt_grade_vectors.py` uses --
-    builds the protected header by hand so tests don't depend on the
-    not-yet-merged `build_receipt(iat=, grade=)` kwargs (PR #44)."""
-    from scitt_cose import inclusion_proof
-
-    root_hex = merkle_root(tree_entries_hex)
-    audit_path = inclusion_proof(tree_entries_hex, leaf_index)
-    inclusion_blob = cbor2.dumps(
-        [len(tree_entries_hex), leaf_index, [bytes.fromhex(h) for h in audit_path]]
-    )
-    protected = {HDR_VDS: 1}
-    if iat is not None:
-        protected[HDR_CWT_CLAIMS] = {CWT_IAT: iat}
-    if grade is not None:
-        protected[HDR_GRADE] = grade
-    unprotected = {HDR_VDP: {VDP_INCLUSION_PROOFS: [inclusion_blob]}}
-    return sign_sign1(
-        bytes.fromhex(root_hex), alg=alg, private_key_pem=log_private_key_pem,
-        protected=protected, unprotected=unprotected, detached=True,
-    )
 
 
 @pytest.fixture(scope="session")
@@ -184,7 +156,7 @@ def test_iat_and_grade_agree_with_python(rust_verifier, tmp_path):
 
     priv, pub = _pem("EdDSA")
     entries = [bytes([i]).hex() for i in range(6)]
-    receipt = _build_receipt_with_claims(
+    receipt = build_receipt(
         leaf_entry_hex=entries[3], leaf_index=3, tree_entries_hex=entries,
         alg="EdDSA", log_private_key_pem=priv, iat=1700001000, grade="mmr-verified",
     )
@@ -213,7 +185,7 @@ def test_tampered_iat_rejected_by_both_python_and_rust(rust_verifier, tmp_path):
 
     priv, pub = _pem("EdDSA")
     entries = [bytes([i]).hex() for i in range(4)]
-    receipt = _build_receipt_with_claims(
+    receipt = build_receipt(
         leaf_entry_hex=entries[1], leaf_index=1, tree_entries_hex=entries,
         alg="EdDSA", log_private_key_pem=priv, iat=1700000000,
     )
@@ -221,7 +193,7 @@ def test_tampered_iat_rejected_by_both_python_and_rust(rust_verifier, tmp_path):
     protected_bstr, unprotected, payload, sig = tag.value
     protected = dict(cbor2.loads(protected_bstr))
     claims = dict(protected[HDR_CWT_CLAIMS])
-    claims[CWT_IAT] = claims[CWT_IAT] + 1
+    claims[CWT_CLAIM_IAT] = claims[CWT_CLAIM_IAT] + 1
     protected[HDR_CWT_CLAIMS] = claims
     tampered = cbor2.dumps(cbor2.CBORTag(tag.tag, [cbor2.dumps(protected), unprotected, payload, sig]))
 
@@ -245,7 +217,7 @@ def test_wrong_key_grade_not_printed_by_rust_or_python(rust_verifier, tmp_path):
     attacker_priv, _attacker_pub = _pem("EdDSA")
     _real_priv, real_pub = _pem("EdDSA")
     entries = [bytes([i]).hex() for i in range(4)]
-    receipt = _build_receipt_with_claims(
+    receipt = build_receipt(
         leaf_entry_hex=entries[1], leaf_index=1, tree_entries_hex=entries,
         alg="EdDSA", log_private_key_pem=attacker_priv, iat=1700000000, grade="mmr-verified",
     )
