@@ -8,7 +8,7 @@ plumbing a transparency service would emit; operating such a service (a hosted
 registration endpoint) is **out of scope** for this library, but the primitive
 to mint and to verify a Receipt is included.
 
-Encoding (tracks draft-ietf-cose-merkle-tree-proofs-18):
+Encoding (RFC 9942 COSE Receipts; unchanged from draft-ietf-cose-merkle-tree-proofs-18):
 
 * protected header:
     * label ``1``   = alg code point (signed by the log key)

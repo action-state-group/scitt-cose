@@ -39,7 +39,7 @@ HDR_KID = 4  # RFC 9052 §3.1
 HDR_CWT_CLAIMS = 15  # RFC 9597 §2 ("CWT Claims") — NOT label 13 (kcwt, RFC 9528)
 
 #: Unprotected header parameter for attached Receipts
-#: (draft-ietf-cose-merkle-tree-proofs / RFC 9943).
+#: (RFC 9942 "receipts", label 394; used by RFC 9943).
 HDR_RECEIPTS = 394
 
 #: CWT claim labels (RFC 8392 / IANA CWT Claims registry).
