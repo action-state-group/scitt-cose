@@ -28,14 +28,14 @@ the root, is skipped and never opened. The root is untrusted content on a fork
 run, and a link could otherwise point the scanner at a file outside it.
 
 Output redaction: matched terms are NOT printed unless ``NEUTRALITY_REVEAL`` is
-set to a truthy value. Redacted output keeps file:line and a per-line hit count.
-Set it only on trusted runs (same-repo events); leaving it unset on runs
-reachable from a fork is what stops the reserved list leaking one term at a time
-through the build log.
+set to a truthy value. Without it, a failing run prints one constant verdict:
+no term, path, line or count. Set it only on trusted runs (same-repo events);
+leaving it unset on runs reachable from a fork is what stops the reserved list
+leaking through the build log.
 
 Usage: python .github/neutrality_scan.py [ROOT=.]
        python .github/neutrality_scan.py --self-test
-Exit 0 = clean; 1 = reserved vocabulary found (prints file:line); 2 = misconfig.
+Exit 0 = clean; 1 = reserved vocabulary found (file:line only on a trusted run); 2 = misconfig.
 """
 from __future__ import annotations
 
@@ -146,13 +146,13 @@ def _strip_generated_comments(text: str) -> str:
 
 
 def _git_tracked_files(root: Path) -> list[Path] | None:
-    r = subprocess.run(
-        ["git", "ls-files"],
-        cwd=root, capture_output=True, text=True
-    )
+    """Every tracked path, exactly. ``-z`` separates names with NUL and never
+    quotes them: without it, a name holding a non-ASCII character, a newline
+    or a quote comes back quoted, names no file, and would be skipped."""
+    r = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True)
     if r.returncode != 0:
         return None
-    return [root / f for f in r.stdout.splitlines() if f]
+    return [root / os.fsdecode(f) for f in r.stdout.split(b"\0") if f]
 
 
 def _read_regular_file(root: Path, path: Path) -> str | None:
@@ -504,13 +504,34 @@ def _run_self_tests() -> None:
             if _read_regular_file(troot, troot / "clean.md") != "clean\n":
                 errors.append("symlink test failed: a regular file inside the root was not read")
 
+    # Every tracked name is scanned, however unusual: a non-ASCII character, a
+    # newline or a quote in a name must not make the file invisible.
+    if subprocess.run(["git", "--version"], capture_output=True).returncode == 0:
+        with tempfile.TemporaryDirectory() as td:
+            troot = Path(td)
+            odd = ["caf\u00e9.md", "a\nb.md", 'q"x.md']
+            for name in odd:
+                try:
+                    (troot / name).write_text(f"{secret_term}\n", encoding="utf-8")
+                except OSError:
+                    odd.remove(name)
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(troot)]
+            subprocess.run(git + ["init", "-q"], check=True)
+            subprocess.run(git + ["add", "-A"], check=True)
+            subprocess.run(git + ["commit", "-q", "-m", "t"], check=True)
+            found = scan(troot, pattern3, (), reveal=True)
+            flagged = {o.rsplit(":", 2)[0] for o in found}
+            missing = [n for n in odd if n not in flagged]
+            if missing:
+                errors.append(f"tracked-name test failed: files with these names were not scanned: {missing!r}")
+
     if errors:
         print("NEUTRALITY SELF-TEST FAILURES:")
         for e in errors:
             print(f"  {e}")
         raise SystemExit(1)
 
-    print("neutrality self-test: OK (span-based allow-phrase exemption; no links followed; redacted by default)")
+    print("neutrality self-test: OK (span-based allow-phrase exemption; no links followed; every tracked name scanned; redacted by default)")
 
 
 def main(argv: list[str] | None = None) -> int:
