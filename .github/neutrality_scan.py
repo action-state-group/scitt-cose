@@ -39,10 +39,10 @@ Exit 0 = clean; 1 = reserved vocabulary found (prints file:line); 2 = misconfig.
 """
 from __future__ import annotations
 
-import json
-import os
 import contextlib
 import io
+import json
+import os
 import re
 import stat
 import subprocess
