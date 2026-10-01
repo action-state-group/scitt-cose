@@ -3,8 +3,12 @@
 //! `scitt-cose-go-verify`. Profile-opaque: it verifies the receipt's
 //! cryptographic claims and treats everything else as opaque.
 //!
-//! Usage: scitt-cose-rust-verify --receipt <file> --log-pubkey <pem-file> \
-//!         --leaf-entry-hex <hex>
+//! Usage:
+//!
+//! ```text
+//! scitt-cose-rust-verify --receipt <file> --log-pubkey <pem-file> \
+//!     --leaf-entry-hex <hex>
+//! ```
 //!
 //! Prints one JSON object to stdout and exits 0 iff the receipt verifies.
 
