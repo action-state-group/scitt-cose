@@ -3,11 +3,14 @@ name = "scitt-cose-receipt"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Vendor-neutral offline verifier for SCITT/RFC 9162 COSE receipts (Rust sibling of the scitt-cose Python and Go verifiers). No network code, no receipt issuance, no cll dependency -- receipts are SCITT, not CLL."
+description = "Offline verifier for SCITT COSE Receipts with RFC 9162 SHA-256 inclusion proofs: checks the log's signature under a pinned key and rebuilds the Merkle root. No network code, no receipt issuance."
 repository = "https://github.com/action-state-group/scitt-cose"
+readme = "README.md"
 keywords = ["scitt", "cose", "rfc9162", "merkle", "receipt"]
-categories = ["cryptography"]
-publish = false
+categories = ["cryptography", "command-line-utilities"]
+# The test vectors live at the repository root, outside this crate, so the
+# integration tests run from a checkout and are left out of the package.
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE"]
 
 [lib]
 name = "scitt_cose_receipt"

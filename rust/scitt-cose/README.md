@@ -34,6 +34,13 @@ is genuinely conformant, not just internally consistent. This check runs in
 CI (`SCITT_REQUIRE_RUST=1` in the Python suite; `cargo test` on its own) so
 it can never silently disappear.
 
+## Install
+
+```bash
+# the scitt-cose-rust-verify CLI, from this repository
+cargo install --locked --git https://github.com/action-state-group/scitt-cose scitt-cose-receipt
+```
+
 ## Usage (library)
 
 ```rust
@@ -46,9 +53,7 @@ if result.ok {
 ## Usage (CLI)
 
 ```bash
-cargo build --bin scitt-cose-rust-verify
-
-./target/debug/scitt-cose-rust-verify \
+scitt-cose-rust-verify \
   --receipt        receipt.cose \
   --log-pubkey     log.pem \
   --leaf-entry-hex 02
@@ -72,6 +77,9 @@ Prints one JSON object to stdout and exits `0` iff the receipt verifies:
 
 ## Tests
 
+Run from a checkout of the repository: the test vectors live at its root and
+are not part of the published crate.
+
 ```bash
 cargo test                              # unit tests (merkle) + tests/vectors.rs
 cargo clippy --all-targets -- -D warnings
@@ -88,6 +96,7 @@ above) and `../../test-vectors/receipt-v1/` (the `iat`/`grade` set).
 - [`p256`](https://crates.io/crates/p256) / [`ecdsa`](https://crates.io/crates/ecdsa) — ES256 (P-256 ECDSA) signature verification
 - [`sha2`](https://crates.io/crates/sha2) — the Merkle fold's SHA-256
 
-`publish = false`: this crate is consumed by git-tag pin, the same discipline
-as `cll` (`checkpointed-local-log`) — bump the tag deliberately, never
-`branch = "main"`.
+## Pinning
+
+Pin a git tag (or, once released, an exact version such as `"=0.1.0"`) and
+bump it deliberately; never follow `branch = "main"`.
