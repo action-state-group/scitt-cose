@@ -175,6 +175,11 @@ fn receipt_v1_synthetic_es256_iat_grade_both_limits_true() {
 }
 
 #[test]
+fn receipt_v1_synthetic_es256_iat_grade_observed_only_both_limits_true() {
+    assert_matches("synthetic-es256-iat-grade-observed-only");
+}
+
+#[test]
 fn receipt_v1_iat_only_never_infers_grade() {
     assert_matches("synthetic-eddsa-iat-only");
 }

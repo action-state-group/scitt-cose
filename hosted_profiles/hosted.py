@@ -1156,8 +1156,9 @@ async function checkAuthenticity(capsules){
  * for checkWitness's detail text. A grade this map doesn't recognize (or a
  * witness that supplied none) renders "ungraded", never silently coerced
  * into either real grade word. Mirrors hosted_profiles/aac.py's
- * _RECEIPT_GRADE_WORDS -- keep both in sync. */
-var RECEIPT_GRADE_WORDS={"mmr-verified":"consistency-verified","countersigned-observed":"existence-and-time"};
+ * _RECEIPT_GRADE_WORDS -- keep both in sync. "countersigned-observed" is the
+ * pre-rename label for "observed-only"; receipts issued then keep it. */
+var RECEIPT_GRADE_WORDS={"mmr-verified":"consistency-verified","observed-only":"existence-and-time","countersigned-observed":"existence-and-time"};
 
 function witnessGradeWords(receiptGrades){
   if(!receiptGrades)return"";
