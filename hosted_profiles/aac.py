@@ -434,8 +434,12 @@ def _check_authenticity(capsules: list[dict]) -> RitualStage:
 #: is the AAC-profile renderer, not the neutral ``scitt_cose`` package (see
 #: this module's docstring), so it is allowed to know this vocabulary; the
 #: neutral package itself never names or interprets label -65537.
+#: ``countersigned-observed`` is the label witnesses emitted before
+#: ``observed-only`` replaced it; receipts issued then keep it, with the same
+#: meaning, so both render as the same word.
 _RECEIPT_GRADE_WORDS = {
     "mmr-verified": "consistency-verified",
+    "observed-only": "existence-and-time",
     "countersigned-observed": "existence-and-time",
 }
 
@@ -474,7 +478,7 @@ def _check_witness(witness: dict | None) -> RitualStage:
     :func:`_witness_grade_words`). This is the per-witness fact beside the
     held/configured COUNT above; a count alone never implies consistency
     was checked, and a checkpoint whose only receipt grades
-    ``countersigned-observed`` must never read as consistency-verified just
+    ``observed-only`` must never read as consistency-verified just
     because it is held.
     """
     if witness is None:

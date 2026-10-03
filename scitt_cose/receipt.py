@@ -80,7 +80,7 @@ CWT_CLAIM_SUB = 2
 HDR_KID = 4
 
 #: Protected-header label for a witness's private-use "grade" claim (e.g.
-#: capsule-anchor's ``mmr-verified`` / ``countersigned-observed``). This is
+#: capsule-anchor's ``mmr-verified`` / ``observed-only``). This is
 #: NOT an IANA-registered COSE header label -- ``-65537`` is a negative
 #: integer in COSE's private-use space (RFC 9052 §2, "Values less than -65536
 #: are reserved for Private Use"), picked to avoid collision with any

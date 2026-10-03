@@ -32,6 +32,11 @@
       "id": "fail-tampered-grade",
       "dir": "receipt-v1/fail-tampered-grade",
       "ok": false
+    },
+    {
+      "id": "synthetic-es256-iat-grade-observed-only",
+      "dir": "receipt-v1/synthetic-es256-iat-grade-observed-only",
+      "ok": true
     }
   ]
 }
