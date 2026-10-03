@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Mutant tests for leak_lint.py -- R4: every rule class demonstrated failing (mutant present,
-lint exits 1) then passing (mutant removed / allowlisted, lint exits 0). Runs against an
-isolated, throwaway `git init` tree, never this host repo's own content -- so a hit on a fixture
-line can never be confused with a hit on this repo's real files, and the test is identical
-whichever repo it is vendored into.
+"""Mutant tests for leak_lint.py: every rule demonstrated failing (mutant present, lint exits 1)
+then passing (mutant removed or allowlisted, lint exits 0). Runs against an isolated, throwaway
+`git init` tree, never this host repo's own content, so the test is identical whichever repo it
+is vendored into.
+
+The term list is a secret in CI, so these tests supply their own SYNTHETIC classes and terms
+through LEAK_LINT_TERMS; none of them is a real entry.
 """
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,9 +35,22 @@ def _commit_all(repo: Path) -> None:
     subprocess.run(["git", "commit", "-q", "-m", "test"], cwd=repo, check=True)
 
 
-def _run(repo: Path) -> subprocess.CompletedProcess:
+#: Synthetic term classes. Real class names and terms live only in the CI secret.
+TERMS = {
+    "class-alpha": ["SYNTHETIC_QUEUE_WORD", "synthetic-buffer"],
+    "class-beta": ["/synthetic/private/path", "synthetic_dir/"],
+    "class-gamma": ["Someone decides alone"],
+}
+
+
+def _run(repo: Path, *, terms=TERMS, reveal: bool = True) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LEAK_LINT_")}
+    if terms is not None:
+        env["LEAK_LINT_TERMS"] = terms if isinstance(terms, str) else json.dumps(terms)
+    if reveal:
+        env["LEAK_LINT_REVEAL"] = "1"
     return subprocess.run(
-        [sys.executable, str(LINT), str(repo)], capture_output=True, text=True
+        [sys.executable, str(LINT), str(repo)], capture_output=True, text=True, env=env
     )
 
 
@@ -187,52 +204,101 @@ def test_attribute_selector_exemption_does_not_hide_a_real_task_id(tmp_path):
     assert "mesh-report-date-fix" in result.stdout
 
 
-# ---- rule 2: ops/lane vocabulary -------------------------------------------------------------
+# ---- term classes (from LEAK_LINT_TERMS) -----------------------------------------------------
 
-def test_ops_vocab_mutant_fails_then_passes(tmp_path):
+@pytest.mark.parametrize(
+    "cls,leak,fixed",
+    [
+        ("class-alpha", "Ask in the synthetic-buffer if you need help.", "Ask in the support channel."),
+        ("class-beta", "See the plan under synthetic_dir/plan.md.", "See the linked plan."),
+        ("class-gamma", "In a dispute, Someone decides alone.", "In a dispute, maintainers vote."),
+    ],
+)
+def test_term_class_mutant_fails_then_passes(tmp_path, cls, leak, fixed):
     repo = _init_repo(tmp_path)
-    doc = _write(repo, "README.md", "Ask in the lane's outbox if you need help.\n")
+    doc = _write(repo, "README.md", leak + "\n")
     _commit_all(repo)
     red = _run(repo)
     assert red.returncode == 1
-    assert "ops-vocab" in red.stdout
+    assert cls in red.stdout
 
-    doc.write_text("Ask in the support channel if you need help.\n")
+    doc.write_text(fixed + "\n")
     _commit_all(repo)
     green = _run(repo)
-    assert green.returncode == 0
+    assert green.returncode == 0, green.stdout
 
 
-# ---- rule 3: internal paths ------------------------------------------------------------------
-
-def test_internal_path_mutant_fails_then_passes(tmp_path):
+def test_term_match_is_case_sensitive(tmp_path):
     repo = _init_repo(tmp_path)
-    doc = _write(repo, "DEPLOY.md", "See the plan under _work/deploy-plan.md for details.\n")
+    _write(repo, "README.md", "synthetic_queue_word in another casing is not the term.\n")
     _commit_all(repo)
-    red = _run(repo)
-    assert red.returncode == 1
-    assert "internal-path" in red.stdout
-
-    doc.write_text("See the linked deploy plan for details.\n")
-    _commit_all(repo)
-    green = _run(repo)
-    assert green.returncode == 0
+    assert _run(repo).returncode == 0
 
 
-# ---- rule 4: named-decider governance prose --------------------------------------------------
+# ---- fail-closed config ----------------------------------------------------------------------
 
-def test_named_decider_mutant_fails_then_passes(tmp_path):
+@pytest.mark.parametrize(
+    "terms",
+    [None, "", "   ", "not json", "[]", json.dumps({}), json.dumps({"class-alpha": []}),
+     json.dumps({"class-alpha": "a-string"}), json.dumps({"class-alpha": [""]})],
+)
+def test_missing_or_empty_term_list_fails_closed(tmp_path, terms):
     repo = _init_repo(tmp_path)
-    doc = _write(repo, "GOVERNANCE.md", "In a dispute, Steven rules on the outcome.\n")
+    _write(repo, "README.md", "clean\n")
     _commit_all(repo)
-    red = _run(repo)
-    assert red.returncode == 1
-    assert "named-decider" in red.stdout
+    result = _run(repo, terms=terms)
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert "leak-lint: clean" not in result.stdout
 
-    doc.write_text("In a dispute, the maintainers vote on the outcome.\n")
+
+def test_double_encoded_term_list_is_accepted(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(repo, "README.md", "a synthetic-buffer here\n")
     _commit_all(repo)
-    green = _run(repo)
-    assert green.returncode == 0
+    result = _run(repo, terms=json.dumps(json.dumps(TERMS)))
+    assert result.returncode == 1
+    assert "class-alpha" in result.stdout
+
+
+# ---- redaction on untrusted runs -------------------------------------------------------------
+
+def test_untrusted_run_with_a_term_hit_prints_only_a_constant_verdict(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(repo, "a.md", "one synthetic-buffer\n[some-fake-internal-id] too\n")
+    _write(repo, "b.md", "/synthetic/private/path\n")
+    _commit_all(repo)
+    first = _run(repo, reveal=False)
+    assert first.returncode == 1
+    for secret in ("synthetic-buffer", "/synthetic/private/path", "class-", "a.md", "b.md",
+                   "some-fake-internal-id"):
+        assert secret not in first.stdout, first.stdout
+
+    # Nothing in the output varies with which or how many terms matched.
+    _write(repo, "b.md", "clean now\n")
+    _commit_all(repo)
+    second = _run(repo, reveal=False)
+    assert second.returncode == 1
+    assert second.stdout == first.stdout
+
+
+def test_untrusted_run_prints_bracket_ids_when_no_term_matched(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(repo, "a.md", "See [some-fake-internal-id] here.\n")
+    _commit_all(repo)
+    result = _run(repo, reveal=False)
+    assert result.returncode == 1
+    assert "some-fake-internal-id" in result.stdout
+
+
+def test_symlink_is_never_followed(tmp_path):
+    outside = tmp_path / "outside.md"
+    outside.write_text("synthetic-buffer and [some-fake-internal-id]\n")
+    repo = _init_repo(tmp_path)
+    (repo / "link.md").symlink_to(outside)
+    _write(repo, "README.md", "clean\n")
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout
 
 
 # ---- allowlist + self-exclusion + committed-tree behavior ------------------------------------
@@ -284,7 +350,7 @@ def test_lint_excludes_its_own_files_by_name(tmp_path):
     _write(
         repo,
         ".github/workflows/leak-lint.yml",
-        "# runs leak_lint.py -- names claim.sh/close.sh/outbox/inbox/_work/ in its own comment\n",
+        "# runs leak_lint.py -- names synthetic-buffer and synthetic_dir/ in its own comment\n",
     )
     _write(repo, ".github/test_leak_lint.py", Path(__file__).read_text())
     _commit_all(repo)

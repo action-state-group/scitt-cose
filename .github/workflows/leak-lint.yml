@@ -1,13 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
-# leak-lint — fail the build if internal coordination-layer text (bracketed task ids, queue
-# vocabulary, private-workspace paths, or named-decider governance prose) reaches this public
-# repo. No secret needed (unlike neutrality.yml, whose reserved-term list is intentionally kept
-# out of the repo) -- the patterns this check bans are generic ops-vocabulary shapes, not a
-# list that itself needs hiding -- so this runs on plain pull_request like hostname-lint.yml.
+# leak-lint — fail the build if internal workflow text (bracketed task ids, and the term classes
+# in the LEAK_LINT_TERMS secret) reaches this public repo. The bracketed-id rule is generic and
+# lives in .github/leak_lint.py; the term list is NOT in this repository (a public gate listing
+# the terms would itself publish them) and is supplied at run time via the LEAK_LINT_TERMS
+# repository secret. The lint is fail-closed: with the secret unset, every run fails with exit 2.
+#
+# This workflow follows neutrality.yml exactly; read that file's "WHY pull_request_target"
+# section before editing. In short: pull_request_target gives fork PRs the secret, which is safe
+# here only because nothing from the pull request is ever executed. The PR head is checked out
+# into ./pr as INERT DATA and read as text by the BASE branch's copy of leak_lint.py; no step
+# builds, installs, tests or runs anything from ./pr; credentials are not persisted; the job can
+# only read.
+#
+# >>> IF YOU ADD A STEP THAT RUNS, BUILDS, OR INSTALLS ANYTHING FROM ./pr, YOU HAVE HANDED THE
+# >>> LEAK_LINT_TERMS SECRET TO ANY STRANGER WHO OPENS A PULL REQUEST. The lint's own unit tests
+# >>> run in python.yml, on pull_request, which correctly receives no secrets.
 name: leak-lint
 
 on:
-  pull_request:
+  pull_request_target:
   push:
     branches: [main]
   workflow_dispatch:
@@ -19,8 +30,34 @@ jobs:
   leak-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # Base repo — TRUSTED. Supplies the scanner. Never the PR's version of it.
+      - name: Checkout base (trusted — provides the scanner)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      # PR head — UNTRUSTED, checked out as data only. Never executed.
+      - name: Checkout pull request head into ./pr (inert data — never executed)
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+          # The inert-data case; see neutrality.yml for why this opt-in is sound here.
+          allow-unsafe-pr-checkout: true
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
-      - run: python .github/leak_lint.py .
+
+      - name: Internal-leak scan (term list from secret)
+        env:
+          LEAK_LINT_TERMS: ${{ secrets.LEAK_LINT_TERMS }}
+          SCAN_ROOT: ${{ github.event_name == 'pull_request_target' && 'pr' || '.' }}
+          # Print matched lines ONLY on a trusted run (not a fork's pull_request_target). The
+          # lint redacts by default; on an untrusted run a term hit yields one constant verdict,
+          # so a stranger cannot read the term list back out of the public log.
+          LEAK_LINT_REVEAL: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: python .github/leak_lint.py "$SCAN_ROOT"
