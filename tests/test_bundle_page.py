@@ -34,6 +34,8 @@ from hosted_profiles import hosted
 from hosted_profiles.hosted import (
     AAC_CRYPTO_JS,
     BUNDLE_JS,
+    WITNESS_CHECK_JS,
+    WITNESS_LIST_JS,
     CAPSULE_JS,
     MMR_JS,
     REPO_URL,
@@ -115,6 +117,9 @@ def test_hosted_bundle_page_is_csp_safe():
     html = render_bundle_page()
     assert '<script src="/static/aac-crypto.js">' in html
     assert '<script src="/static/bundle.js">' in html
+    # the witness check runs on its own scripts, before bundle.js uses them
+    for name in ("mmr.js", "witness-check.js", "witness-list.js"):
+        assert html.index(f'<script src="/static/{name}">') < html.index('<script src="/static/bundle.js">'), name
     assert not re.search(r"<script[^>]*>[^<]", html)  # no inline script bodies
     assert "<link" not in html
     assert "@import" not in html
@@ -142,6 +147,9 @@ def test_offline_bundle_shell_is_self_contained_and_reusable_template():
     assert "<script src=" not in html  # nothing external — fully inlined
     assert AAC_CRYPTO_JS in html
     assert BUNDLE_JS in html
+    assert MMR_JS in html
+    assert WITNESS_CHECK_JS in html
+    assert WITNESS_LIST_JS in html
     # 3 occurrences: 1 embed point (first in document order) + 2 internal
     # BUNDLE_JS references (the sentinel check + the download button's own
     # replace() call) -- BUNDLE_JS itself only ever replaces the first
@@ -164,7 +172,9 @@ def test_hosted_and_offline_pages_share_identical_dom_ids():
     offline = render_bundle_page(offline=True)
     for hook in ("bundleSummary", "permalinkText", "downloadBtn", "copyLinkBtn",
                  "completenessMount", "ritualMount", "recordsTableContent",
-                 "privlogSection", "privlogContent", "bundleJson", "loadBtn", "emptyState"):
+                 "privlogSection", "privlogContent", "bundleJson", "loadBtn", "emptyState",
+                 "witnessMount", "witnessListNone", "witnessListPublished", "witnessListOwn",
+                 "witnessListFile", "publishedListSource"):
         assert f'id="{hook}"' in hosted, hook
         assert f'id="{hook}"' in offline, hook
 
@@ -183,6 +193,8 @@ def test_stdlib_routes_wired():
             ("/bundle/offline-shell", "Ledger bundle verifier"),
             ("/static/mmr.js", "verifyInclusion"),
             ("/static/bundle.js", "checkCompleteness"),
+            ("/static/witness-check.js", "checkWitnessEvidence"),
+            ("/static/witness-list.js", "PUBLISHED_WITNESS_LIST"),
         ):
             t = threading.Thread(target=httpd.handle_request)
             t.start()
@@ -224,6 +236,10 @@ def test_asgi_routes_wired():
     assert status == 200 and "verifyInclusion" in body.decode()
     status, body = _drive_asgi(app, "/static/bundle.js")
     assert status == 200 and "checkCompleteness" in body.decode()
+    status, body = _drive_asgi(app, "/static/witness-check.js")
+    assert status == 200 and "checkWitnessEvidence" in body.decode()
+    status, body = _drive_asgi(app, "/static/witness-list.js")
+    assert status == 200 and "PUBLISHED_WITNESS_LIST" in body.decode()
 
 
 def test_bundle_route_matches_capsule_ledger_default_permalink_base():

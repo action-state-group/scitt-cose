@@ -36,6 +36,8 @@ vm.runInThisContext(cryptoSrc, { filename: "aac-crypto.js" });
 // The bundle uses the canonical verifier for Evidence Bundle v2 and retains
 // this legacy verifier only for already-issued certificate compatibility.
 vm.runInThisContext(mmrSrc, { filename: "mmr.js" });
+const witnessSrc = readFileSync(new URL("../viewer/dist/witness-check.js", import.meta.url), "utf8");
+vm.runInThisContext(witnessSrc, { filename: "witness-check.js" });
 vm.runInThisContext(bundleSrc, { filename: "bundle.js" });
 
 const op = JSON.parse(readFileSync(0, "utf8"));
@@ -100,6 +102,12 @@ async function main() {
     case "evaluateBundleRitual":
       result = await evaluateBundleRitual(op.records, op.completeness, op.crossCheck, op.integrity);
       break;
+    case "checkWitness": {
+      const list = op.list == null ? null : WitnessCheck.parseWitnessList(op.list);
+      const checked = await WitnessCheck.checkWitnessEvidence(op.bundle, MMR, list);
+      result = { checked, described: describeWitness(checked, op.listName || "") };
+      break;
+    }
     default:
       throw new Error("unknown fn: " + op.fn);
   }
