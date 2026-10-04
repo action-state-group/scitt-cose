@@ -418,6 +418,34 @@ VERIFY_JS = """\
     document.querySelectorAll(".fname").forEach(function(f){f.textContent="";});
     $("verdict").classList.remove("show");
   });
+
+  /* A report page or an Evidence Bundle dropped here is read in this browser
+   * and handed to the bundle verifier in sessionStorage (same origin, this
+   * tab only); it is never uploaded, and nothing here POSTs it. */
+  var DROPPED_MAX_BYTES = 16*1024*1024, DROPPED_KEY = "aac.droppedFile";
+  function rootErr(text){ var e=$("rootBundleErr"); if(e)e.textContent=text; }
+  function handOver(file){
+    if(!file)return;
+    if(file.size>DROPPED_MAX_BYTES){ rootErr("Larger than 16 MiB; not read."); return; }
+    var reader=new FileReader();
+    reader.onload=function(){
+      try{ sessionStorage.setItem(DROPPED_KEY, String(reader.result)); }
+      catch(e){ rootErr("This browser could not hold the file for the bundle verifier; open /bundle and drop it there."); return; }
+      location.assign("/bundle");
+    };
+    reader.onerror=function(){ rootErr("The file could not be read."); };
+    reader.readAsText(file);
+  }
+  var drop=$("rootBundleDrop"), pick=$("rootBundleFile");
+  if(drop&&pick){
+    drop.addEventListener("click", function(){ pick.click(); });
+    drop.addEventListener("dragover", function(e){ e.preventDefault(); });
+    drop.addEventListener("drop", function(e){
+      e.preventDefault();
+      if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)handOver(e.dataTransfer.files[0]);
+    });
+    pick.addEventListener("change", function(e){ handOver(e.target.files&&e.target.files[0]); });
+  }
 })();
 """
 
@@ -2341,6 +2369,32 @@ function encodeFragment(obj){
   return stdToB64u(btoa(bin));
 }
 
+/* ---------- a dropped file: its Evidence Bundle ----------
+ * A bundle (.json), or a report page (.html) embedding one as
+ * `window.__BUNDLE__ = <JSON>;</script>`. Pure: the bootstrap section below
+ * reads the file (FileReader) and hands the text here. */
+var DROPPED_MAX_BYTES=16*1024*1024;
+var DROPPED_KEY="aac.droppedFile";
+function extractDroppedBundle(text){
+  if(typeof text!=="string")throw new Error("the file could not be read as text");
+  if(text.length>DROPPED_MAX_BYTES)throw new Error("larger than 16 MiB; not read");
+  var t=text.replace(/^\uFEFF/,"").trim();
+  var value;
+  if(t.charAt(0)==="{"){
+    value=JSON.parse(t);
+  }else{
+    var marker="window.__BUNDLE__ = ";
+    var i=t.indexOf(marker);
+    if(i<0)throw new Error("this file has no Evidence Bundle in it: drop a report page (.html) or a bundle (.json)");
+    var rest=t.slice(i+marker.length);
+    var j=rest.indexOf(";</script>");
+    if(j<0)throw new Error("the report page's embedded bundle is cut off");
+    value=JSON.parse(rest.slice(0,j));
+  }
+  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error("the bundle is not a JSON object");
+  return value;
+}
+
 /* ---------- range membership certificate ----------
  * Optional bundle field this viewer knows how to check (capsule-ledger's
  * `capsule bundle` does not populate it yet as of this viewer shipping --
@@ -2782,7 +2836,43 @@ async function loadBundle(data,fragmentB64u){
   try{ history.replaceState(null,"",location.pathname+location.search+"#"+_fragmentB64u); }catch(ex){}
 }
 
+/* ---------- a dropped file ----------
+ * A bundle (.json), or a report page (.html) that embeds one as
+ * `window.__BUNDLE__ = <JSON>;</script>` (the self-contained page a producer
+ * writes; its JSON is script-safe: <, > and & are \u-escaped). Read with
+ * FileReader and checked here: nothing is uploaded. The landing page hands a
+ * file it was given over in sessionStorage (same origin, this tab only). */
+function loadDroppedText(text){
+  var value;
+  try{ value=extractDroppedBundle(text); }
+  catch(ex){ $("parseErr")&&($("parseErr").textContent="Dropped file: "+ex.message); return; }
+  $("parseErr")&&($("parseErr").textContent="");
+  loadBundle(value);
+}
+function readDroppedFile(file){
+  if(!file)return;
+  if(file.size>DROPPED_MAX_BYTES){ $("parseErr")&&($("parseErr").textContent="Dropped file: larger than 16 MiB; not read"); return; }
+  var reader=new FileReader();
+  reader.onload=function(){ loadDroppedText(String(reader.result)); };
+  reader.onerror=function(){ $("parseErr")&&($("parseErr").textContent="Dropped file: could not be read"); };
+  reader.readAsText(file);
+}
+if(typeof document!=="undefined"&&document.addEventListener){
+  /* A file dropped anywhere on the page is read, never opened by the browser. */
+  document.addEventListener("dragover",function(e){ if(e&&e.preventDefault)e.preventDefault(); });
+  document.addEventListener("drop",function(e){
+    if(!e||!e.dataTransfer||!e.dataTransfer.files||!e.dataTransfer.files.length)return;
+    e.preventDefault(); readDroppedFile(e.dataTransfer.files[0]);
+  });
+}
+$("bundleFile")&&$("bundleFile").addEventListener("change",function(e){ readDroppedFile(e.target.files&&e.target.files[0]); });
+$("bundleDrop")&&$("bundleDrop").addEventListener("click",function(){ $("bundleFile")&&$("bundleFile").click(); });
+
 function bootstrapLoad(){
+  try{
+    var stashed=(typeof sessionStorage!=="undefined")?sessionStorage.getItem(DROPPED_KEY):null;
+    if(stashed!==null){ sessionStorage.removeItem(DROPPED_KEY); loadDroppedText(stashed); return; }
+  }catch(e){ /* storage unavailable: nothing was handed over */ }
   if(typeof window!=="undefined"&&window.__BUNDLE_FRAGMENT_B64U__&&window.__BUNDLE_FRAGMENT_B64U__!=="@@BUNDLE_FRAGMENT@@"){
     try{
       var frag=window.__BUNDLE_FRAGMENT_B64U__;
@@ -3422,6 +3512,19 @@ def render_landing_page() -> str:
   </div>
 </header>
 
+<section class="band" id="dropFile">
+  <div class="wrap">
+    <div class="sec-eyebrow">Check a file in your browser</div>
+    <h2 class="sec-title">Drop a report page or an Evidence Bundle.</h2>
+    <div id="rootBundleDrop" tabindex="0" style="border:2px dashed var(--line);border-radius:10px;padding:28px 20px;text-align:center;color:var(--muted);font-size:14px;cursor:pointer">
+      Drop a report page (<code class="mono">.html</code>) or an Evidence Bundle (<code class="mono">.json</code>) here, or <label for="rootBundleFile" style="color:var(--accent);cursor:pointer;text-decoration:underline">choose it</label>.
+      It is read and checked in this browser, in the bundle verifier; it is never uploaded.
+    </div>
+    <input type="file" id="rootBundleFile" accept=".json,.html,.htm,application/json,text/html" style="display:none">
+    <p id="rootBundleErr" style="color:var(--fail);font-family:var(--mono);font-size:12px;margin:8px 0;min-height:18px"></p>
+  </div>
+</section>
+
 <section class="band" id="how">
   <div class="wrap">
     <div class="sec-eyebrow">The boundary</div>
@@ -3600,12 +3703,19 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
 <section class="band">
   <div class="wrap">
     <div class="sec-eyebrow">Bundle data</div>
-    <h2 class="sec-title">Paste bundle JSON to render</h2>
+    <h2 class="sec-title">Drop a file, or paste bundle JSON</h2>
     <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
-      The JSON goes into the URL fragment only — never sent to this server.
+      A dropped file or pasted JSON is read and checked in this browser — never sent to this server.
     </p>
     <div class="tool">
       <div class="tool-body">
+        <div class="field">
+          <label>File <span class="opt">a report page (.html) with an embedded Evidence Bundle, or a bundle (.json)</span></label>
+          <div id="bundleDrop" tabindex="0" style="border:2px dashed var(--line);border-radius:10px;padding:20px;text-align:center;color:var(--muted);font-size:14px;cursor:pointer">
+            Drop the file here, or <label for="bundleFile" style="color:var(--accent);cursor:pointer;text-decoration:underline">choose it</label>. It is never uploaded.
+          </div>
+          <input type="file" id="bundleFile" accept=".json,.html,.htm,application/json,text/html" style="display:none">
+        </div>
         <div class="field">
           <label>Bundle JSON <span class="opt">output of <code>capsule bundle</code></span></label>
           <textarea id="bundleJson" style="min-height:120px"

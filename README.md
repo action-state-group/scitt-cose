@@ -441,6 +441,14 @@ failed*. Full trust model, including exactly what a server does learn (a
 viewed `capsule_id`, and — until you've downloaded and diffed it — trust in
 served JS): [`docs/verification-trust-model.md`](docs/verification-trust-model.md).
 
+**Drop a file instead of opening a link.** `GET /` and `GET /bundle` both
+accept a dropped (or chosen) file: an Evidence Bundle (`.json`), or a
+self-contained report page (`.html`) whose embedded bundle
+(`window.__BUNDLE__ = …;</script>`) is read out of it. The file is read with
+the browser's FileReader and checked on the page; it is never uploaded. A
+file dropped on `/` is handed to `/bundle` in `sessionStorage` (same origin,
+that tab only), never sent to the server. Files over 16 MiB are refused.
+
 ## Test vectors (cross-implementation, stable)
 
 [`test-vectors/`](test-vectors/) is a frozen, **append-only** vector set for

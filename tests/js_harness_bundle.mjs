@@ -46,6 +46,12 @@ async function main() {
     case "decodeFragment":
       result = decodeFragment(op.hash);
       break;
+    case "extractDroppedBundle":
+      result = extractDroppedBundle(op.text);
+      break;
+    case "extractThenCheckCompleteness":
+      result = await checkCompleteness(extractDroppedBundle(op.text));
+      break;
     case "encodeFragment":
       result = encodeFragment(op.obj);
       break;

@@ -30,6 +30,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from hosted_profiles import hosted
 from hosted_profiles.hosted import (
     AAC_CRYPTO_JS,
     BUNDLE_JS,
@@ -632,3 +633,108 @@ def test_canonicalization_shared_with_digest_path(js_paths):
     entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
     assert entry["matchOk"] is True
     assert entry["_recomputedDigest"] == digest
+
+
+# ---------------------------------------------------------------------------
+# A dropped file: a bundle (.json) or a report page (.html) embedding one as
+# `window.__BUNDLE__ = <JSON>;</script>`, read and checked in the browser.
+# ---------------------------------------------------------------------------
+
+OFFLINE_PASS = HERE.parent / "test-vectors" / "tamper-states" / "offline_pass" / "bundle.json"
+
+
+def _report_page(bundle: dict) -> str:
+    """A self-contained report page as a producer's emitter writes it: the
+    bundle's JSON with <, > and & escaped for a script element, then the
+    verifier runtime after it."""
+    text = json.dumps(bundle, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+    for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026")):
+        text = text.replace(ch, esc)
+    return (
+        "<!DOCTYPE html>\n<html><head><title>Deal report</title></head><body>\n"
+        '<div id="app"></div>\n'
+        "<script>window.__BUNDLE__ = " + text + ";</script>\n"
+        "<script>/* verifier runtime */ function renderEvidenceGraph(){}</script>\n"
+        '<script>renderEvidenceGraph(window.__BUNDLE__, document.getElementById("app"));</script>\n'
+        "</body></html>\n"
+    )
+
+
+def _js_error(js_paths, op: dict) -> str:
+    mmr_path, bundle_path = js_paths
+    result = subprocess.run(
+        ["node", str(HARNESS), str(mmr_path), str(bundle_path)],
+        input=json.dumps(op), capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0, "expected the dropped file to be refused"
+    return result.stderr
+
+
+@pytestmark_node
+def test_dropped_bundle_json_is_read(js_paths):
+    bundle = json.loads(OFFLINE_PASS.read_text(encoding="utf-8"))
+    assert _run_js(js_paths, {"fn": "extractDroppedBundle", "text": json.dumps(bundle)}) == bundle
+    # A byte-order mark and surrounding whitespace are tolerated.
+    assert _run_js(js_paths, {"fn": "extractDroppedBundle", "text": "﻿\n " + json.dumps(bundle) + "\n"}) == bundle
+
+
+@pytestmark_node
+def test_dropped_report_page_yields_its_embedded_bundle(js_paths):
+    """The bundle is read out of a report page, including text that the
+    emitter escaped (<, >, &), and checks exactly as the bundle itself does."""
+    bundle = json.loads(OFFLINE_PASS.read_text(encoding="utf-8"))
+    bundle["note"] = "a <b> & c > d"
+    page = _report_page(bundle)
+    assert "<b>" not in page.split("window.__BUNDLE__ = ")[1].split(";</script>")[0]
+    assert _run_js(js_paths, {"fn": "extractDroppedBundle", "text": page}) == bundle
+    del bundle["note"]
+    direct = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
+    dropped = _run_js(js_paths, {"fn": "extractThenCheckCompleteness", "text": _report_page(bundle)})
+    assert dropped == direct
+
+
+@pytestmark_node
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("<html><body>no bundle here</body></html>", "has no Evidence Bundle in it"),
+        ("<script>window.__BUNDLE__ = {\"a\":1}", "embedded bundle is cut off"),
+        ("[1, 2, 3]", "has no Evidence Bundle in it"),
+        ("{\"truncated\": ", "JSON"),
+        ("<script>window.__BUNDLE__ = [1];</script>", "is not a JSON object"),
+    ],
+)
+def test_dropped_file_without_a_bundle_is_refused(js_paths, text, message):
+    assert message in _js_error(js_paths, {"fn": "extractDroppedBundle", "text": text})
+
+
+@pytestmark_node
+def test_dropped_file_over_16_mib_is_refused(js_paths):
+    big = "{" + " " * (16 * 1024 * 1024) + "}"
+    assert "larger than 16 MiB" in _js_error(js_paths, {"fn": "extractDroppedBundle", "text": big})
+
+
+def test_bundle_page_takes_a_dropped_file_and_a_handover():
+    """The bundle page reads a dropped or chosen file with FileReader, and
+    first looks for a file the landing page handed over in sessionStorage."""
+    assert "new FileReader()" in BUNDLE_JS
+    assert 'sessionStorage.getItem(DROPPED_KEY)' in BUNDLE_JS
+    assert 'sessionStorage.removeItem(DROPPED_KEY)' in BUNDLE_JS
+    for mode in (False, True):
+        page = hosted.render_bundle_page(offline=mode)
+        assert 'id="bundleDrop"' in page and 'id="bundleFile"' in page
+        assert "never uploaded" in page
+
+
+def test_landing_page_drop_hands_over_and_never_uploads():
+    """The landing page's drop zone hands the file to the bundle verifier in
+    sessionStorage and navigates to /bundle: the file is never POSTed."""
+    landing = hosted.render_landing_page()
+    assert 'id="rootBundleDrop"' in landing and 'id="rootBundleFile"' in landing
+    assert "it is never uploaded" in landing
+    js = hosted.VERIFY_JS
+    block = js[js.index("function handOver(file)"):js.index("})();", js.index("function handOver(file)"))]
+    assert 'sessionStorage.setItem(DROPPED_KEY' in block
+    assert 'location.assign("/bundle")' in block
+    assert "fetch(" not in block and "XMLHttpRequest" not in block
+    assert '"aac.droppedFile"' in js and '"aac.droppedFile"' in BUNDLE_JS, "both pages use the same key"
