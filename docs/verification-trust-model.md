@@ -105,7 +105,8 @@ has, so nothing needs fetching:
   public directory, named on the page), or a file of their own. A key the
   bundle supplies is never used. With no list, or no entry for that witness,
   the receipt is reported as present, not checked — never as a pass.
-- **A chain to a witnessed checkpoint** (`extensions["cadence-witness/v0"]`).
+- **A chain to a witnessed checkpoint** (`extensions["x-cadence-witness/v0"]`;
+  bundles written earlier carry it as `cadence-witness/v0` or `x-deal-cadence-v0`).
   The checkpoint is a salted leaf of a 16-level tree whose root is an entry
   of a cadence log; the page checks the leaf, the path, the entry's MMR
   inclusion in the cadence checkpoint, that the cadence checkpoint is signed

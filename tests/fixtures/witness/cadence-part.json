@@ -13,7 +13,7 @@
     "v": 1
   },
   "extensions": {
-    "cadence-witness/v0": {
+    "x-cadence-witness/v0": {
       "cadence": {
         "checkpoint": {
           "cose": "0oRYgqQBJwN4H2FwcGxpY2F0aW9uL2NsbC1jaGVja3BvaW50K2Nib3IEWCBP5LyREGN7_KQAt-pGG1KVgVcOxvFV_3J3mMHkTtwebA-iAXgYY2FkZW5jZS9mYzExYmIzZTY5YTI1YWFkAngaY2FkZW5jZS9mYzExYmIzZTY5YTI1YWFkIzGgWIqmZGtpbmRuY2xsLWNoZWNrcG9pbnRobG9nX3NpemUBaWlzc3VlZF9hdHQyMDI2LTEwLTA0VDA5OjAwOjAwWmlwcmV2X3NpemUAamNvbW1pdG1lbnRYI4FYIMHEvSQpKIZ7XlcvMrMwC2kK62ybnZqkXy8AO0PGfhsCb3ByZXZfY29tbWl0bWVudEBYQNFa3lnPUGLdny5SWg1Bmt1yeV_HFdbrUZf0LqLhcMTcj1wuHMA2c4vI77r_YU728e0LTFYDN15jOUJwYRHUago"

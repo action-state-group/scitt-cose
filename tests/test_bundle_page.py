@@ -754,3 +754,72 @@ def test_landing_page_drop_hands_over_and_never_uploads():
     assert 'location.assign("/bundle")' in block
     assert "fetch(" not in block and "XMLHttpRequest" not in block
     assert '"aac.droppedFile"' in js and '"aac.droppedFile"' in BUNDLE_JS, "both pages use the same key"
+
+
+# ---------------------------------------------------------------------------
+# The page's own script set: range membership runs through the mmr.js the
+# page loads, and an unauthenticated checkpoint is never "verified"
+# ---------------------------------------------------------------------------
+
+PAGE_HARNESS = HERE / "js_harness_page.mjs"
+
+
+def _page_scripts(tmp_path, drop=None):
+    """The offline page's inline scripts, in page order, as files (``drop``:
+    leave out the one containing that text)."""
+    import re
+
+    html = render_bundle_page(offline=True)
+    bodies = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+    paths = []
+    for i, body in enumerate(bodies):
+        if drop and drop in body:
+            continue
+        p = tmp_path / f"script{i}.js"
+        p.write_text(body)
+        paths.append(str(p))
+    listing = tmp_path / "scripts.json"
+    listing.write_text(json.dumps(paths))
+    return listing
+
+
+def _run_page(listing, op):
+    result = subprocess.run(
+        ["node", str(PAGE_HARNESS), str(listing)],
+        input=json.dumps(op), capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@pytestmark_node
+def test_range_membership_runs_through_the_pages_own_mmr_js(tmp_path):
+    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "range-vectors.json").read_text())
+    bundle = _range_case_bundle(next(c for c in vectors["range_cases"] if c["name"] == "three-leaf"))
+    got = _run_page(_page_scripts(tmp_path), {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "pass", got
+    # without mmr.js the same check cannot run: it was the page's own copy
+    without = _run_page(_page_scripts(tmp_path, drop="var MMR = (function(){"), {"fn": "checkCompleteness", "bundle": bundle})
+    assert without["status"] == "fail" and "MMR is not defined" in without["detail"], without
+
+
+@pytestmark_node
+def test_an_unauthenticated_checkpoint_is_not_verified_by_the_interval_check(tmp_path):
+    """The canonical library cannot authenticate a checkpoint in a browser and
+    says so (checkpoint_unverified); the page must not call the interval
+    "verified" on that alone."""
+    bundle = json.loads((HERE / "fixtures" / "witness" / "v2-bundle.json").read_text())
+    got = _run_page(_page_scripts(tmp_path), {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "skip", got
+    assert got["detail"].startswith("the checkpoint signature is not verified by this check")
+    assert "verified —" not in got["detail"]
+
+
+def test_no_inlined_script_closes_early():
+    """The offline copy inlines every script; a literal close tag inside one
+    ends that script there, and the page breaks."""
+    import re
+
+    for body in (AAC_CRYPTO_JS, MMR_JS, WITNESS_CHECK_JS, WITNESS_LIST_JS, BUNDLE_JS):
+        assert not re.search(r"</script", body, re.I)
+

@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
 - **The bundle page checks witness evidence in the browser.** It verifies the
   bundle's signed checkpoint, each witness receipt under a key from a witness
   list the reader chooses (none, the published list shipped with the page, or
-  their own file), a `cadence-witness/v0` chain to a witnessed checkpoint, and
+  their own file), an `x-cadence-witness/v0` chain to a witnessed checkpoint, and
   an earlier witnessed checkpoint the bundle's checkpoint extends ("witnessed
   in part"). It names the level it checked and says when it only found
   evidence present. The checker is `viewer/src/witness.js`, built on its own

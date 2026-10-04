@@ -1692,7 +1692,7 @@
 
   // src/witness.js
   var CHECKPOINT_CONTENT_TYPE = "application/cll-checkpoint+cbor";
-  var CADENCE_EXTENSION = "cadence-witness/v0";
+  var CADENCE_EXTENSIONS = ["x-cadence-witness/v0", "cadence-witness/v0", "x-deal-cadence-v0"];
   var CADENCE_DEPTH = 16;
   var ED25519_SPKI_PREFIX = "302a300506032b6570032100";
   var enc = new TextEncoder;
@@ -2073,7 +2073,9 @@
       return out;
     }
     out.checkpoint = { status: "pass", reason: "signature verifies under the key the checkpoint names", logId: cp.logId, size: cp.size, kid: cp.kid };
-    const chain = bundle.extensions && bundle.extensions[CADENCE_EXTENSION];
+    const exts = bundle.extensions || {};
+    const name = CADENCE_EXTENSIONS.find((n) => exts[n] && typeof exts[n] === "object");
+    const chain = name ? exts[name] : null;
     if (chain && chain.state === "witnessed")
       return checkCadence(out, chain, cp, cose, mmr, list);
     const direct = Array.isArray(stated.witnesses) ? stated.witnesses : [];
@@ -2112,11 +2114,12 @@
       leafCp = prior;
     }
     const size = asInt(chain.size), index = asInt(chain.index);
-    if (chain.log_id !== leafCp.logId || size !== leafCp.size)
+    const logId = chain.log_id !== undefined ? chain.log_id : chain.deal_log_id;
+    if (logId !== leafCp.logId || size !== leafCp.size)
       return failChain("the chain does not name this checkpoint");
     if (!Number.isSafeInteger(index) || index < 0 || index >= 2 ** CADENCE_DEPTH || typeof chain.salt !== "string" || !chain.salt || !Array.isArray(chain.path) || chain.path.length !== CADENCE_DEPTH)
       return failChain("the chain is malformed");
-    let node = await cadenceLeaf(chain.log_id, size, bytesToHex(await sha256(leafCose)), chain.salt);
+    let node = await cadenceLeaf(logId, size, bytesToHex(await sha256(leafCose)), chain.salt);
     for (let level = 0;level < CADENCE_DEPTH; level++) {
       const sib = hexToBytes(chain.path[level]);
       if (sib.length !== 32)

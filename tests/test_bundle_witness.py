@@ -14,7 +14,7 @@ and pass its own ``verify --bundle --witness-directory``: ``direct.json`` (a
 receipt on the bundle's checkpoint), ``cadence-all.json`` (a cadence chain to
 a witnessed checkpoint of the same size), ``cadence-part.json`` (the chain
 reaches an earlier checkpoint: 5 of 6 entries). Each is cut down to its
-``checkpoint`` and its ``cadence-witness/v0`` extension, which is all the
+``checkpoint`` and its ``x-cadence-witness/v0`` extension, which is all the
 witness check reads. The witness keys are test keys.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ from scitt_cose.receipt import build_receipt, verify_receipt
 HERE = Path(__file__).parent
 HARNESS = HERE / "js_harness_bundle.mjs"
 FIXTURES = HERE / "fixtures" / "witness"
-CADENCE = "cadence-witness/v0"
+CADENCE = "x-cadence-witness/v0"
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 
@@ -109,6 +109,25 @@ def test_witnessed_in_part_names_how_much(js_paths):
     text = described["verdict"]["text"]
     assert "covering the first 5 of 6 entries" in text
     assert "Entry 6 is signed by the log's key only" in text
+
+
+@pytest.mark.parametrize("name", ["x-cadence-witness/v0", "cadence-witness/v0", "x-deal-cadence-v0"])
+def test_the_chain_is_read_under_its_name_and_both_earlier_names(js_paths, name):
+    b = load("cadence-part.json")
+    chain = b["extensions"].pop(CADENCE)
+    if name == "x-deal-cadence-v0":  # its chain named the log deal_log_id
+        chain["deal_log_id"] = chain.pop("log_id")
+    b["extensions"][name] = chain
+    checked, _ = check(js_paths, b, load("cadence-witnesses.json"))
+    assert checked["rung"] == "witnessed_in_part", name
+
+
+def test_an_unknown_extension_is_not_read_as_a_chain(js_paths):
+    b = load("cadence-part.json")
+    b["extensions"]["cadence-witness/v9"] = b["extensions"].pop(CADENCE)
+    checked, described = check(js_paths, b, load("cadence-witnesses.json"))
+    assert checked["chain"] is None
+    assert described["verdict"]["label"] == "Signed only"
 
 
 # ---------------------------------------------------------------------------

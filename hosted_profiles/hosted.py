@@ -2405,7 +2405,7 @@ function encodeFragment(obj){
 
 /* ---------- a dropped file: its Evidence Bundle ----------
  * A bundle (.json), or a report page (.html) embedding one as
- * `window.__BUNDLE__ = <JSON>;</script>`. Pure: the bootstrap section below
+ * `window.__BUNDLE__ = <JSON>;<\/script>`. Pure: the bootstrap section below
  * reads the file (FileReader) and hands the text here. */
 var DROPPED_MAX_BYTES=16*1024*1024;
 var DROPPED_KEY="aac.droppedFile";
@@ -2421,7 +2421,7 @@ function extractDroppedBundle(text){
     var i=t.indexOf(marker);
     if(i<0)throw new Error("this file has no Evidence Bundle in it: drop a report page (.html) or a bundle (.json)");
     var rest=t.slice(i+marker.length);
-    var j=rest.indexOf(";</script>");
+    var j=rest.indexOf(";<\/script>"); /* "<\/" is "</": a literal close tag would end this script when inlined */
     if(j<0)throw new Error("the report page's embedded bundle is cut off");
     value=JSON.parse(rest.slice(0,j));
   }
@@ -2466,6 +2466,13 @@ async function checkCompleteness(bundle){
   if(bundle&&bundle.bundle_kind==="evidence-bundle/v2"){
     var verified=await AacCrypto.verifyBundle(bundle);
     var interval=verified.intervalCoverage, members=verified.perRecordMembership;
+    /* The records match the checkpoint's root, but this check did not
+     * authenticate the checkpoint (the signature check is the "Signed
+     * checkpoint" row below): never "verified" on that alone. */
+    var unsigned=(interval.findings||[]).concat(members.findings||[]).indexOf("checkpoint_unverified")>=0;
+    if(interval.status==="pass"&&members.status==="pass"&&unsigned)
+      return{status:"skip",detail:"the checkpoint signature is not verified by this check: the records match the checkpoint's root, "+
+        "and whether that checkpoint is genuinely signed is checked under Signed checkpoint · Witness"};
     if(interval.status==="pass"&&members.status==="pass")
       return{status:"pass",detail:"interval endpoints verified — graph closure and per-record membership are independently verified"};
     if(interval.status==="withheld"||members.status==="withheld")
@@ -2961,7 +2968,7 @@ async function loadBundle(data,fragmentB64u){
 
 /* ---------- a dropped file ----------
  * A bundle (.json), or a report page (.html) that embeds one as
- * `window.__BUNDLE__ = <JSON>;</script>` (the self-contained page a producer
+ * `window.__BUNDLE__ = <JSON>;<\/script>` (the self-contained page a producer
  * writes; its JSON is script-safe: <, > and & are \u-escaped). Read with
  * FileReader and checked here: nothing is uploaded. The landing page hands a
  * file it was given over in sessionStorage (same origin, this tab only). */
