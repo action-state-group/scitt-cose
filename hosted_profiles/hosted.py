@@ -601,6 +601,33 @@ AAC_CRYPTO_JS = (Path(__file__).resolve().parent.parent / "viewer" / "dist" / "a
     encoding="utf-8"
 )
 
+#: Witness checks for the bundle page (viewer/src/witness.js, built on its
+#: own from aac-crypto.js: it needs only cborg). Exposes ``WitnessCheck``.
+WITNESS_CHECK_JS = (Path(__file__).resolve().parent.parent / "viewer" / "dist" / "witness-check.js").read_text(
+    encoding="utf-8"
+)
+
+#: A published witness list the bundle page offers its reader, never applies
+#: on its own: a verbatim copy of capsule-emit's witnesses.json (the source
+#: and commit below), shipped with the page because the page fetches nothing.
+#: The reader may use it, or a list of their own, or none.
+PUBLISHED_WITNESS_LIST_SOURCE = {
+    "url": "https://github.com/action-state-group/capsule-emit/blob/main/witnesses.json",
+    "commit": "3a5696f27d3cb3b03d6a6213c8849f7602964a15",
+    "date": "2026-10-03",
+}
+_PUBLISHED_WITNESS_LIST = json.loads(
+    (Path(__file__).resolve().parent / "published-witnesses.json").read_text(encoding="utf-8")
+)
+WITNESS_LIST_JS = (
+    "globalThis.PUBLISHED_WITNESS_LIST="
+    + json.dumps({"source": PUBLISHED_WITNESS_LIST_SOURCE, "list": _PUBLISHED_WITNESS_LIST}, sort_keys=True)
+    .replace("<", "\\u003c")
+    .replace(">", "\\u003e")
+    .replace("&", "\\u0026")
+    + ";\n"
+)
+
 #: JS for the capsule verification page (served at /static/capsule.js).
 CAPSULE_JS = r"""
 /* Agent Action Capsule — P1 verification surface client.
@@ -2119,6 +2146,13 @@ _BUNDLE_CSS = """
 .completeness-card.status-fail .completeness-title{color:var(--fail)}
 .completeness-card.status-skip .completeness-title{color:var(--muted)}
 .completeness-detail{font-size:13.5px;color:var(--ink)}
+.witness-lists{display:flex;flex-direction:column;gap:6px;font-size:13.5px;margin-bottom:12px}
+.witness-lists .mono{font-size:11.5px;color:var(--muted)}
+.witness-rows{margin-top:12px}
+.witness-row{display:flex;gap:10px;font-size:13px;padding:6px 0;border-top:1px solid var(--line)}
+.witness-row .ritual-mark{flex-shrink:0;width:16px}
+.witness-row-name{font-weight:600;flex-shrink:0;min-width:150px}
+.witness-row-detail{word-break:break-word}
 .bundle-empty{border:1px dashed var(--line);border-radius:12px;padding:28px;text-align:center;color:var(--muted);font-size:14px;margin-bottom:20px}
 """
 
@@ -2371,7 +2405,7 @@ function encodeFragment(obj){
 
 /* ---------- a dropped file: its Evidence Bundle ----------
  * A bundle (.json), or a report page (.html) embedding one as
- * `window.__BUNDLE__ = <JSON>;</script>`. Pure: the bootstrap section below
+ * `window.__BUNDLE__ = <JSON>;<\/script>`. Pure: the bootstrap section below
  * reads the file (FileReader) and hands the text here. */
 var DROPPED_MAX_BYTES=16*1024*1024;
 var DROPPED_KEY="aac.droppedFile";
@@ -2387,7 +2421,7 @@ function extractDroppedBundle(text){
     var i=t.indexOf(marker);
     if(i<0)throw new Error("this file has no Evidence Bundle in it: drop a report page (.html) or a bundle (.json)");
     var rest=t.slice(i+marker.length);
-    var j=rest.indexOf(";</script>");
+    var j=rest.indexOf(";<\/script>"); /* "<\/" is "</": a literal close tag would end this script when inlined */
     if(j<0)throw new Error("the report page's embedded bundle is cut off");
     value=JSON.parse(rest.slice(0,j));
   }
@@ -2432,6 +2466,13 @@ async function checkCompleteness(bundle){
   if(bundle&&bundle.bundle_kind==="evidence-bundle/v2"){
     var verified=await AacCrypto.verifyBundle(bundle);
     var interval=verified.intervalCoverage, members=verified.perRecordMembership;
+    /* The records match the checkpoint's root, but this check did not
+     * authenticate the checkpoint (the signature check is the "Signed
+     * checkpoint" row below): never "verified" on that alone. */
+    var unsigned=(interval.findings||[]).concat(members.findings||[]).indexOf("checkpoint_unverified")>=0;
+    if(interval.status==="pass"&&members.status==="pass"&&unsigned)
+      return{status:"skip",detail:"the checkpoint signature is not verified by this check: the records match the checkpoint's root, "+
+        "and whether that checkpoint is genuinely signed is checked under Signed checkpoint · Witness"};
     if(interval.status==="pass"&&members.status==="pass")
       return{status:"pass",detail:"interval endpoints verified — graph closure and per-record membership are independently verified"};
     if(interval.status==="withheld"||members.status==="withheld")
@@ -2691,6 +2732,37 @@ async function buildBundlePrivlog(records,disclosures){
   return rows;
 }
 
+/* What the page says about a witness check (WitnessCheck.checkWitnessEvidence's
+ * result): the level this page CHECKED, never one it only found present. */
+function describeWitness(r,listName){
+  var rows=[],cp=r.checkpoint||{};
+  rows.push({status:cp.status,name:"Signed checkpoint",detail:cp.status==="pass"?
+    "Verified: log "+cp.logId+" at size "+cp.size+", signed by key "+sh(cp.kid)+
+    " (the key the checkpoint names; this page does not decide whether to trust it)":cp.reason});
+  if(r.chain)rows.push({status:r.chain.status,name:"Chain to the witnessed checkpoint",detail:r.chain.reason});
+  (r.receipts||[]).forEach(function(x){ rows.push({status:x.status,name:"Receipt",detail:x.witness+": "+x.reason}); });
+  var present=(r.receipts||[]).length;
+  var v;
+  if(r.status==="fail"){
+    v={status:"fail",label:"Witness check FAILED",text:"Something the bundle carries does not verify: "+
+      (rows.filter(function(x){return x.status==="fail";}).map(function(x){return x.name+" ("+x.detail+")";}).join("; "))+"."};
+  }else if(cp.status!=="pass"){
+    v={status:"skip",label:"No signed checkpoint",text:"The bundle carries no signed checkpoint, so there is nothing here for a witness to hold."};
+  }else if(r.rung==="witnessed_in_part"){
+    v={status:"pass",label:"Checked: witnessed in part",text:"A witness on "+listName+" holds an earlier checkpoint of this log, covering the first "+
+      r.stepsWitnessed+" of "+r.steps+" entries, and this page verified that the bundle's checkpoint extends it. "+
+      (r.stepsWitnessed+1===r.steps?"Entry "+r.steps+" is":"Entries "+(r.stepsWitnessed+1)+" to "+r.steps+" are")+" signed by the log's key only."};
+  }else if(r.rung==="witnessed"){
+    v={status:"pass",label:"Checked: witnessed",text:"A witness on "+listName+" holds this checkpoint; this page verified its receipt."};
+  }else if(present){
+    v={status:"skip",label:"Found present, not checked",text:"The bundle carries "+present+" witness receipt(s), none checked under a key from a witness list you chose"+
+      (listName?" ("+listName+")":"")+". Until one is, this checkpoint reads as signed by the log's key only."};
+  }else{
+    v={status:"skip",label:"Signed only",text:"The checkpoint is signed by the key it names; the bundle carries no witness receipt."};
+  }
+  return {verdict:v,rows:rows};
+}
+
 /* ---------- render/DOM section: everything below touches document/window --------- */
 (function(){"use strict";
 
@@ -2793,6 +2865,63 @@ function renderCompletenessCard(c){
     "</div><div class='completeness-detail'>"+safe(c.detail)+"</div></div>";
 }
 
+/* ---------- signed checkpoint + witness ----------
+ * WitnessCheck (witness-check.js) does the checking; the witness list is the
+ * reader's choice: none, the published list shipped with this page, or a
+ * file of their own. Nothing is fetched. */
+var _witnessList=null,_witnessListName="";
+
+function renderWitness(){
+  var mount=$("witnessMount");if(!mount||!_bundleData)return;
+  if(typeof WitnessCheck==="undefined"||typeof MMR==="undefined"){
+    mount.innerHTML="<div class='completeness-card status-skip'><div class='completeness-title'>Witness check not available</div>"+
+      "<div class='completeness-detail'>This copy of the page lacks its witness checker.</div></div>";
+    return;
+  }
+  var data=_bundleData,list=_witnessList,name=_witnessListName;
+  WitnessCheck.checkWitnessEvidence(data,MMR,list).then(function(r){
+    if(data!==_bundleData||list!==_witnessList)return;
+    var d=describeWitness(r,name),marks={pass:"✓",fail:"✕",withheld:"–",skip:"–"};
+    var h="<div class='completeness-card status-"+d.verdict.status+"'><div class='completeness-title'>"+safe(d.verdict.label)+
+      "</div><div class='completeness-detail'>"+safe(d.verdict.text)+"</div></div><div class='witness-rows'>";
+    d.rows.forEach(function(x){
+      h+="<div class='witness-row ritual-"+(x.status==="withheld"?"skip":x.status)+"'><span class='ritual-mark'>"+(marks[x.status]||"–")+
+        "</span><span class='witness-row-name'>"+safe(x.name)+"</span><span class='witness-row-detail'>"+safe(x.detail||"")+"</span></div>";
+    });
+    mount.innerHTML=h+"</div>";
+  });
+}
+
+function useWitnessList(list,name){
+  _witnessList=list;_witnessListName=name;
+  $("witnessListErr")&&($("witnessListErr").textContent="");
+  renderWitness();
+}
+(function wireWitnessLists(){
+  var pub=(typeof PUBLISHED_WITNESS_LIST!=="undefined")?PUBLISHED_WITNESS_LIST:null;
+  var src=$("publishedListSource");
+  if(src&&pub)src.textContent="("+pub.source.url+" at "+pub.source.commit.slice(0,12)+", "+pub.source.date+")";
+  $("witnessListNone")&&$("witnessListNone").addEventListener("change",function(){ useWitnessList(null,""); });
+  $("witnessListPublished")&&$("witnessListPublished").addEventListener("change",function(){
+    if(!pub){ $("witnessListErr").textContent="This copy of the page carries no published list."; return; }
+    useWitnessList(WitnessCheck.parseWitnessList(JSON.stringify(pub.list)),"the published list");
+  });
+  function readOwn(file){
+    if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      try{ useWitnessList(WitnessCheck.parseWitnessList(String(reader.result)),"your list ("+file.name+")"); $("witnessListOwn")&&($("witnessListOwn").checked=true); }
+      catch(ex){ $("witnessListErr")&&($("witnessListErr").textContent="Witness list: "+ex.message); }
+    };
+    reader.readAsText(file);
+  }
+  $("witnessListFile")&&$("witnessListFile").addEventListener("change",function(e){ readOwn(e.target.files&&e.target.files[0]); });
+  $("witnessListOwn")&&$("witnessListOwn").addEventListener("change",function(){
+    var f=$("witnessListFile");
+    if(f&&f.files&&f.files[0])readOwn(f.files[0]); else if(f)f.click();
+  });
+})();
+
 /* ---------- load + permalink + offline download ---------- */
 var _bundleData=null,_fragmentB64u=null;
 
@@ -2832,13 +2961,14 @@ async function loadBundle(data,fragmentB64u){
   var crossCheck=await crossCheckSelfReport(data,records);
   var ritual=await evaluateBundleRitual(records,completeness,crossCheck,integrity,data.disclosures);
   renderRitual(ritual);
+  renderWitness();
 
   try{ history.replaceState(null,"",location.pathname+location.search+"#"+_fragmentB64u); }catch(ex){}
 }
 
 /* ---------- a dropped file ----------
  * A bundle (.json), or a report page (.html) that embeds one as
- * `window.__BUNDLE__ = <JSON>;</script>` (the self-contained page a producer
+ * `window.__BUNDLE__ = <JSON>;<\/script>` (the self-contained page a producer
  * writes; its JSON is script-safe: <, > and & are \u-escaped). Read with
  * FileReader and checked here: nothing is uploaded. The landing page hands a
  * file it was given over in sessionStorage (same origin, this tab only). */
@@ -3673,6 +3803,28 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
 
 <div class="wrap" id="completenessMount"></div>
 
+<section id="witnessSection" class="band" style="padding-top:16px">
+  <div class="wrap">
+    <div class="sec-eyebrow">Signed checkpoint · Witness</div>
+    <h2 class="sec-title">Who signed the checkpoint, and which witness holds it</h2>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:16px">
+      This page checks the checkpoint's signature and the bundle's witness receipts itself, in your
+      browser. A receipt is checked only under a key from a witness list you choose, never a key the
+      bundle supplies. With no list chosen, a receipt is reported as present, not checked. The page
+      states which level it checked and which it only found present.
+    </p>
+    <div class="witness-lists">
+      <label><input type="radio" name="witnessList" id="witnessListNone" value="none" checked> No witness list</label>
+      <label><input type="radio" name="witnessList" id="witnessListPublished" value="published"> The published list shipped with this page
+        <span class="mono" id="publishedListSource"></span></label>
+      <label><input type="radio" name="witnessList" id="witnessListOwn" value="file"> My own list (JSON):
+        <input type="file" id="witnessListFile" accept=".json,application/json"></label>
+    </div>
+    <p class="mono" id="witnessListErr" style="font-size:12px;color:var(--fail)"></p>
+    <div id="witnessMount"></div>
+  </div>
+</section>
+
 <section id="ritualSection" class="band" style="padding-top:16px">
   <div class="wrap">
     <div class="sec-eyebrow">Verification ritual</div>
@@ -3787,10 +3939,11 @@ def render_bundle_page(*, offline: bool = False) -> str:
       it as a single self-contained downloadable file — no build step,
       trivially embeddable by a future producer-side ``--with-viewer`` flag.
     """
-    scripts = (
-        f"<script>{AAC_CRYPTO_JS}</script>\n<script>{BUNDLE_JS}</script>"
-        if offline
-        else '<script src="/static/aac-crypto.js"></script>\n<script src="/static/bundle.js"></script>'
+    names = ("aac-crypto.js", "mmr.js", "witness-check.js", "witness-list.js", "bundle.js")
+    bodies = (AAC_CRYPTO_JS, MMR_JS, WITNESS_CHECK_JS, WITNESS_LIST_JS, BUNDLE_JS)
+    scripts = "\n".join(
+        f"<script>{body}</script>" if offline else f'<script src="/static/{name}"></script>'
+        for name, body in zip(names, bodies)
     )
     body = _bundle_page_body(embed_placeholder=offline)
     return f"""<!DOCTYPE html>
@@ -4051,6 +4204,10 @@ def make_handler(verify_rpm: int | None = None):
                 self._send_js(200, MMR_JS)
             elif self.path == "/static/bundle.js":
                 self._send_js(200, BUNDLE_JS)
+            elif self.path == "/static/witness-check.js":
+                self._send_js(200, WITNESS_CHECK_JS)
+            elif self.path == "/static/witness-list.js":
+                self._send_js(200, WITNESS_LIST_JS)
             elif self.path.rstrip("/") == "/bundle":
                 self._send_html(200, render_bundle_page())
             elif self.path == "/bundle/offline-shell":
@@ -4203,6 +4360,12 @@ def make_asgi_app(verify_rpm: int | None = None):
         if method == "GET" and path == "/static/bundle.js":
             await send_js(200, BUNDLE_JS)
             return
+        if method == "GET" and path == "/static/witness-check.js":
+            await send_js(200, WITNESS_CHECK_JS)
+            return
+        if method == "GET" and path == "/static/witness-list.js":
+            await send_js(200, WITNESS_LIST_JS)
+            return
         if method == "GET" and path == "/bundle":
             await send_html(200, render_bundle_page())
             return
@@ -4283,6 +4446,8 @@ __all__ = [
     "CAPSULE_JS",
     "MMR_JS",
     "BUNDLE_JS",
+    "WITNESS_CHECK_JS",
+    "WITNESS_LIST_JS",
     "INSTRUMENTATION_POLICY",
     "render_landing_page",
     "render_capsule_page",

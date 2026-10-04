@@ -1,0 +1,29 @@
+{
+  "directory_version": "1",
+  "witnesses": [
+    {
+      "name": "rekor.sigstore.dev",
+      "endpoint": "https://rekor.sigstore.dev",
+      "binding": "rekor",
+      "key_ids": [
+        "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
+      ],
+      "public_keys": [
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwrkBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw=="
+      ],
+      "since": "2022-10-25"
+    },
+    {
+      "name": "witness.agentactioncapsule.org",
+      "endpoint": "https://witness.agentactioncapsule.org",
+      "binding": "cll",
+      "key_ids": [
+        "39bb654c9dc0afe1c0edef0deffaa69099b8518836c9ba26e0491535840f96b5"
+      ],
+      "public_keys": [
+        "MCowBQYDK2VwAyEAObtlTJ3Ar+HA7e8N7/qmkJm4UYg2ybom4EkVNYQPlrU="
+      ],
+      "since": "2026-06-28"
+    }
+  ]
+}
