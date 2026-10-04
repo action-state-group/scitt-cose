@@ -46,6 +46,9 @@ async function main() {
     case "decodeFragment":
       result = decodeFragment(op.hash);
       break;
+    case "decodeFragmentAny":
+      result = await decodeFragmentAny(op.hash);
+      break;
     case "encodeFragment":
       result = encodeFragment(op.obj);
       break;

@@ -2341,6 +2341,44 @@ function encodeFragment(obj){
   return stdToB64u(btoa(bin));
 }
 
+/* ---------- compressed fragment codec "z1" (PROVISIONAL) ----------
+ * "z1." + unpadded base64url(deflate-raw(the bundle's JSON bytes)), the
+ * format DecompressionStream("deflate-raw") reads (RFC 1951). The "." never
+ * occurs in a plain fragment (unpadded base64url), so the mark tells the two
+ * apart and every plain fragment decodes exactly as before; any other mark
+ * is refused rather than guessed at. The inflated bytes are capped at
+ * 1 MiB, so a small link cannot expand without bound. The mark is
+ * provisional until the bundle format adopts it. */
+var FRAGMENT_Z1_MAX_INFLATED=1<<20;
+async function decodeFragmentAny(hash){
+  var dot=hash.indexOf(".");
+  if(dot<0)return decodeFragment(hash);
+  var mark=hash.slice(0,dot),body=hash.slice(dot+1);
+  if(mark!=="z1")throw new Error("unsupported fragment codec: "+mark);
+  if(!/^[A-Za-z0-9_-]*$/.test(body))throw new Error("fragment must be unpadded base64url after the codec mark");
+  if(typeof DecompressionStream==="undefined")throw new Error("this browser cannot read a compressed link; open the bundle file instead");
+  var std=b64uToStd(body);
+  var pad=std.length%4; if(pad)std+="=".repeat(4-pad);
+  var bin=atob(std);
+  var bytes=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  var reader=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+  var chunks=[],total=0;
+  for(;;){
+    var step=await reader.read();
+    if(step.done)break;
+    total+=step.value.length;
+    if(total>FRAGMENT_Z1_MAX_INFLATED){
+      try{await reader.cancel();}catch(e){}
+      throw new Error("fragment inflates past the size cap");
+    }
+    chunks.push(step.value);
+  }
+  var out=new Uint8Array(total),off=0;
+  for(var j=0;j<chunks.length;j++){out.set(chunks[j],off);off+=chunks[j].length;}
+  return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(out));
+}
+
 /* ---------- range membership certificate ----------
  * Optional bundle field this viewer knows how to check (capsule-ledger's
  * `capsule bundle` does not populate it yet as of this viewer shipping --
@@ -2782,17 +2820,17 @@ async function loadBundle(data,fragmentB64u){
   try{ history.replaceState(null,"",location.pathname+location.search+"#"+_fragmentB64u); }catch(ex){}
 }
 
-function bootstrapLoad(){
+async function bootstrapLoad(){
   if(typeof window!=="undefined"&&window.__BUNDLE_FRAGMENT_B64U__&&window.__BUNDLE_FRAGMENT_B64U__!=="@@BUNDLE_FRAGMENT@@"){
     try{
       var frag=window.__BUNDLE_FRAGMENT_B64U__;
-      loadBundle(decodeFragment(frag),frag);
+      loadBundle(await decodeFragmentAny(frag),frag);
       return;
     }catch(ex){ $("parseErr")&&($("parseErr").textContent="Embedded bundle decode error: "+ex.message); }
   }
   var hash=location.hash.slice(1);
   if(hash){
-    try{ loadBundle(decodeFragment(hash),hash); return; }
+    try{ loadBundle(await decodeFragmentAny(hash),hash); return; }
     catch(ex){ $("parseErr")&&($("parseErr").textContent="Fragment decode error: "+ex.message); }
   }
   $("emptyState")&&($("emptyState").style.display="block");

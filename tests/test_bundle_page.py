@@ -632,3 +632,108 @@ def test_canonicalization_shared_with_digest_path(js_paths):
     entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
     assert entry["matchOk"] is True
     assert entry["_recomputedDigest"] == digest
+
+
+# ---------------------------------------------------------------------------
+# Compressed fragment codec "z1" (provisional): "z1." + unpadded
+# base64url(deflate-raw(JSON)). Plain fragments decode as before.
+# ---------------------------------------------------------------------------
+
+Z1_VECTOR = HERE / "fixtures" / "fragment_z1_capsulectl.json"
+
+
+def _z1(value) -> str:
+    import base64
+    import zlib
+
+    deflater = zlib.compressobj(9, zlib.DEFLATED, -15)  # raw deflate, RFC 1951
+    raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    body = deflater.compress(raw) + deflater.flush()
+    return "z1." + base64.urlsafe_b64encode(body).decode().rstrip("=")
+
+
+def _plain(value) -> str:
+    import base64
+
+    return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
+
+
+def _run_js_error(js_paths, op: dict) -> str:
+    mmr_path, bundle_path = js_paths
+    result = subprocess.run(
+        ["node", str(HARNESS), str(mmr_path), str(bundle_path)],
+        input=json.dumps(op), capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0, "expected the decode to be refused"
+    return result.stderr
+
+
+@pytestmark_node
+def test_z1_fragment_decodes_to_the_same_bundle(js_paths):
+    value = {"bundle_kind": "evidence-bundle/v2", "records": [CAPSULE_A], "note": "é ✓"}
+    assert _run_js(js_paths, {"fn": "decodeFragmentAny", "hash": _z1(value)}) == value
+
+
+@pytestmark_node
+def test_plain_fragment_still_decodes_through_the_same_entry_point(js_paths):
+    value = {"bundle_kind": "evidence-bundle/v2", "records": [CAPSULE_A]}
+    assert _run_js(js_paths, {"fn": "decodeFragmentAny", "hash": _plain(value)}) == value
+    assert _run_js(js_paths, {"fn": "decodeFragment", "hash": _plain(value)}) == value
+
+
+@pytestmark_node
+def test_z1_vector_minted_by_another_implementation_decodes(js_paths):
+    """A fragment minted by capsulectl's own z1 encoder (Go compress/flate)
+    decodes here to the exact bundle it was minted from: two independent
+    implementations of the codec agree. The vector is a synthetic deal's
+    counterparty-shared Evidence Bundle; the compressed link is about a quarter
+    of the plain one."""
+    vector = json.loads(Z1_VECTOR.read_text(encoding="utf-8"))
+    assert vector["fragment_z1"].startswith("z1.")
+    assert len(vector["fragment_z1"]) * 3 < vector["fragment_plain_length"]
+    decoded = _run_js(js_paths, {"fn": "decodeFragmentAny", "hash": vector["fragment_z1"]})
+    assert decoded == vector["bundle"]
+    assert decoded["bundle_kind"] == "evidence-bundle/v2"
+
+
+@pytestmark_node
+def test_z1_refuses_an_unknown_codec_mark(js_paths):
+    err = _run_js_error(js_paths, {"fn": "decodeFragmentAny", "hash": "z2." + _z1({"a": 1})[3:]})
+    assert "unsupported fragment codec: z2" in err
+
+
+@pytestmark_node
+def test_z1_refuses_a_body_that_is_not_unpadded_base64url(js_paths):
+    err = _run_js_error(js_paths, {"fn": "decodeFragmentAny", "hash": _z1({"a": 1}) + "="})
+    assert "unpadded base64url" in err
+
+
+@pytestmark_node
+def test_z1_refuses_a_fragment_that_inflates_past_the_cap(js_paths):
+    """A compression bomb: a few kilobytes that inflate past 1 MiB."""
+    import base64
+    import zlib
+
+    deflater = zlib.compressobj(9, zlib.DEFLATED, -15)
+    body = deflater.compress(b" " * ((1 << 20) + 10)) + deflater.flush()
+    assert len(body) < 4096
+    bomb = "z1." + base64.urlsafe_b64encode(body).decode().rstrip("=")
+    err = _run_js_error(js_paths, {"fn": "decodeFragmentAny", "hash": bomb})
+    assert "inflates past the size cap" in err
+
+
+@pytestmark_node
+def test_z1_at_the_cap_still_decodes(js_paths):
+    """Just under 1 MiB of JSON inflates and decodes: the cap refuses only
+    what is past it."""
+    value = {"pad": "x" * ((1 << 20) - 20)}
+    assert len(json.dumps(value, separators=(",", ":"))) <= 1 << 20
+    assert _run_js(js_paths, {"fn": "decodeFragmentAny", "hash": _z1(value)}) == value
+
+
+def test_bundle_page_bootstrap_reads_compressed_fragments():
+    """Both the hash and an offline shell's embedded fragment go through the
+    codec-aware decoder."""
+    assert "loadBundle(await decodeFragmentAny(hash),hash)" in BUNDLE_JS
+    assert "loadBundle(await decodeFragmentAny(frag),frag)" in BUNDLE_JS
+    assert "PROVISIONAL" in BUNDLE_JS
