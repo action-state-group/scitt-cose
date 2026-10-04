@@ -34,11 +34,11 @@ from hosted_profiles import hosted
 from hosted_profiles.hosted import (
     AAC_CRYPTO_JS,
     BUNDLE_JS,
-    WITNESS_CHECK_JS,
-    WITNESS_LIST_JS,
     CAPSULE_JS,
     MMR_JS,
     REPO_URL,
+    WITNESS_CHECK_JS,
+    WITNESS_LIST_JS,
     make_asgi_app,
     make_handler,
     render_bundle_page,

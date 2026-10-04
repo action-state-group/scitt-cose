@@ -32,7 +32,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from hosted_profiles.hosted import BUNDLE_JS, MMR_JS, WITNESS_LIST_JS, _PUBLISHED_WITNESS_LIST
+from hosted_profiles.hosted import _PUBLISHED_WITNESS_LIST, BUNDLE_JS, MMR_JS, WITNESS_LIST_JS
 from scitt_cose.receipt import build_receipt, verify_receipt
 
 HERE = Path(__file__).parent
