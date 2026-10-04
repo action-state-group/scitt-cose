@@ -646,7 +646,7 @@ def _z1(value) -> str:
     import base64
     import zlib
 
-    deflater = zlib.compressobj(9, zlib.DEFLATED, -15)  # raw deflate, RFC 1951
+    deflater = zlib.compressobj(9, zlib.DEFLATED, -15)  # raw deflate
     raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     body = deflater.compress(raw) + deflater.flush()
     return "z1." + base64.urlsafe_b64encode(body).decode().rstrip("=")

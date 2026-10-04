@@ -443,10 +443,10 @@ served JS): [`docs/verification-trust-model.md`](docs/verification-trust-model.m
 
 `GET /bundle` also reads a compressed fragment, **provisionally**:
 `z1.` followed by unpadded base64url of the bundle's JSON compressed with raw
-DEFLATE (RFC 1951, what a browser's `DecompressionStream("deflate-raw")`
-reads). A multi-step bundle's link is about a quarter of its plain size this
-way. The `.` never occurs in a plain fragment, so every plain link decodes as
-before, and any other mark is refused. What a compressed link inflates to is
+DEFLATE (what a browser's `DecompressionStream("deflate-raw")` reads). A
+multi-step bundle's link is about a quarter of its plain size this way. The
+`.` never occurs in a plain fragment, so every plain link decodes as before,
+and any other mark is refused. What a compressed link inflates to is
 capped at 1 MiB. The `z1` mark is provisional until the bundle format adopts
 it; producers should keep minting plain links until then.
 

@@ -2343,7 +2343,7 @@ function encodeFragment(obj){
 
 /* ---------- compressed fragment codec "z1" (PROVISIONAL) ----------
  * "z1." + unpadded base64url(deflate-raw(the bundle's JSON bytes)), the
- * format DecompressionStream("deflate-raw") reads (RFC 1951). The "." never
+ * format DecompressionStream("deflate-raw") reads. The "." never
  * occurs in a plain fragment (unpadded base64url), so the mark tells the two
  * apart and every plain fragment decodes exactly as before; any other mark
  * is refused rather than guessed at. The inflated bytes are capped at
