@@ -9,7 +9,6 @@ both receipts verified by `scitt_cose.verify_receipt`.
 | File | Purpose |
 |------|---------|
 | `shared-vector.json` | All interop artifacts: statements, receipts, verify results, status table |
-| `DRAFT-amaury-note.md` | **GATED** — draft note for Steven to send to Amaury (historical; exchange complete) |
 
 ## Status
 
