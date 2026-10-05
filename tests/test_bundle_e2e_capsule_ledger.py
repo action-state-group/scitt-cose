@@ -80,14 +80,16 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def real_bundle():
-    """Run the real `capsule bundle` CLI against the real amaury fixture
-    ledger -- zero mocking, zero special-casing."""
+    """Run the real `capsule bundle` CLI against the real CCF-interop
+    sample ledger -- zero mocking, zero special-casing."""
     sys.path.insert(0, str(CAPSULE_LEDGER))
     pkg = _ledger_pkg(CAPSULE_LEDGER)
     cli_main = importlib.import_module(f"{pkg}.cli.main").main
 
+    # The file name is capsule-ledger's own (that repository is archived and
+    # read-only), so it is kept as published there.
     fixture = CAPSULE_LEDGER / "tests" / "fixtures" / "amaury_sample_ledger.jsonl"
-    assert fixture.exists(), "amaury fixture missing from capsule-ledger checkout"
+    assert fixture.exists(), "CCF-interop sample ledger missing from capsule-ledger checkout"
 
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "bundle.json"
@@ -205,7 +207,7 @@ def test_raw_oss_bundle_renders_with_no_special_casing(real_bundle, js_paths):
     integrity = next(s for s in ritual["stages"] if s["name"] == "Integrity")
     sequence = next(s for s in ritual["stages"] if s["name"] == "Sequence")
     assert integrity["status"] == "pass"
-    # The amaury fixture has partial chain coverage (confirm_purchase cites approve_purchase but
+    # The CCF-interop sample ledger has partial chain coverage (confirm_purchase cites approve_purchase but
     # the other records are standalone), so the honest Sequence verdict is "skip" (partial),
     # not "pass" (every link declared).
     assert sequence["status"] == "skip"
