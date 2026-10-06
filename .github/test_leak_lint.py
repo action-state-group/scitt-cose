@@ -315,5 +315,104 @@ def test_generated_artifact_suffixes_are_scanned(tmp_path):
     assert "draft-out.xml" in result.stdout
 
 
+#: A rule-3 term that fits inside a URL path, and its class.
+LOCK_TERM = "_work/"
+LOCK_CLASS = "internal-path"
+
+# ---- lockfile URL and hash values ------------------------------------------------------------
+# A lockfile's dependency URL can contain any substring; only the values of its URL and hash
+# fields are exempt from term matching. Everything else is matched as usual.
+
+LOCK_URL = "https://registry.example.invalid/" + LOCK_TERM + "pkg/-/pkg-1.0.0.tgz"
+
+LOCKFILE_URL_FIELDS = {
+    "package-lock.json": (
+        '{\n  "packages": {\n    "node_modules/pkg": {\n      "version": "1.0.0",\n'
+        f'      "resolved": "{LOCK_URL}",\n'
+        f'      "integrity": "sha512-{LOCK_TERM}AAAA=="\n'
+        "    }\n  }\n}\n"
+    ),
+    "yarn.lock": (
+        'pkg@^1.0.0:\n  version "1.0.0"\n'
+        f'  resolved "{LOCK_URL}#abc"\n'
+        f"  integrity sha512-{LOCK_TERM}AAAA==\n"
+        '\n"other@npm:^2.0.0":\n  version: 2.0.0\n'
+        f'  resolution: "other@{LOCK_URL}"\n'
+        f"  checksum: {LOCK_TERM}0123abcd\n"
+    ),
+    "pnpm-lock.yaml": (
+        "packages:\n  /pkg@1.0.0:\n"
+        f"    resolution: {{integrity: sha512-{LOCK_TERM}AAAA==, tarball: {LOCK_URL}}}\n"
+        "  /other@2.0.0:\n    resolution:\n"
+        f"      integrity: sha512-{LOCK_TERM}BBBB==\n"
+        f"      tarball: {LOCK_URL}\n"
+    ),
+}
+
+LOCKFILE_OTHER_FIELD = {
+    "package-lock.json": f'{{\n  "name": "{LOCK_TERM}app",\n  "version": "1.0.0"\n}}\n',
+    "yarn.lock": (
+        f'pkg@^1.0.0:\n  version "1.0.0"\n  dependencies:\n    {LOCK_TERM}dep "^1.0.0"\n'
+    ),
+    "pnpm-lock.yaml": f"importers:\n  .:\n    dependencies:\n      {LOCK_TERM}dep: 1.0.0\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(LOCKFILE_URL_FIELDS))
+def test_a_term_inside_a_lockfile_url_or_hash_value_is_clean(tmp_path, name):
+    repo = _init_repo(tmp_path)
+    _write(repo, f"ts/{name}", LOCKFILE_URL_FIELDS[name])
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.parametrize("name", sorted(LOCKFILE_OTHER_FIELD))
+def test_a_term_in_another_lockfile_field_is_still_flagged(tmp_path, name):
+    repo = _init_repo(tmp_path)
+    _write(repo, name, LOCKFILE_OTHER_FIELD[name])
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert LOCK_CLASS in result.stdout
+
+
+def test_the_same_term_in_prose_is_still_flagged(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(repo, "package-lock.json", LOCKFILE_URL_FIELDS["package-lock.json"])
+    _write(repo, "README.md", f"Fetch it from {LOCK_URL}.\n")
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "README.md" in result.stdout
+    assert "package-lock.json" not in result.stdout
+
+
+@pytest.mark.parametrize("name", ["data.json", "package.json", "config.yaml"])
+def test_a_resolved_key_outside_a_lockfile_is_still_flagged(tmp_path, name):
+    repo = _init_repo(tmp_path)
+    if name.endswith(".json"):
+        _write(repo, name, f'{{\n  "resolved": "{LOCK_URL}",\n  "integrity": "{LOCK_TERM}"\n}}\n')
+    else:
+        _write(repo, name, f"resolution:\n  integrity: {LOCK_TERM}\n  tarball: {LOCK_URL}\n")
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert LOCK_CLASS in result.stdout
+
+
+def test_a_lockfile_url_value_is_still_checked_for_bracketed_ids(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write(
+        repo,
+        "package-lock.json",
+        '{\n  "resolved": "https://registry.example.invalid/[lockfile-url-task-id]"\n}\n',
+    )
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "bracketed-id" in result.stdout
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

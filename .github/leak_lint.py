@@ -32,6 +32,9 @@ Design (same shape as the sibling `hostname_lint.py`):
     (they rot the moment a file is edited above the hit) -- the exact stripped line text.
   - **Scans generated artifacts too** (`.txt`, `.xml` I-D outputs), not just `.md` sources -- a
     fix applied to source without a rebuild leaves the leak live in the rendered artifact.
+  - **Lockfile URL and hash values are not term-matched** (`package-lock.json`, `yarn.lock`,
+    `pnpm-lock.yaml`): a registry URL can contain any substring. Only those values are exempt;
+    the rest of a lockfile is scanned as usual (see `LOCKFILE_EXEMPT_VALUES`).
   - **Excludes this script, its allowlist, its own CI workflow, and its own test fixtures by
     filename** -- they legitimately name the patterns they ban, in prose that describes the ban
     or in fixture data that exercises the ban.
@@ -61,6 +64,9 @@ SCAN_SUFFIXES = (
     ".toml", ".cfg", ".yml", ".yaml", ".json",
     ".html", ".sh",
 )
+
+#: Files scanned by name whose suffix is not in SCAN_SUFFIXES.
+SCAN_NAMES = {"yarn.lock"}
 
 # Rule 1 -- bracketed internal ids. Lowercase-alnum segments only (excludes uppercase citation
 # tags structurally), each segment 2+ chars (excludes a hex regex character class like
@@ -102,6 +108,35 @@ NAMED_DECIDER = (
     "Steven ratifies",
     "Steven decides",
 )
+
+
+# Lockfiles: the values of their dependency URL and hash fields are not prose (a registry URL
+# can contain any substring), so they are exempt from term matching. Only those values, and only
+# in these files: every other field of a lockfile, and every other file whatever its keys, is
+# matched as usual, and the bracketed-id rule still sees the whole line.
+LOCKFILE_EXEMPT_VALUES = {
+    # npm: `"resolved": "<url>",` and `"integrity": "<hash>",`
+    "package-lock.json": (
+        re.compile(r'^(\s*"(?:resolved|integrity)"\s*:\s*)"(?:[^"\\]|\\.)*"'),
+    ),
+    # yarn 1: `  resolved "<url>"`, `  integrity <hash>`;
+    # yarn 2+: `  resolution: "<package>@npm:<version>"`, `  checksum: <hash>`
+    "yarn.lock": (
+        re.compile(r"^(\s+(?:resolved|integrity)\s+)\S.*$"),
+        re.compile(r"^(\s+(?:resolution|checksum):\s*)\S.*$"),
+    ),
+    # pnpm: `integrity: <hash>` and `tarball: <url>`, in a block or in the inline
+    # `resolution: {integrity: ..., tarball: ...}` map
+    "pnpm-lock.yaml": (re.compile(r"(\b(?:integrity|tarball):\s*)[^\s,{}][^,{}]*"),),
+}
+
+
+def term_text(name: str, line: str) -> str:
+    """`line` as term matching sees it: when the file named `name` is a lockfile, with the
+    values of its URL and hash fields removed (see LOCKFILE_EXEMPT_VALUES); otherwise as is."""
+    for pattern in LOCKFILE_EXEMPT_VALUES.get(name, ()):
+        line = pattern.sub(lambda m: m.group(1), line)
+    return line
 
 
 def _tracked_files(root: Path) -> list[Path]:
@@ -170,15 +205,16 @@ def _has_bracket_id_leak(line: str) -> bool:
     return False
 
 
-def _classify(line: str) -> list[str]:
+def _classify(line: str, file_name: str = "") -> list[str]:
     hits = []
     if _has_bracket_id_leak(line):
         hits.append("bracketed-id")
-    if any(term in line for term in OPS_VOCAB):
+    matched = term_text(file_name, line)
+    if any(term in matched for term in OPS_VOCAB):
         hits.append("ops-vocab")
-    if any(term in line for term in INTERNAL_PATHS):
+    if any(term in matched for term in INTERNAL_PATHS):
         hits.append("internal-path")
-    if any(term in line for term in NAMED_DECIDER):
+    if any(term in matched for term in NAMED_DECIDER):
         hits.append("named-decider")
     return hits
 
@@ -189,7 +225,7 @@ def scan(root: Path) -> list[str]:
     for f in _tracked_files(root):
         if f.name in SELF_NAMES:
             continue
-        if f.suffix not in SCAN_SUFFIXES:
+        if f.suffix not in SCAN_SUFFIXES and f.name not in SCAN_NAMES:
             continue
         try:
             text = f.read_text(errors="ignore")
@@ -202,7 +238,7 @@ def scan(root: Path) -> list[str]:
             stripped = line.strip()
             if stripped in allow:
                 continue
-            classes = _classify(line)
+            classes = _classify(line, f.name)
             if classes:
                 hits.append(f"{f.relative_to(root)}:{i}:{','.join(classes)}: {stripped}")
     return hits
