@@ -8,6 +8,7 @@ whichever repo it is vendored into.
 """
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 from pathlib import Path
@@ -318,6 +319,13 @@ def test_generated_artifact_suffixes_are_scanned(tmp_path):
 #: A rule-3 term that fits inside a URL path, and its class.
 LOCK_TERM = "_work/"
 LOCK_CLASS = "internal-path"
+#: A rule-2 term made only of base64 characters, so it can sit inside an SRI-shaped value.
+DIGEST_TERM = "worktree"
+DIGEST_CLASS = "ops-vocab"
+
+
+def _run_digest(repo: Path) -> subprocess.CompletedProcess:
+    return _run(repo)
 
 # ---- lockfile URL and hash values ------------------------------------------------------------
 # A lockfile's dependency URL can contain any substring, so the value of a URL or hash field is
@@ -328,8 +336,9 @@ LOCK_CLASS = "internal-path"
 #: A URL on a public registry host, and the same path on a host that is not one.
 LOCK_URL = "https://registry.npmjs.org/" + LOCK_TERM + "pkg/-/pkg-1.0.0.tgz"
 PRIVATE_URL = "https://npm.internal.example.invalid/" + LOCK_TERM + "pkg/-/pkg-1.0.0.tgz"
-#: Hash values in their real shapes: an SRI integrity value and a yarn 2+ checksum.
-SRI_HASH = "sha512-AbCdEf0123+/xyz=="
+#: Hash values in their real shapes: an SRI integrity value (a 64-byte sha512 digest) and a
+#: yarn 2+ checksum.
+SRI_HASH = "sha512-" + base64.b64encode(bytes(range(64))).decode()
 YARN_CHECKSUM = "10c0/" + "0123abcd" * 8
 
 LOCKFILE_URL_FIELDS = {
@@ -392,6 +401,34 @@ def test_a_term_in_a_lockfile_value_that_is_not_a_public_registry_or_a_hash_is_f
     result = _run(repo)
     assert result.returncode == 1, f"{name} {case}: {result.stdout}"
     assert LOCK_CLASS in result.stdout
+
+#: SRI-shaped values holding a base64-clean term, with a digest the wrong length for their
+#: algorithm: not a digest, so matched as usual.
+SRI_WRONG_LENGTH = {
+    "package-lock.json": f'{{\n  "integrity": "sha512-{DIGEST_TERM}=="\n}}\n',
+    "yarn.lock": f"pkg@^1.0.0:\n  integrity sha256-{DIGEST_TERM}AAAA=\n",
+    "pnpm-lock.yaml": f"packages:\n  /pkg@1.0.0:\n    resolution: {{integrity: sha384-{DIGEST_TERM}}}\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(SRI_WRONG_LENGTH))
+def test_an_sri_shaped_value_that_is_not_a_digest_of_its_length_is_flagged(tmp_path, name):
+    repo = _init_repo(tmp_path)
+    _write(repo, name, SRI_WRONG_LENGTH[name])
+    _commit_all(repo)
+    result = _run_digest(repo)
+    assert result.returncode == 1, result.stdout
+    assert DIGEST_CLASS in result.stdout
+
+
+@pytest.mark.parametrize("algorithm,size", [("sha1", 20), ("sha256", 32), ("sha384", 48), ("sha512", 64)])
+def test_an_sri_digest_of_its_algorithms_length_is_exempt(tmp_path, algorithm, size):
+    repo = _init_repo(tmp_path)
+    digest = base64.b64encode(bytes(range(size))).decode()
+    _write(repo, "package-lock.json", f'{{\n  "integrity": "{algorithm}-{digest}"\n}}\n')
+    _commit_all(repo)
+    assert _run_digest(repo).returncode == 0
+
 
 LOCKFILE_OTHER_FIELD = {
     "package-lock.json": f'{{\n  "name": "{LOCK_TERM}app",\n  "version": "1.0.0"\n}}\n',
