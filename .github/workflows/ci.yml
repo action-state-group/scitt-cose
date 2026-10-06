@@ -31,6 +31,11 @@ jobs:
         env:
           SCITT_REQUIRE_GO: "1"
           SCITT_REQUIRE_RUST: "1"
+
+      # The leak-lint tests live next to the lint in .github/, outside the test paths. They use
+      # synthetic terms only, so this pull_request job needs no secret.
+      - name: leak-lint tests
+        run: python -m pytest -q .github/test_leak_lint.py
       - name: Lint
         run: python -m ruff check .
 
