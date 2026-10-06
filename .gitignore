@@ -19,3 +19,7 @@ dist/
 # interop artifacts are committed reference outputs (test-only keys, not secrets)
 !interop/**/*.cose
 !interop/**/*.pem
+
+# Local secrets: never commit an env file.
+.env
+.env.*
