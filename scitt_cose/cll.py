@@ -4,11 +4,11 @@ range proofs against a signed checkpoint, plus honest witness-lag rendering.
 
 A CLL is a locally-appended log (an Agent Action Capsule stream) that
 periodically commits to a Merkle Mountain Range (MMR) accumulator and
-registers the resulting *checkpoint* with a SCITT Transparency Service (TS),
-per Amendment E. The checkpoint/MMR-producing side lives in
+registers the resulting *checkpoint* with a SCITT Transparency Service (TS).
+The checkpoint/MMR-producing side lives in
 ``capsule_emit.checkpoint`` (opt-in subpackage; ``core.py``/``index.py``/
 ``emit.py``). This module is the other half: **a verifier that cannot check
-the log is a half-verifier** (Amendment E). It lets a third party who holds
+the log is a half-verifier**. It lets a third party who holds
 only a capsule, an inclusion proof, and a witnessed checkpoint confirm the
 whole chain **offline** — no live log, no trust in the operator's own
 signature scheme.

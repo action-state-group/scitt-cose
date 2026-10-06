@@ -3,10 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build src/aac-crypto.js --bundle --format=iife --target=browser --outfile=dist/aac-crypto.js",
-    "check": "npm run build && ! rg -q 'node:' dist/aac-crypto.js"
+    "build": "bun build src/aac-crypto.js --bundle --format=iife --target=browser --outfile=dist/aac-crypto.js && npm run build:witness",
+    "build:witness": "bun build src/witness-check.js --bundle --format=iife --target=browser --outfile=dist/witness-check.js",
+    "check": "npm run build && ! grep -q 'node:' dist/aac-crypto.js dist/witness-check.js"
   },
   "dependencies": {
-    "@action-state-group/agent-action-capsule": "file:vendor/agent-action-capsule-70948ef.tgz"
+    "@action-state-group/agent-action-capsule": "file:vendor/agent-action-capsule-70948ef.tgz",
+    "@action-state-group/cll": "file:vendor/cll-ts-b38e831.tgz",
+    "cborg": "6.1.2"
+  },
+  "overrides": {
+    "@action-state-group/cll": "$@action-state-group/cll"
   }
 }

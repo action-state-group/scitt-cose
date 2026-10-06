@@ -40,6 +40,7 @@ to existing files.
 | `synthetic-eddsa-iat-only` | true | ✓ | — | true | false |
 | `fail-tampered-iat` | false | — | — | false | false |
 | `fail-tampered-grade` | false | — | — | false | false |
+| `synthetic-es256-iat-grade-observed-only` | true | ✓ | ✓ | true | true |
 
 `trace-sept7-witness` is not synthetic: it is the real COSE Receipt bytes
 from the Action State Group's live TRACE-registry witness, captured
@@ -47,6 +48,12 @@ from the Action State Group's live TRACE-registry witness, captured
 `agentrust-io/trace-registry`'s `docs/evidence/witness-2026-09-07/`. It
 carries neither label — both booleans are false **permanently** for this
 exact receipt (it pre-dates the labels), not pending a witness upgrade.
+
+`synthetic-es256-iat-grade-observed-only` (appended) is the twin of
+`synthetic-es256-iat-grade` under the grade label witnesses emit now,
+`observed-only`. The original keeps its published bytes and its
+`countersigned-observed` label, the same meaning under its earlier name.
+This library does not interpret grade values: both surface exactly as signed.
 
 `fail-tampered-iat` / `fail-tampered-grade` take a valid receipt and alter
 the labeled value in the protected header *after* signing, without

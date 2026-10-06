@@ -90,6 +90,36 @@ that doesn't recompute from its own fragment body is never shown a green
 witnessed banner no matter what the log says about that id, because the id
 being logged proves nothing about a body that's since been altered.
 
+**The bundle page checks its witness evidence itself, with zero network**
+(the "Signed checkpoint · Witness" section). A bundle carries the receipts it
+has, so nothing needs fetching:
+
+- **Signed checkpoint.** The bundle's checkpoint is a COSE_Sign1 (EdDSA);
+  the page verifies its signature under the key the checkpoint names, and
+  that the bundle's JSON copy of the log id, size and root matches the
+  signed values. That shows which key signed it, not that the key is
+  trusted.
+- **Receipts, under a key the reader chose.** An RFC 9162 receipt is
+  verified only under a key from a witness list the reader picks: none (the
+  default), the published list shipped with the page (a dated copy of a
+  public directory, named on the page), or a file of their own. A key the
+  bundle supplies is never used. With no list, or no entry for that witness,
+  the receipt is reported as present, not checked — never as a pass.
+- **A chain to a witnessed checkpoint** (`extensions["x-cadence-witness/v0"]`;
+  bundles written earlier carry it as `cadence-witness/v0` or `x-deal-cadence-v0`).
+  The checkpoint is a salted leaf of a 16-level tree whose root is an entry
+  of a cadence log; the page checks the leaf, the path, the entry's MMR
+  inclusion in the cadence checkpoint, that the cadence checkpoint is signed
+  by the same key, and that checkpoint's receipts.
+- **In part.** When the witnessed checkpoint is an earlier one of the same
+  log, the page verifies it (same key, smaller size) and the MMR consistency
+  proof that the bundle's checkpoint extends it, and says how many entries
+  the witness covers.
+
+The page then names the level it checked — witnessed, witnessed in part,
+signed only — or says it found receipts present but did not check them.
+Rekor and SCRAPI receipts are reported as present, not checked.
+
 ## What a server *does* learn — stated, not buried
 
 Two residuals, both narrower than "the record":

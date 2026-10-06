@@ -6,7 +6,10 @@
 A generic, **payload-agnostic** IETF **SCITT + COSE Receipts** substrate for Python:
 build/verify COSE_Sign1 **Signed Statements**, verify **Receipts** and RFC 9162
 **inclusion / consistency proofs**, with the **Merkle + receipt-signing
-primitives**.
+primitives**. A separate module, `scitt_cose.cll`, verifies a Checkpointed
+Local Log (MMR inclusion, consistency and range proofs against a checkpoint);
+it is narrower than the rest of the package, see
+[CLL verification](#cll-verification-scitt_cosecll).
 
 It is **NOT a transparency service** (operating a log — a hosted registration
 endpoint — is a separate concern), and it carries **NO application profile** —
@@ -36,6 +39,10 @@ use `python-cwt` or any other COSE library.
   silently accepted.
 - Provide the RFC 9162 **Merkle primitives** (root, inclusion, consistency) and a
   `build_receipt` primitive.
+- Verify a **Checkpointed Local Log** offline (`scitt_cose.cll`): that a leaf
+  is under a checkpoint's MMR root, that one checkpoint extends an earlier
+  one, and that a range of leaves is complete, with the checkpoint's own
+  receipt checked by `verify_receipt`.
 
 **Does NOT:**
 
@@ -45,7 +52,9 @@ use `python-cwt` or any other COSE library.
 - **Validate any application profile's payload semantics.** The statement payload
   is treated as **opaque bytes**. There is no application-profile awareness —
   SBOMs, agent actions, or anything else; that neutrality is deliberate, and is
-  what makes this reusable by *anyone* in the SCITT ecosystem.
+  what makes this reusable by *anyone* in the SCITT ecosystem. The one
+  exception is honest to name: `scitt_cose.cll` knows one log format, the
+  CLL checkpoint record (below). Its leaves are still opaque digests.
 - **Depend on a COSE library for wire values.** `COSE_Sign1` is implemented from
   scratch over `cbor2` + `cryptography`; code points are pinned to the IANA
   registries, not to a library's enum.
@@ -189,6 +198,7 @@ scitt-cose --statement stmt.cose --receipt receipt.cose \
 | Statements | `build_signed_statement`, `parse_signed_statement`, `attach_receipts`, `extract_receipts` |
 | Merkle | `leaf_hash`, `merkle_root`, `inclusion_proof`, `verify_inclusion`, `consistency_proof`, `verify_consistency` |
 | Receipts | `build_receipt`, `verify_receipt`, `ReceiptResult` |
+| CLL (`scitt_cose.cll`, its own namespace) | `verify_leaf_against_checkpoint`, `verify_checkpoint_chain`, `verify_range_against_checkpoint`, `witness_status_line`; the proof types `InclusionProof`, `ConsistencyProof`, `RangeProof`, `Checkpoint`; the MMR primitives (`leaf_hash`, `interior_hash`, `root_from_peaks`, `peaks`, `verify_inclusion`, `verify_consistency`, `verify_range`) |
 | Status | `DRAFT_TRACKING_NOTICE`, `RFC_SCITT_ARCHITECTURE`, `RFC_COSE_RECEIPTS`, `SUBSTRATE_RFCS` (`DRAFT_*` names kept as aliases) |
 
 ### Failure contract
@@ -260,6 +270,43 @@ security-relevant and must be integrity-protected), reconstructs the root from
 the proof, and verifies the COSE_Sign1 over that root with the log key. This
 exact CBOR shape is **validated by round-trip in this library's own tests** and
 against the code points RFC 9942 registers (vds 395, vdp 396, `RFC9162_SHA256` = 1).
+
+## CLL verification (`scitt_cose.cll`)
+
+A Checkpointed Local Log appends records locally, commits to them with a
+Merkle Mountain Range (MMR), and registers a signed **checkpoint** of that
+MMR with a Transparency Service. `scitt_cose.cll` is the verifier for it: a
+third party holding a record digest, a proof and a checkpoint can check,
+offline,
+
+- that the leaf is under the checkpoint's MMR root (inclusion);
+- that a later checkpoint extends an earlier one, with no rollback
+  (consistency);
+- that a run of leaves is complete, with none left out (range);
+- and that the checkpoint was registered, through the checkpoint's own COSE
+  Receipt and the unchanged `verify_receipt`.
+
+Every result reports "witnessed up to size S at time T", never a bare
+boolean, and shows the lag when it is known.
+
+**What it is not, honestly:**
+
+- **It is not RFC 9162.** An MMR is a different tree construction, which is
+  why the module keeps its own namespace and is not exported at the top
+  level: its `verify_inclusion` would otherwise collide with the RFC 9162
+  one.
+- **It knows one format.** `Checkpoint.digest()` is a byte-identical port of
+  the checkpoint record that
+  [checkpointed-local-log](https://github.com/action-state-group/checkpointed-local-log)
+  and `capsule-emit` produce. It is a port, not an import, so this package
+  still depends only on `cbor2` and `cryptography`. The records under the
+  leaves stay opaque: the module sees only their digests.
+- **It does not check the checkpoint's own signature.** The producer signs
+  checkpoints with a scheme it chooses, which a neutral verifier cannot
+  check generically. The receipt is what this module verifies.
+
+It is checked against the vectors in [`test-vectors/mmr/`](test-vectors/mmr/)
+(KAT39, proof and range vectors) and in `tests/test_cll.py`.
 
 ## Standards status / honesty
 
@@ -441,6 +488,14 @@ failed*. Full trust model, including exactly what a server does learn (a
 viewed `capsule_id`, and — until you've downloaded and diffed it — trust in
 served JS): [`docs/verification-trust-model.md`](docs/verification-trust-model.md).
 
+**Drop a file instead of opening a link.** `GET /` and `GET /bundle` both
+accept a dropped (or chosen) file: an Evidence Bundle (`.json`), or a
+self-contained report page (`.html`) whose embedded bundle
+(`window.__BUNDLE__ = …;</script>`) is read out of it. The file is read with
+the browser's FileReader and checked on the page; it is never uploaded. A
+file dropped on `/` is handed to `/bundle` in `sessionStorage` (same origin,
+that tab only), never sent to the server. Files over 16 MiB are refused.
+
 ## Test vectors (cross-implementation, stable)
 
 [`test-vectors/`](test-vectors/) is a frozen, **append-only** vector set for
@@ -474,6 +529,35 @@ real captured receipt from a live TRACE-registry witness alongside synthetic
 EdDSA/ES256 vectors and two post-signature tamper vectors. Same append-only
 promise, own `SHA256SUMS`. Details:
 [`test-vectors/receipt-v1/README.md`](test-vectors/receipt-v1/README.md).
+
+### More vector sets in this repository
+
+| Set | What it pins | Checked by |
+|---|---|---|
+| [`test-vectors/mmr/`](test-vectors/mmr/) | MMR known answers (KAT39), inclusion and consistency proofs, and range proofs | `scitt_cose.cll` (`tests/test_cll.py`) and the browser range check |
+| [`test-vectors/capsule-id/`](test-vectors/capsule-id/) | the browser port of the Agent Action Capsule id recompute, against that library's Python reference | the hosted viewers only (`hosted_profiles/`); not the package |
+| [`test-vectors/tamper-states/`](test-vectors/tamper-states/) | four bundle states (offline pass, digest mismatch, chain gap, witness downgrade) for the bundle viewer's checks | the hosted viewers only (`hosted_profiles/`); not the package |
+
+The last two exist for the hosted viewers, which render one application
+profile. The package itself never reads them.
+
+## What else is in this repository
+
+The published package is `scitt_cose/` alone. Everything else is here for
+cross-checking, hosting or history, and stays out of the wheel:
+
+| Path | What it is |
+|---|---|
+| `scitt-cose-go-verify/` | the independent Go verifier CI cross-checks against ([above](#correctness--cross-implementation-evidence)) |
+| `rust/scitt-cose/` | the independent, receipt-only Rust verifier ([above](#correctness--cross-implementation-evidence)) |
+| `hosted_profiles/` | the hosted HTTP verifier and its viewers ([above](#hosted-verification--a-standalone-scitt-only-verifier)). Unlike the package, it renders application profiles: `aac.py` for Agent Action Capsules and `machine_mandate.py`, plus `published-witnesses.json` |
+| `viewer/` | the source of the hosted viewers' bundled browser checks (`aac-crypto.js`, `witness-check.js`), built from vendored copies of the agent-action-capsule and CLL TypeScript libraries |
+| `demo/` | a synthetic, worked example: a fictional bank's three-capsule refund chain registered on a live Transparency Service. It shows one application profile on top of this substrate; nothing in it is part of the package |
+| `interop/ccf/` | the IETF 126 cross-service check: one statement with receipts from two independent Transparency Services (an RFC 9162 log and a CCF node), both verified by `verify_receipt` |
+| `interop/vcp/` | an envelope probe: a VeritasChain VCP event payload wrapped in a Signed Statement verifies through `parse_signed_statement` as opaque bytes |
+| `scripts/` | one-time vector generators (each says what it pins), the Python-vs-Go differential fuzzer, and `smoke_verify.py`, which checks a running verifier |
+| `docs/` | the hardening review, the hosted-verifier design, the verification trust model and the launch checklist |
+| `INTEROP.md` | a pointer: the interop registry moved to agent-action-capsule |
 
 ## Tests
 

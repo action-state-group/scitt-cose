@@ -30,12 +30,15 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from hosted_profiles import hosted
 from hosted_profiles.hosted import (
     AAC_CRYPTO_JS,
     BUNDLE_JS,
     CAPSULE_JS,
     MMR_JS,
     REPO_URL,
+    WITNESS_CHECK_JS,
+    WITNESS_LIST_JS,
     make_asgi_app,
     make_handler,
     render_bundle_page,
@@ -114,6 +117,9 @@ def test_hosted_bundle_page_is_csp_safe():
     html = render_bundle_page()
     assert '<script src="/static/aac-crypto.js">' in html
     assert '<script src="/static/bundle.js">' in html
+    # the witness check runs on its own scripts, before bundle.js uses them
+    for name in ("mmr.js", "witness-check.js", "witness-list.js"):
+        assert html.index(f'<script src="/static/{name}">') < html.index('<script src="/static/bundle.js">'), name
     assert not re.search(r"<script[^>]*>[^<]", html)  # no inline script bodies
     assert "<link" not in html
     assert "@import" not in html
@@ -141,6 +147,9 @@ def test_offline_bundle_shell_is_self_contained_and_reusable_template():
     assert "<script src=" not in html  # nothing external — fully inlined
     assert AAC_CRYPTO_JS in html
     assert BUNDLE_JS in html
+    assert MMR_JS in html
+    assert WITNESS_CHECK_JS in html
+    assert WITNESS_LIST_JS in html
     # 3 occurrences: 1 embed point (first in document order) + 2 internal
     # BUNDLE_JS references (the sentinel check + the download button's own
     # replace() call) -- BUNDLE_JS itself only ever replaces the first
@@ -163,7 +172,9 @@ def test_hosted_and_offline_pages_share_identical_dom_ids():
     offline = render_bundle_page(offline=True)
     for hook in ("bundleSummary", "permalinkText", "downloadBtn", "copyLinkBtn",
                  "completenessMount", "ritualMount", "recordsTableContent",
-                 "privlogSection", "privlogContent", "bundleJson", "loadBtn", "emptyState"):
+                 "privlogSection", "privlogContent", "bundleJson", "loadBtn", "emptyState",
+                 "witnessMount", "witnessListNone", "witnessListPublished", "witnessListOwn",
+                 "witnessListFile", "publishedListSource"):
         assert f'id="{hook}"' in hosted, hook
         assert f'id="{hook}"' in offline, hook
 
@@ -182,6 +193,8 @@ def test_stdlib_routes_wired():
             ("/bundle/offline-shell", "Ledger bundle verifier"),
             ("/static/mmr.js", "verifyInclusion"),
             ("/static/bundle.js", "checkCompleteness"),
+            ("/static/witness-check.js", "checkWitnessEvidence"),
+            ("/static/witness-list.js", "PUBLISHED_WITNESS_LIST"),
         ):
             t = threading.Thread(target=httpd.handle_request)
             t.start()
@@ -223,6 +236,10 @@ def test_asgi_routes_wired():
     assert status == 200 and "verifyInclusion" in body.decode()
     status, body = _drive_asgi(app, "/static/bundle.js")
     assert status == 200 and "checkCompleteness" in body.decode()
+    status, body = _drive_asgi(app, "/static/witness-check.js")
+    assert status == 200 and "checkWitnessEvidence" in body.decode()
+    status, body = _drive_asgi(app, "/static/witness-list.js")
+    assert status == 200 and "PUBLISHED_WITNESS_LIST" in body.decode()
 
 
 def test_bundle_route_matches_capsule_ledger_default_permalink_base():
@@ -632,3 +649,177 @@ def test_canonicalization_shared_with_digest_path(js_paths):
     entry = next(e for e in g["privlog"] if e["type"] == "agent_input")
     assert entry["matchOk"] is True
     assert entry["_recomputedDigest"] == digest
+
+
+# ---------------------------------------------------------------------------
+# A dropped file: a bundle (.json) or a report page (.html) embedding one as
+# `window.__BUNDLE__ = <JSON>;</script>`, read and checked in the browser.
+# ---------------------------------------------------------------------------
+
+OFFLINE_PASS = HERE.parent / "test-vectors" / "tamper-states" / "offline_pass" / "bundle.json"
+
+
+def _report_page(bundle: dict) -> str:
+    """A self-contained report page as a producer's emitter writes it: the
+    bundle's JSON with <, > and & escaped for a script element, then the
+    verifier runtime after it."""
+    text = json.dumps(bundle, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+    for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026")):
+        text = text.replace(ch, esc)
+    return (
+        "<!DOCTYPE html>\n<html><head><title>Deal report</title></head><body>\n"
+        '<div id="app"></div>\n'
+        "<script>window.__BUNDLE__ = " + text + ";</script>\n"
+        "<script>/* verifier runtime */ function renderEvidenceGraph(){}</script>\n"
+        '<script>renderEvidenceGraph(window.__BUNDLE__, document.getElementById("app"));</script>\n'
+        "</body></html>\n"
+    )
+
+
+def _js_error(js_paths, op: dict) -> str:
+    mmr_path, bundle_path = js_paths
+    result = subprocess.run(
+        ["node", str(HARNESS), str(mmr_path), str(bundle_path)],
+        input=json.dumps(op), capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0, "expected the dropped file to be refused"
+    return result.stderr
+
+
+@pytestmark_node
+def test_dropped_bundle_json_is_read(js_paths):
+    bundle = json.loads(OFFLINE_PASS.read_text(encoding="utf-8"))
+    assert _run_js(js_paths, {"fn": "extractDroppedBundle", "text": json.dumps(bundle)}) == bundle
+    # A byte-order mark and surrounding whitespace are tolerated.
+    assert _run_js(js_paths, {"fn": "extractDroppedBundle", "text": "﻿\n " + json.dumps(bundle) + "\n"}) == bundle
+
+
+@pytestmark_node
+def test_dropped_report_page_yields_its_embedded_bundle(js_paths):
+    """The bundle is read out of a report page, including text that the
+    emitter escaped (<, >, &), and checks exactly as the bundle itself does."""
+    bundle = json.loads(OFFLINE_PASS.read_text(encoding="utf-8"))
+    bundle["note"] = "a <b> & c > d"
+    page = _report_page(bundle)
+    assert "<b>" not in page.split("window.__BUNDLE__ = ")[1].split(";</script>")[0]
+    assert _run_js(js_paths, {"fn": "extractDroppedBundle", "text": page}) == bundle
+    del bundle["note"]
+    direct = _run_js(js_paths, {"fn": "checkCompleteness", "bundle": bundle})
+    dropped = _run_js(js_paths, {"fn": "extractThenCheckCompleteness", "text": _report_page(bundle)})
+    assert dropped == direct
+
+
+@pytestmark_node
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("<html><body>no bundle here</body></html>", "has no Evidence Bundle in it"),
+        ("<script>window.__BUNDLE__ = {\"a\":1}", "embedded bundle is cut off"),
+        ("[1, 2, 3]", "has no Evidence Bundle in it"),
+        ("{\"truncated\": ", "JSON"),
+        ("<script>window.__BUNDLE__ = [1];</script>", "is not a JSON object"),
+    ],
+)
+def test_dropped_file_without_a_bundle_is_refused(js_paths, text, message):
+    assert message in _js_error(js_paths, {"fn": "extractDroppedBundle", "text": text})
+
+
+@pytestmark_node
+def test_dropped_file_over_16_mib_is_refused(js_paths):
+    big = "{" + " " * (16 * 1024 * 1024) + "}"
+    assert "larger than 16 MiB" in _js_error(js_paths, {"fn": "extractDroppedBundle", "text": big})
+
+
+def test_bundle_page_takes_a_dropped_file_and_a_handover():
+    """The bundle page reads a dropped or chosen file with FileReader, and
+    first looks for a file the landing page handed over in sessionStorage."""
+    assert "new FileReader()" in BUNDLE_JS
+    assert 'sessionStorage.getItem(DROPPED_KEY)' in BUNDLE_JS
+    assert 'sessionStorage.removeItem(DROPPED_KEY)' in BUNDLE_JS
+    for mode in (False, True):
+        page = hosted.render_bundle_page(offline=mode)
+        assert 'id="bundleDrop"' in page and 'id="bundleFile"' in page
+        assert "never uploaded" in page
+
+
+def test_landing_page_drop_hands_over_and_never_uploads():
+    """The landing page's drop zone hands the file to the bundle verifier in
+    sessionStorage and navigates to /bundle: the file is never POSTed."""
+    landing = hosted.render_landing_page()
+    assert 'id="rootBundleDrop"' in landing and 'id="rootBundleFile"' in landing
+    assert "it is never uploaded" in landing
+    js = hosted.VERIFY_JS
+    block = js[js.index("function handOver(file)"):js.index("})();", js.index("function handOver(file)"))]
+    assert 'sessionStorage.setItem(DROPPED_KEY' in block
+    assert 'location.assign("/bundle")' in block
+    assert "fetch(" not in block and "XMLHttpRequest" not in block
+    assert '"aac.droppedFile"' in js and '"aac.droppedFile"' in BUNDLE_JS, "both pages use the same key"
+
+
+# ---------------------------------------------------------------------------
+# The page's own script set: range membership runs through the mmr.js the
+# page loads, and an unauthenticated checkpoint is never "verified"
+# ---------------------------------------------------------------------------
+
+PAGE_HARNESS = HERE / "js_harness_page.mjs"
+
+
+def _page_scripts(tmp_path, drop=None):
+    """The offline page's inline scripts, in page order, as files (``drop``:
+    leave out the one containing that text)."""
+    import re
+
+    html = render_bundle_page(offline=True)
+    bodies = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+    paths = []
+    for i, body in enumerate(bodies):
+        if drop and drop in body:
+            continue
+        p = tmp_path / f"script{i}.js"
+        p.write_text(body)
+        paths.append(str(p))
+    listing = tmp_path / "scripts.json"
+    listing.write_text(json.dumps(paths))
+    return listing
+
+
+def _run_page(listing, op):
+    result = subprocess.run(
+        ["node", str(PAGE_HARNESS), str(listing)],
+        input=json.dumps(op), capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@pytestmark_node
+def test_range_membership_runs_through_the_pages_own_mmr_js(tmp_path):
+    vectors = json.loads((HERE.parent / "test-vectors" / "mmr" / "range-vectors.json").read_text())
+    bundle = _range_case_bundle(next(c for c in vectors["range_cases"] if c["name"] == "three-leaf"))
+    got = _run_page(_page_scripts(tmp_path), {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "pass", got
+    # without mmr.js the same check cannot run: it was the page's own copy
+    without = _run_page(_page_scripts(tmp_path, drop="var MMR = (function(){"), {"fn": "checkCompleteness", "bundle": bundle})
+    assert without["status"] == "fail" and "MMR is not defined" in without["detail"], without
+
+
+@pytestmark_node
+def test_an_unauthenticated_checkpoint_is_not_verified_by_the_interval_check(tmp_path):
+    """The canonical library cannot authenticate a checkpoint in a browser and
+    says so (checkpoint_unverified); the page must not call the interval
+    "verified" on that alone."""
+    bundle = json.loads((HERE / "fixtures" / "witness" / "v2-bundle.json").read_text())
+    got = _run_page(_page_scripts(tmp_path), {"fn": "checkCompleteness", "bundle": bundle})
+    assert got["status"] == "skip", got
+    assert got["detail"].startswith("the checkpoint signature is not verified by this check")
+    assert "verified —" not in got["detail"]
+
+
+def test_no_inlined_script_closes_early():
+    """The offline copy inlines every script; a literal close tag inside one
+    ends that script there, and the page breaks."""
+    import re
+
+    for body in (AAC_CRYPTO_JS, MMR_JS, WITNESS_CHECK_JS, WITNESS_LIST_JS, BUNDLE_JS):
+        assert not re.search(r"</script", body, re.I)
+

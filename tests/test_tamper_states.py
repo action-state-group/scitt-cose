@@ -173,6 +173,22 @@ def test_witness_grade_words_render_beside_the_count_not_instead_of_it():
     )
 
 
+def test_observed_only_and_its_pre_rename_label_render_the_same_word():
+    """`observed-only` replaced `countersigned-observed`; receipts issued
+    before the rename keep the old label. Both mean existence and time and
+    must render identically, never as consistency-verified."""
+    bundle, _, _, _ = _load("witness_downgrade")
+    details = []
+    for label in ("observed-only", "countersigned-observed"):
+        summary, _ = _run(
+            bundle,
+            {"held": 1, "configured": 1, "reachable": True,
+             "receipt_grades": {"https://witness.example": label}},
+        )
+        details.append(_stage(summary.stages, "Witness").detail)
+    assert details == ["witnessed 1 of 1: existence-and-time (witness.example)"] * 2
+
+
 def test_witness_grade_words_ungraded_never_masquerades_as_a_real_grade():
     """A receipt with no grade label at all (`None`, e.g. a pre-label
     witness) renders "ungraded" -- never silently omitted (which would
