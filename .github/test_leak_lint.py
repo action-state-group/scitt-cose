@@ -365,9 +365,11 @@ LOCKFILE_NOT_EXEMPT = {
         "file path": f'{{\n  "resolved": "file:../{LOCK_TERM}pkg"\n}}\n',
         "not a hash": f'{{\n  "integrity": "sha512-{LOCK_TERM}AAAA=="\n}}\n',
         "http, not https": f'{{\n  "resolved": "http://registry.npmjs.org/{LOCK_TERM}pkg.tgz"\n}}\n',
+        "github tarball": f'{{\n  "resolved": "https://codeload.github.com/example/{LOCK_TERM}repo/tar.gz/abc123"\n}}\n',
     },
     "yarn.lock": {
         "private host": f'pkg@^1.0.0:\n  resolved "{PRIVATE_URL}#abc"\n',
+        "term in the fragment": f'pkg@^1.0.0:\n  resolved "https://registry.yarnpkg.com/pkg/-/pkg-1.0.0.tgz#{LOCK_TERM}x"\n',
         "git+ssh": f'pkg@^1.0.0:\n  resolved "git+ssh://git@git.example.invalid/{LOCK_TERM}pkg.git"\n',
         "workspace": f'"pkg@workspace:.":\n  resolution: "pkg@workspace:{LOCK_TERM}pkg"\n',
         "not a checksum": f'"pkg@npm:1.0.0":\n  checksum: {LOCK_TERM}0123abcd\n',

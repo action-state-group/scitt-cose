@@ -34,9 +34,9 @@ Design (same shape as the sibling `hostname_lint.py`):
     fix applied to source without a rebuild leaves the leak live in the rendered artifact.
   - **Lockfile URL and hash values are not term-matched** (`package-lock.json`, `yarn.lock`,
     `pnpm-lock.yaml`) when they are what a public registry or a hash looks like: an https URL
-    on a host in `PUBLIC_REGISTRY_HOSTS`, an SRI integrity value, a hex checksum. A URL on any
-    other host, or a file:, git+ssh:, link: or workspace: value, is matched as usual, and so
-    is the rest of a lockfile (see `exempt_value`).
+    on a host in `PUBLIC_REGISTRY_HOSTS` (its #fragment is still matched), an SRI integrity
+    value, a hex checksum. A URL on any other host, or a file:, git+ssh:, link: or workspace:
+    value, is matched as usual, and so is the rest of a lockfile (see `exempt_remainder`).
   - **Excludes this script, its allowlist, its own CI workflow, and its own test fixtures by
     filename** -- they legitimately name the patterns they ban, in prose that describes the ban
     or in fixture data that exercises the ban.
@@ -122,11 +122,10 @@ NAMED_DECIDER = (
 # rule still sees the whole line.
 
 #: The public registries a lockfile URL may point at and stay exempt: npm
-#: (registry.npmjs.org), yarn's npm mirror (registry.yarnpkg.com), GitHub's tarball host for
-#: git dependencies (codeload.github.com), and crates.io (crates.io, static.crates.io).
-PUBLIC_REGISTRY_HOSTS = frozenset(
-    {"registry.npmjs.org", "registry.yarnpkg.com", "codeload.github.com", "crates.io", "static.crates.io"}
-)
+#: (registry.npmjs.org), yarn's npm mirror (registry.yarnpkg.com), and crates.io (crates.io,
+#: static.crates.io). Not GitHub's tarball host: it serves private repositories too, so a
+#: GitHub tarball dependency is matched as usual.
+PUBLIC_REGISTRY_HOSTS = frozenset({"registry.npmjs.org", "registry.yarnpkg.com", "crates.io", "static.crates.io"})
 
 #: A Subresource Integrity value: `<algorithm>-<base64 digest>`.
 SRI = re.compile(r"(?:sha1|sha256|sha384|sha512)-[A-Za-z0-9+/]+={0,2}")
@@ -156,7 +155,8 @@ LOCKFILE_EXEMPT_VALUES = {
 
 
 def public_registry_url(value: str) -> bool:
-    """Whether `value` is an https URL on a public registry host, with no credentials or port."""
+    """Whether `value`, without its #fragment, is an https URL on a public registry host, with
+    no credentials or port."""
     url = urllib.parse.urlsplit(value.split("#", 1)[0])
     return (
         url.scheme == "https" and url.hostname in PUBLIC_REGISTRY_HOSTS and url.username is None
@@ -164,31 +164,36 @@ def public_registry_url(value: str) -> bool:
     )
 
 
-def exempt_value(field: str, value: str) -> bool:
-    """Whether a lockfile field's value is a public registry URL or a hash, and so not prose."""
+def exempt_remainder(field: str, value: str) -> str | None:
+    """None when a lockfile field's value is not exempt. When it is (a public registry URL or a
+    hash), the part of it still to term-match: an exempt URL's #fragment, which the registry
+    host says nothing about; nothing for a hash."""
     value = value.strip().strip("\"'")
+    fragment = value[value.find("#"):] if "#" in value else ""
     if field in ("resolved", "tarball"):
-        return public_registry_url(value)
+        return fragment if public_registry_url(value) else None
     if field == "integrity":
-        return bool(value.split()) and all(SRI.fullmatch(part) for part in value.split())
+        return "" if value.split() and all(SRI.fullmatch(part) for part in value.split()) else None
     if field == "checksum":
-        return YARN_CHECKSUM.fullmatch(value) is not None
+        return "" if YARN_CHECKSUM.fullmatch(value) else None
     if field == "resolution":
         if NPM_RESOLUTION.fullmatch(value):
-            return True
+            return ""
         _, at, url = value.rpartition("@")
-        return bool(at) and public_registry_url(url)
-    return False
+        return fragment if at and public_registry_url(url) else None
+    return None
 
 
 def term_text(name: str, line: str) -> str:
     """`line` as term matching sees it: when the file named `name` is a lockfile, with the
-    values of its URL and hash fields removed where they are exempt (see exempt_value);
-    otherwise as is."""
+    exempt part of its URL and hash values removed (see exempt_remainder); otherwise as is."""
+
+    def drop(m: re.Match) -> str:
+        rest = exempt_remainder(m.group("field"), m.group("value"))
+        return m.group(0) if rest is None else m.group("lead") + rest
+
     for pattern in LOCKFILE_EXEMPT_VALUES.get(name, ()):
-        line = pattern.sub(
-            lambda m: m.group("lead") if exempt_value(m.group("field"), m.group("value")) else m.group(0), line
-        )
+        line = pattern.sub(drop, line)
     return line
 
 
