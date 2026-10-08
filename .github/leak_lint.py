@@ -37,6 +37,12 @@ Design:
   - **Exact-text allowlist**, `leak_lint_allowlist.txt` next to this script, for genuine
     historical record. Never line numbers -- the exact stripped line text.
   - **Scans generated artifacts too** (`.txt`, `.xml`), not just sources.
+  - **Lockfile URL and hash values are not term-matched** (`package-lock.json`, `yarn.lock`,
+    `pnpm-lock.yaml`) when they are what a public registry or a hash looks like: an https URL
+    on a host in `PUBLIC_REGISTRY_HOSTS` (its #fragment is still matched), an SRI integrity
+    value whose digest is its algorithm's length, a hex checksum. A URL on any other host, or
+    a file:, git+ssh:, link: or workspace: value, is matched as usual, and so is the rest of a
+    lockfile (see `exempt_remainder`).
   - **Excludes this script, its allowlist, its CI workflow and its tests by filename.**
   - **Scans the COMMITTED tree** (`git ls-files -z`) of ROOT, and never follows a symbolic link
     or reads outside ROOT: on a fork run ROOT is untrusted content.
@@ -46,12 +52,14 @@ Exit 0 = clean; 1 = leak(s) found; 2 = misconfiguration (no term list).
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
 import stat
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 SELF_NAMES = {
@@ -68,6 +76,9 @@ SCAN_SUFFIXES = (
     ".html", ".sh",
 )
 
+#: Files scanned by name whose suffix is not in SCAN_SUFFIXES.
+SCAN_NAMES = {"yarn.lock"}
+
 # Lowercase-alnum segments only (excludes uppercase citation tags structurally), each segment
 # 2+ chars (excludes a hex regex character class like `[0-9a-f]`, which the hyphen-as-range
 # operator would otherwise fake as hyphen-separated segments), 3+ segments (excludes 2-segment
@@ -75,6 +86,105 @@ SCAN_SUFFIXES = (
 BRACKET_ID = re.compile(r"\[[a-z0-9]{2,}(?:-[a-z0-9]{2,}){2,}\]")
 
 BRACKET_CLASS = "bracketed-id"
+
+# Lockfiles: a dependency URL or hash is not prose (a registry URL can contain any substring),
+# so its value is exempt from term matching, but only when it is what a public registry or a
+# content hash looks like. A URL on any other host, a file:, git+ssh:, link: or workspace:
+# value, or a hash field holding anything but a hash, is matched as usual: those are where a
+# private registry host or a path into a private workspace would show. Every other field of a
+# lockfile, and every other file whatever its keys, is matched as usual, and the bracketed-id
+# rule still sees the whole line.
+
+#: The public registries a lockfile URL may point at and stay exempt: npm
+#: (registry.npmjs.org), yarn's npm mirror (registry.yarnpkg.com), and crates.io (crates.io,
+#: static.crates.io). Not GitHub's tarball host: it serves private repositories too, so a
+#: GitHub tarball dependency is matched as usual.
+PUBLIC_REGISTRY_HOSTS = frozenset({"registry.npmjs.org", "registry.yarnpkg.com", "crates.io", "static.crates.io"})
+
+#: A Subresource Integrity value: `<algorithm>-<base64 digest>`, the digest exactly as long as
+#: its algorithm's (sha1 20 bytes, sha256 32, sha384 48, sha512 64), so text that only looks
+#: like base64 is not taken for a digest unless it is that long.
+SRI = re.compile(r"(sha1|sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})")
+SRI_DIGEST_BYTES = {"sha1": 20, "sha256": 32, "sha384": 48, "sha512": 64}
+
+
+def sri_digest(part: str) -> bool:
+    """Whether `part` is an SRI value whose digest decodes to its algorithm's length."""
+    m = SRI.fullmatch(part)
+    if m is None:
+        return False
+    try:
+        digest = base64.b64decode(m.group(2), validate=True)
+    except ValueError:
+        return False
+    return len(digest) == SRI_DIGEST_BYTES[m.group(1)]
+#: A yarn 2+ checksum: hex, after an optional cache-key prefix (`10c0/`).
+YARN_CHECKSUM = re.compile(r"(?:[0-9]+[a-z][0-9]*/)?[0-9a-f]{32,}")
+#: A yarn 2+ resolution from the npm registry: `<package>@npm:<version>`.
+NPM_RESOLUTION = re.compile(r"(?:@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*@npm:[0-9A-Za-z.+-]+")
+
+# Per lockfile, the field patterns: `lead` is kept, `value` is dropped when it is exempt.
+LOCKFILE_EXEMPT_VALUES = {
+    # npm: `"resolved": "<url>",` and `"integrity": "<hash>",`
+    "package-lock.json": (
+        re.compile(r'^(?P<lead>\s*"(?P<field>resolved|integrity)"\s*:\s*)(?P<value>"(?:[^"\\]|\\.)*")'),
+    ),
+    # yarn 1: `  resolved "<url>"`, `  integrity <hash>`;
+    # yarn 2+: `  resolution: "<package>@npm:<version>"`, `  checksum: <hash>`
+    "yarn.lock": (
+        re.compile(r"^(?P<lead>\s+(?P<field>resolved|integrity)\s+)(?P<value>\S.*)$"),
+        re.compile(r"^(?P<lead>\s+(?P<field>resolution|checksum):\s*)(?P<value>\S.*)$"),
+    ),
+    # pnpm: `integrity: <hash>` and `tarball: <url>`, as a block key at the start of a line or
+    # as a member of the inline `resolution: {integrity: ..., tarball: ...}` map
+    "pnpm-lock.yaml": (
+        re.compile(r"(?P<lead>(?:^\s*|[{,]\s*)(?P<field>integrity|tarball):\s*)(?P<value>[^\s,{}][^,{}]*?)(?=\s*(?:[,}]|$))"),
+    ),
+}
+
+
+def public_registry_url(value: str) -> bool:
+    """Whether `value`, without its #fragment, is an https URL on a public registry host, with
+    no credentials or port."""
+    url = urllib.parse.urlsplit(value.split("#", 1)[0])
+    return (
+        url.scheme == "https" and url.hostname in PUBLIC_REGISTRY_HOSTS and url.username is None
+        and url.port is None
+    )
+
+
+def exempt_remainder(field: str, value: str) -> str | None:
+    """None when a lockfile field's value is not exempt. When it is (a public registry URL or a
+    hash), the part of it still to term-match: an exempt URL's #fragment, which the registry
+    host says nothing about; nothing for a hash."""
+    value = value.strip().strip("\"'")
+    fragment = value[value.find("#"):] if "#" in value else ""
+    if field in ("resolved", "tarball"):
+        return fragment if public_registry_url(value) else None
+    if field == "integrity":
+        return "" if value.split() and all(sri_digest(part) for part in value.split()) else None
+    if field == "checksum":
+        return "" if YARN_CHECKSUM.fullmatch(value) else None
+    if field == "resolution":
+        if NPM_RESOLUTION.fullmatch(value):
+            return ""
+        _, at, url = value.rpartition("@")
+        return fragment if at and public_registry_url(url) else None
+    return None
+
+
+def term_text(name: str, line: str) -> str:
+    """`line` as term matching sees it: when the file named `name` is a lockfile, with the
+    exempt part of its URL and hash values removed (see exempt_remainder); otherwise as is."""
+
+    def drop(m: re.Match) -> str:
+        rest = exempt_remainder(m.group("field"), m.group("value"))
+        return m.group(0) if rest is None else m.group("lead") + rest
+
+    for pattern in LOCKFILE_EXEMPT_VALUES.get(name, ()):
+        line = pattern.sub(drop, line)
+    return line
+
 
 UNTRUSTED_VERDICT = (
     "leak-lint: content check failed. Details are withheld on fork runs; a maintainer can "
@@ -217,10 +327,13 @@ def _has_bracket_id_leak(line: str) -> bool:
     return False
 
 
-def classify(line: str, terms: dict[str, tuple[str, ...]]) -> tuple[bool, list[str]]:
-    """(bracketed-id hit?, the term classes that match) for one line."""
+def classify(
+    line: str, terms: dict[str, tuple[str, ...]], file_name: str = ""
+) -> tuple[bool, list[str]]:
+    """(bracketed-id hit?, the term classes that match) for one line of the file `file_name`."""
+    matched = term_text(file_name, line)
     return _has_bracket_id_leak(line), [
-        name for name, words in terms.items() if any(w in line for w in words)
+        name for name, words in terms.items() if any(w in matched for w in words)
     ]
 
 
@@ -230,7 +343,9 @@ def scan(root: Path, terms: dict[str, tuple[str, ...]]) -> tuple[list[str], list
     bracket_only: list[str] = []
     term_hits: list[str] = []
     for f in _tracked_files(root):
-        if f.name in SELF_NAMES or f.suffix not in SCAN_SUFFIXES:
+        if f.name in SELF_NAMES:
+            continue
+        if f.suffix not in SCAN_SUFFIXES and f.name not in SCAN_NAMES:
             continue
         text = _read_regular_file(root, f)
         if text is None:
@@ -241,7 +356,7 @@ def scan(root: Path, terms: dict[str, tuple[str, ...]]) -> tuple[list[str], list
             stripped = line.strip()
             if stripped in allow:
                 continue
-            bracket, classes = classify(line, terms)
+            bracket, classes = classify(line, terms, f.name)
             if not bracket and not classes:
                 continue
             labels = ([BRACKET_CLASS] if bracket else []) + classes
