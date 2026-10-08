@@ -46,14 +46,14 @@
     {
       "id": "valid-eddsa-multi-proof",
       "dir": "v1/valid-eddsa-multi-proof",
-      "description": "Inherited valid-eddsa signed bytes; unsigned proof selection/shape regression.",
+      "description": "Inherited valid-eddsa signed bytes; unrelated first proof must not mask the target proof at index 1.",
       "expected_result": "VALID",
       "derived_from": "v1/valid-eddsa"
     },
     {
       "id": "fail-zero-size-proof",
       "dir": "v1/fail-zero-size-proof",
-      "description": "Inherited valid-eddsa signed bytes; unsigned proof selection/shape regression.",
+      "description": "Inherited valid-eddsa signed bytes; [0, 0, []] is malformed before signature or binding verification.",
       "expected_result": "INVALID",
       "failure_code": "MALFORMED_INCLUSION_PROOF",
       "derived_from": "v1/valid-eddsa"

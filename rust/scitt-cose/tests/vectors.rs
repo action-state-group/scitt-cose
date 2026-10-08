@@ -290,3 +290,23 @@ fn donated_zero_size_proof_is_reported_malformed() {
         result.errors
     );
 }
+
+#[test]
+fn candidate_verification_preserves_invalid_key_diagnostic() {
+    let (expected, _) = run_v1("valid-eddsa-multi-proof");
+    let receipt = std::fs::read(v1_dir("valid-eddsa-multi-proof").join("receipt.cose")).unwrap();
+    let result = scitt_cose_receipt::verify_receipt(
+        &receipt,
+        &hex::decode(expected.leaf_entry).unwrap(),
+        "not a public key",
+    );
+    assert!(!result.ok);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("could not load EdDSA public key")),
+        "{:?}",
+        result.errors
+    );
+}

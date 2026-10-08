@@ -312,11 +312,14 @@ pub fn verify_receipt(
         }
     }
     let mut matched = false;
+    let mut last_error = None;
     for (tree_size, leaf_index, audit_path) in candidates {
         let reconstructed =
             root_from_inclusion_proof(leaf_entry, leaf_index, tree_size, &audit_path)
                 .expect("decoded proof has validated shape");
-        if verify_signature(&sign1, alg_code, log_public_key_pem, &reconstructed).is_ok() {
+        if let Err(error) = verify_signature(&sign1, alg_code, log_public_key_pem, &reconstructed) {
+            last_error = Some(error);
+        } else {
             result.tree_size = Some(tree_size);
             result.leaf_index = Some(leaf_index);
             result.root = Some(reconstructed);
@@ -326,7 +329,10 @@ pub fn verify_receipt(
     }
     if !matched {
         return result
-            .fail("receipt signature did not verify for any inclusion proof")
+            .fail(format!(
+                "receipt signature did not verify for any inclusion proof: {}",
+                last_error.expect("nonempty candidates each produced a signature error")
+            ))
             .fail(CLAIMS_WITHHELD);
     }
 

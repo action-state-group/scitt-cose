@@ -204,10 +204,10 @@ def _decode_inclusion_proof(blob: bytes):
     try:
         stream = io.BytesIO(blob)
         arr = _plain(cbor2.CBORDecoder(stream).decode())
-        if stream.read(1):
-            raise CoseError("inclusion proof contains trailing CBOR bytes")
     except Exception as exc:  # noqa: BLE001 - map any parser error to CoseError
         raise CoseError(f"inclusion proof is not valid CBOR: {type(exc).__name__}") from exc
+    if stream.read(1):
+        raise CoseError("inclusion proof contains trailing CBOR bytes")
     if not isinstance(arr, (list, tuple)) or len(arr) != 3:
         raise CoseError("inclusion proof must be [tree_size, leaf_index, [path]]")
     tree_size, leaf_index, path = arr

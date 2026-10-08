@@ -87,11 +87,14 @@ def main():
             )
         e = dict(expected)
         e["description"] = (
-            "Inherited valid-eddsa signed bytes; unsigned proof selection/shape regression."
+            "Inherited valid-eddsa signed bytes; unrelated first proof must not mask the target proof at index 1."
+            if valid
+            else "Inherited valid-eddsa signed bytes; [0, 0, []] is malformed before signature or binding verification."
         )
         e["receipt_valid"] = valid
         e["result"] = "VALID" if valid else "INVALID"
         if failure:
+            e.update(tree_size=0, leaf_index=0, inclusion_path=[], reconstructed_root=None)
             e["failure_code"] = failure
             e["failure_contains"] = "invalid tree size or leaf index"
         (out / "expected.json").write_text(json.dumps(e, indent=2) + "\n")

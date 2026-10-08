@@ -1,5 +1,5 @@
 {
-  "description": "Inherited valid-eddsa signed bytes; unsigned proof selection/shape regression.",
+  "description": "Inherited valid-eddsa signed bytes; unrelated first proof must not mask the target proof at index 1.",
   "payload_sha256": "08b6e9ec3bd002da4e21976b6dc1411567d30acb30d671161583b3d8351e7692",
   "protected_header": {
     "statement": {

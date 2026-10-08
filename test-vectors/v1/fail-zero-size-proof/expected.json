@@ -1,5 +1,5 @@
 {
-  "description": "Inherited valid-eddsa signed bytes; unsigned proof selection/shape regression.",
+  "description": "Inherited valid-eddsa signed bytes; [0, 0, []] is malformed before signature or binding verification.",
   "payload_sha256": "08b6e9ec3bd002da4e21976b6dc1411567d30acb30d671161583b3d8351e7692",
   "protected_header": {
     "statement": {
@@ -18,14 +18,10 @@
     }
   },
   "leaf_entry": "a6dd4523ffdda1754c234acf209bdde758db7d30438468700a7bf6c01e800e3a",
-  "leaf_index": 2,
-  "tree_size": 8,
-  "inclusion_path": [
-    "d5790c062bb617c193f8dbedf90469ccf49525739238b6d1102df4d3424fbd44",
-    "fb85d1461099612b0a34168f8f207bc9a761a91cd1173f39c5dd7ca4d1d92a6c",
-    "b8e2ffb9ad6e45622e44393e6f58a747c4c5b3900d9676e3ecf50aab2ba266e4"
-  ],
-  "reconstructed_root": "5c834b80c0b40ca993f0b4a3ef9d2e77a8a3e8113358e4f318866c02cd448362",
+  "leaf_index": 0,
+  "tree_size": 0,
+  "inclusion_path": [],
+  "reconstructed_root": null,
   "statement_signature_valid": true,
   "receipt_valid": false,
   "result": "INVALID",

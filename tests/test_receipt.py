@@ -608,5 +608,5 @@ def test_donated_multi_proof_orders_and_malformed_tail():
 def test_inclusion_proof_rejects_trailing_cbor():
     from scitt_cose.receipt import _decode_inclusion_proof
 
-    with pytest.raises(CoseError, match="not valid CBOR"):
+    with pytest.raises(CoseError, match="trailing CBOR"):
         _decode_inclusion_proof(cbor2.dumps([1, 0, []]) + b"\x00")
