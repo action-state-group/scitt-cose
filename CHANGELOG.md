@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- RFC 9162 receipt verification checks all structurally valid inclusion proofs
+  against the signed root, so an unrelated first proof cannot hide a later
+  proof for the requested leaf. Impossible tree/index/path shapes and trailing
+  proof CBOR are rejected as malformed before candidate selection. Shared
+  append-only vectors exercise both proof orders and a zero-size tree.
+
 ### Added
 
 - **The bundle page checks witness evidence in the browser.** It verifies the

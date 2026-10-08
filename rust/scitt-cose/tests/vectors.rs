@@ -261,3 +261,32 @@ fn grade_still_exposed_on_valid_receipt() {
     assert_eq!(result.iat, Some(1_700_000_000));
     assert!(!result.errors.iter().any(|e| e.contains(CLAIMS_WITHHELD)));
 }
+
+#[test]
+fn donated_multi_proof_receipt_selects_target_in_either_order() {
+    let (expected, result) = run_v1("valid-eddsa-multi-proof");
+    assert!(expected.receipt_valid);
+    assert!(result.ok, "decoy masked target: {:?}", result.errors);
+    let dir = v1_dir("valid-eddsa-multi-proof");
+    let reordered = std::fs::read(dir.join("receipt-reordered.cose")).unwrap();
+    let result = scitt_cose_receipt::verify_receipt(
+        &reordered,
+        &hex::decode(expected.leaf_entry).unwrap(),
+        &read_pem(&dir.join("log-key.pub")),
+    );
+    assert!(result.ok, "reordered pair: {:?}", result.errors);
+}
+
+#[test]
+fn donated_zero_size_proof_is_reported_malformed() {
+    let (_, result) = run_v1("fail-zero-size-proof");
+    assert!(!result.ok);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("invalid tree size or leaf index")),
+        "{:?}",
+        result.errors
+    );
+}

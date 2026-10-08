@@ -34,3 +34,16 @@ c958efd5944b049d162194593cd87a8a83e8d40085a0cf1a5b1aa06ae1407c1a  v1/valid-ccf-v
 07c630cdcf81b73cc40477d5af03dad67eb8ac279ffdbb85cd077d2249a6a5f1  v1/valid-ccf-vds2/issuer-key.pub
 e2beb44155a0fab01dcd719715c5b1f5d4a276b18d1fe08c309a7fc4d18653d3  v1/valid-ccf-vds2/log-key.pub
 e484e717249b770c4d025c1d54f3b41bd51b62750a2f2196cf84f8f6afd9ddc6  v1/valid-ccf-vds2/expected.json
+89b3b7b5d54ee62305920d28d0b6c9d5023e82b85c14fadb96e8bd5000899733  v1/valid-eddsa-multi-proof/expected.json
+705cc28884908057d1f28cb29885b26fa5998f33cac24c88b14cda71fe884547  v1/valid-eddsa-multi-proof/issuer-key.pub
+1b4894577db7df7180ac28883219971fae4444a0bf840f0845edfcafd5551d51  v1/valid-eddsa-multi-proof/log-key.pub
+08b6e9ec3bd002da4e21976b6dc1411567d30acb30d671161583b3d8351e7692  v1/valid-eddsa-multi-proof/payload.bin
+98e9a488dea986a9950c343fcf51287c92e212d791aa59c00fe489e67a97c0b0  v1/valid-eddsa-multi-proof/receipt-reordered.cose
+7996731e10f5298a3435d2272f6a19c5e35ec3bca3933cf0fd453a445675e4c2  v1/valid-eddsa-multi-proof/receipt.cose
+a6dd4523ffdda1754c234acf209bdde758db7d30438468700a7bf6c01e800e3a  v1/valid-eddsa-multi-proof/statement.cose
+5b435ea46b7a4df019c12a07973f49ab9680d81942402bf6da66034d6ac3f273  v1/fail-zero-size-proof/expected.json
+705cc28884908057d1f28cb29885b26fa5998f33cac24c88b14cda71fe884547  v1/fail-zero-size-proof/issuer-key.pub
+1b4894577db7df7180ac28883219971fae4444a0bf840f0845edfcafd5551d51  v1/fail-zero-size-proof/log-key.pub
+08b6e9ec3bd002da4e21976b6dc1411567d30acb30d671161583b3d8351e7692  v1/fail-zero-size-proof/payload.bin
+a6265644a5316cad92f1d1446c6512fa187580eaca47945def94b60e04dd76d9  v1/fail-zero-size-proof/receipt.cose
+a6dd4523ffdda1754c234acf209bdde758db7d30438468700a7bf6c01e800e3a  v1/fail-zero-size-proof/statement.cose

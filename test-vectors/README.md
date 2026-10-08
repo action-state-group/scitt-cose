@@ -69,6 +69,8 @@ v1/<vector-id>/
 |---|---|---|
 | `valid-eddsa` | VALID | — |
 | `valid-es256` | VALID | — |
+| `valid-eddsa-multi-proof` | VALID | — |
+| `fail-zero-size-proof` | INVALID | `MALFORMED_INCLUSION_PROOF` |
 | `fail-tampered-path` | INVALID | `TAMPERED_INCLUSION_PATH` |
 | `fail-unsupported-vds` | INVALID | `UNSUPPORTED_VDS` |
 | `fail-bad-statement-sig` | INVALID | `BAD_STATEMENT_SIGNATURE` |
@@ -125,3 +127,16 @@ Minted once by [`scripts/generate_test_vectors.py`](../scripts/generate_test_vec
 published version). The expected values were self-checked at mint time and are
 continuously verified in CI by two independent runtimes: this repo's Python
 library and the clean-room Go implementation.
+
+### Proof-array derivatives
+
+`valid-eddsa-multi-proof` and `fail-zero-size-proof` reuse the immutable
+`valid-eddsa` tree, statement, public keys and receipt signature. Only the
+unprotected VDP changes. Their filler labels therefore use `valid-eddsa`,
+not the derivative vector id. `scripts/append_multi_proof_vectors.py` documents
+the deterministic construction without private keys.
+
+The multi-proof receipt places a valid proof for another leaf first and the
+target proof second. `receipt-reordered.cose` swaps them as a positive control.
+Both must authenticate the target entry. `[0, 0, []]` must be diagnosed as a
+malformed inclusion proof before binding or signature verification.
