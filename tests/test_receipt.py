@@ -585,3 +585,28 @@ def test_frozen_receipt_v1_vectors_unchanged(vid):
     assert r.protected_header_ext.get(HDR_GRADE) == exp["grade"]
     if exp["ok"]:
         assert r.root == exp["root"]
+
+
+def test_donated_multi_proof_orders_and_malformed_tail():
+    directory = Path(__file__).parents[1] / "test-vectors/v1/valid-eddsa-multi-proof"
+    expected = json.loads((directory / "expected.json").read_text())
+    key = (directory / "log-key.pub").read_bytes()
+    for name in ("receipt.cose", "receipt-reordered.cose"):
+        receipt = (directory / name).read_bytes()
+        result = verify_receipt(receipt, leaf_entry_hex=expected["leaf_entry"], log_public_key_pem=key)
+        assert result.ok, result.errors
+        assert result.leaf_index == expected["leaf_index"]
+    tagged = cbor2.loads(receipt)
+    protected, unprotected, payload, signature = tagged.value
+    proofs = list(unprotected[396][-1])
+    proofs.append(cbor2.dumps([0, 0, []]))
+    malformed = cbor2.dumps(cbor2.CBORTag(18, [protected, {396: {-1: proofs}}, payload, signature]))
+    result = verify_receipt(malformed, leaf_entry_hex=expected["leaf_entry"], log_public_key_pem=key)
+    assert result.errors == ["invalid tree size or leaf index"]
+
+
+def test_inclusion_proof_rejects_trailing_cbor():
+    from scitt_cose.receipt import _decode_inclusion_proof
+
+    with pytest.raises(CoseError, match="trailing CBOR"):
+        _decode_inclusion_proof(cbor2.dumps([1, 0, []]) + b"\x00")

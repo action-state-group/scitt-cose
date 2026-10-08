@@ -273,20 +273,46 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 
 	switch vds {
 	case vdsRFC9162SHA256:
-		// --- vds=1: RFC 9162 SHA-256 Merkle tree ---
-		treeSize, leafIndex, auditPath, decErr := decodeInclusionProof(proofBlob)
-		if decErr != nil {
-			r.Error = decErr.Error()
+		if len(proofs) > 16 {
+			r.Error = "too many inclusion proofs (maximum 16)"
 			return r
 		}
-		r.TreeSize = treeSize
-		r.LeafIndex = leafIndex
-		var ok bool
-		root, ok = rootFromInclusionProof(leafBytes, leafIndex, treeSize, auditPath)
-		if !ok {
-			r.Error = "inclusion proof does not reconstruct a root for this leaf"
+		// Parse the full unauthenticated proof array before selecting a root.
+		type candidate struct {
+			size, index int64
+			path        [][]byte
+		}
+		candidates := make([]candidate, 0, len(proofs))
+		for _, entry := range proofs {
+			blob, ok := entry.([]byte)
+			if !ok {
+				r.Error = "inclusion proof entry is not a bstr"
+				return r
+			}
+			size, index, path, err := decodeInclusionProof(blob)
+			if err != nil {
+				r.Error = err.Error()
+				return r
+			}
+			candidates = append(candidates, candidate{size, index, path})
+		}
+		verifier := newVerifier(algName, logPub)
+		for _, proof := range candidates {
+			computed, ok := rootFromInclusionProof(leafBytes, proof.index, proof.size, proof.path)
+			if !ok {
+				continue
+			}
+			msg.Payload = computed
+			if err := msg.Verify(nil, verifier); err != nil {
+				continue
+			}
+			r.TreeSize, r.LeafIndex = proof.size, proof.index
+			r.Root = hex.EncodeToString(computed)
+			r.Ok = true
 			return r
 		}
+		r.Error = "receipt signature did not verify over any reconstructed root"
+		return r
 
 	case vdsCCFLedgerSHA256:
 		// --- vds=2: CCF ccf.v1 Merkle receipt ---
@@ -437,6 +463,17 @@ func decodeInclusionProof(blob []byte) (int64, int64, [][]byte, error) {
 	var path [][]byte
 	if err := cbor.Unmarshal(arr[2], &path); err != nil {
 		return 0, 0, nil, fmt.Errorf("inclusion proof path not an array of bstr: %v", err)
+	}
+	if treeSize <= 0 || leafIndex < 0 || leafIndex >= treeSize || treeSize > maxTreeSize {
+		return 0, 0, nil, fmt.Errorf("invalid tree size or leaf index")
+	}
+	if int64(len(path)) != expectedInclusionPathLen(treeSize, leafIndex) {
+		return 0, 0, nil, fmt.Errorf("invalid inclusion proof path length")
+	}
+	for _, node := range path {
+		if len(node) != sha256.Size {
+			return 0, 0, nil, fmt.Errorf("inclusion proof path node must be 32 bytes")
+		}
 	}
 	return treeSize, leafIndex, path, nil
 }

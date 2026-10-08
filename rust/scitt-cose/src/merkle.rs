@@ -43,7 +43,7 @@ fn largest_pow2_below(n: u64) -> u64 {
 
 /// Exact number of audit-path siblings for `index` in an RFC 6962 tree of
 /// `tree_size` entries -- the leaf's depth under the recursive split.
-fn expected_inclusion_path_len(tree_size: u64, index: u64) -> u64 {
+pub(crate) fn expected_inclusion_path_len(tree_size: u64, index: u64) -> u64 {
     let mut n = 0u64;
     let (mut size, mut m) = (tree_size, index);
     while size > 1 {

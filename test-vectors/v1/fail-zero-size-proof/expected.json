@@ -1,0 +1,30 @@
+{
+  "description": "Inherited valid-eddsa signed bytes; [0, 0, []] is malformed before signature or binding verification.",
+  "payload_sha256": "08b6e9ec3bd002da4e21976b6dc1411567d30acb30d671161583b3d8351e7692",
+  "protected_header": {
+    "statement": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "content_type": "application/json",
+      "cwt_claims_label": 15,
+      "issuer": "https://test-vectors.scitt-cose.invalid",
+      "subject": "urn:scitt-cose:test-vectors:v1:valid-eddsa"
+    },
+    "receipt": {
+      "alg": "EdDSA",
+      "alg_code": -8,
+      "vds_label": 395,
+      "vds": 1
+    }
+  },
+  "leaf_entry": "a6dd4523ffdda1754c234acf209bdde758db7d30438468700a7bf6c01e800e3a",
+  "leaf_index": 0,
+  "tree_size": 0,
+  "inclusion_path": [],
+  "reconstructed_root": null,
+  "statement_signature_valid": true,
+  "receipt_valid": false,
+  "result": "INVALID",
+  "failure_code": "MALFORMED_INCLUSION_PROOF",
+  "failure_contains": "invalid tree size or leaf index"
+}

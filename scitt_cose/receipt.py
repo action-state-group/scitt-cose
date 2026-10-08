@@ -29,6 +29,7 @@ not against a frozen RFC.
 from __future__ import annotations
 
 import hashlib
+import io
 from dataclasses import dataclass, field
 from typing import Union
 
@@ -201,9 +202,12 @@ _MAX_AUDIT_PATH = 64
 
 def _decode_inclusion_proof(blob: bytes):
     try:
-        arr = _plain(cbor2.loads(blob))
+        stream = io.BytesIO(blob)
+        arr = _plain(cbor2.CBORDecoder(stream).decode())
     except Exception as exc:  # noqa: BLE001 - map any parser error to CoseError
         raise CoseError(f"inclusion proof is not valid CBOR: {type(exc).__name__}") from exc
+    if stream.read(1):
+        raise CoseError("inclusion proof contains trailing CBOR bytes")
     if not isinstance(arr, (list, tuple)) or len(arr) != 3:
         raise CoseError("inclusion proof must be [tree_size, leaf_index, [path]]")
     tree_size, leaf_index, path = arr
@@ -222,6 +226,12 @@ def _decode_inclusion_proof(blob: bytes):
         if not isinstance(node, (bytes, bytearray)):
             raise CoseError("inclusion proof path element is not a byte string")
         audit_path_hex.append(bytes(node).hex())
+    if not 0 <= leaf_index < tree_size or tree_size > merkle.MAX_TREE_SIZE:
+        raise CoseError("invalid tree size or leaf index")
+    if len(path) != merkle._expected_inclusion_path_len(tree_size, leaf_index):
+        raise CoseError("invalid inclusion proof path length")
+    if any(len(node) != 32 for node in path):
+        raise CoseError("inclusion proof path node must be 32 bytes")
     return tree_size, leaf_index, audit_path_hex
 
 
@@ -444,44 +454,43 @@ def verify_receipt(
         return result
 
     if vds == VDS_RFC9162_SHA256:
-        # --- vds=1: RFC9162_SHA256 ---
+        # Parse every candidate before verifying: a valid proof must not hide a
+        # malformed later entry in this unauthenticated array.
         try:
-            tree_size, leaf_index, audit_path_hex = _decode_inclusion_proof(bytes(first_proof))
+            candidates = []
+            for proof in inclusion_proofs:
+                if not isinstance(proof, (bytes, bytearray)):
+                    raise CoseError("inclusion proof entry is not a byte string")
+                candidates.append(_decode_inclusion_proof(bytes(proof)))
         except CoseError as exc:
             result.errors.append(str(exc))
             return result
 
-        result.tree_size = tree_size
-        result.leaf_index = leaf_index
-
-        # Reconstruct the root by folding the leaf up the audit path. The Merkle
-        # layer bounds tree_size and checks the path length before any hashing, so
-        # this cannot recurse without bound; the guard here is belt-and-suspenders so
-        # verify_receipt's "never raises" contract holds even if that changes.
-        try:
-            reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
-        except Exception as exc:  # noqa: BLE001 - contract: never raise, map to errors
-            result.errors.append(f"inclusion proof could not be evaluated: {type(exc).__name__}")
-            return result
-        if reconstructed is None:
-            result.errors.append("inclusion proof does not reconstruct a root for this leaf")
-            return result
-        result.root = reconstructed
-
-        # Verify the COSE_Sign1 over the reconstructed root. This proves the log
-        # signed *this* root, binding the leaf+proof to the log's signature. The
-        # receipt layer actively processes vds (395), so it is advertised as
-        # understood — a receipt that legitimately marks vds critical is accepted,
-        # while any *other* unknown critical header is still rejected (RFC 9052 §3.1).
-        try:
-            verify_sign1(
-                receipt,
-                public_key_pem=log_public_key_pem,
-                detached_payload=bytes.fromhex(reconstructed),
-                understood_labels=_RECEIPT_UNDERSTOOD,
-            )
-        except CoseError as exc:
-            result.errors.append(f"receipt signature did not verify: {exc}")
+        last_error = None
+        for tree_size, leaf_index, audit_path_hex in candidates:
+            try:
+                reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
+            except Exception as exc:  # noqa: BLE001 - public verifier never raises
+                result.errors.append(f"inclusion proof could not be evaluated: {type(exc).__name__}")
+                return result
+            if reconstructed is None:
+                continue
+            try:
+                verify_sign1(
+                    receipt,
+                    public_key_pem=log_public_key_pem,
+                    detached_payload=bytes.fromhex(reconstructed),
+                    understood_labels=_RECEIPT_UNDERSTOOD,
+                )
+            except CoseError as exc:
+                last_error = exc
+                continue
+            result.tree_size = tree_size
+            result.leaf_index = leaf_index
+            result.root = reconstructed
+            break
+        else:
+            result.errors.append(f"receipt signature did not verify: {last_error}")
             result.errors.append(_CLAIMS_WITHHELD)
             return result
 

@@ -32,7 +32,7 @@ use coset::iana::EnumI64 as _;
 use coset::{CoseSign1, RegisteredLabelWithPrivate, TaggedCborSerializable};
 use ecdsa::signature::Verifier as _;
 
-use crate::merkle::root_from_inclusion_proof;
+use crate::merkle::{expected_inclusion_path_len, root_from_inclusion_proof, MAX_TREE_SIZE};
 
 /// COSE algorithm code point for EdDSA (RFC 9053).
 const ALG_EDDSA: i64 = -8;
@@ -123,8 +123,12 @@ impl ReceiptResult {
 }
 
 fn decode_inclusion_proof(blob: &[u8]) -> Result<(u64, u64, Vec<[u8; 32]>), ReceiptError> {
-    let value: CborValue = coset::cbor::de::from_reader(blob)
+    let mut reader = blob;
+    let value: CborValue = coset::cbor::de::from_reader(&mut reader)
         .map_err(|e| malformed(format!("inclusion proof is not valid CBOR: {e:?}")))?;
+    if !reader.is_empty() {
+        return Err(malformed("inclusion proof has trailing CBOR bytes"));
+    }
     let arr = value
         .as_array()
         .ok_or_else(|| malformed("inclusion proof must be [tree_size, leaf_index, [path]]"))?;
@@ -164,6 +168,14 @@ fn decode_inclusion_proof(blob: &[u8]) -> Result<(u64, u64, Vec<[u8; 32]>), Rece
             .try_into()
             .map_err(|_| malformed("inclusion proof path element must be 32 bytes"))?;
         path.push(arr32);
+    }
+    if tree_size == 0 || tree_size > MAX_TREE_SIZE || leaf_index >= tree_size {
+        return Err(malformed("invalid tree size or leaf index"));
+    }
+    if path.len() as u64 != expected_inclusion_path_len(tree_size, leaf_index) {
+        return Err(malformed(
+            "inclusion proof path length does not match tree size and leaf index",
+        ));
     }
     Ok((tree_size, leaf_index, path))
 }
@@ -286,30 +298,41 @@ pub fn verify_receipt(
             proofs.len()
         ));
     }
-    let first_proof = match proofs[0].as_bytes() {
-        Some(b) => b,
-        None => return result.fail("inclusion proof entry is not a byte string"),
-    };
-
-    let (tree_size, leaf_index, audit_path) = match decode_inclusion_proof(first_proof) {
-        Ok(v) => v,
-        Err(e) => return result.fail(e.to_string()),
-    };
-    result.tree_size = Some(tree_size);
-    result.leaf_index = Some(leaf_index);
-
-    let reconstructed =
-        match root_from_inclusion_proof(leaf_entry, leaf_index, tree_size, &audit_path) {
-            Some(r) => r,
-            None => {
-                return result.fail("inclusion proof does not reconstruct a root for this leaf")
-            }
+    // Proof order is unprotected. Validate every entry before selecting a
+    // candidate whose reconstructed root authenticates the caller's leaf.
+    let mut candidates = Vec::with_capacity(proofs.len());
+    for proof in proofs {
+        let blob = match proof.as_bytes() {
+            Some(b) => b,
+            None => return result.fail("inclusion proof entry is not a byte string"),
         };
-    result.root = Some(reconstructed);
-
-    if let Err(e) = verify_signature(&sign1, alg_code, log_public_key_pem, &reconstructed) {
+        match decode_inclusion_proof(blob) {
+            Ok(candidate) => candidates.push(candidate),
+            Err(e) => return result.fail(e.to_string()),
+        }
+    }
+    let mut matched = false;
+    let mut last_error = None;
+    for (tree_size, leaf_index, audit_path) in candidates {
+        let reconstructed =
+            root_from_inclusion_proof(leaf_entry, leaf_index, tree_size, &audit_path)
+                .expect("decoded proof has validated shape");
+        if let Err(error) = verify_signature(&sign1, alg_code, log_public_key_pem, &reconstructed) {
+            last_error = Some(error);
+        } else {
+            result.tree_size = Some(tree_size);
+            result.leaf_index = Some(leaf_index);
+            result.root = Some(reconstructed);
+            matched = true;
+            break;
+        }
+    }
+    if !matched {
         return result
-            .fail(format!("receipt signature did not verify: {e}"))
+            .fail(format!(
+                "receipt signature did not verify for any inclusion proof: {}",
+                last_error.expect("nonempty candidates each produced a signature error")
+            ))
             .fail(CLAIMS_WITHHELD);
     }
 
@@ -366,5 +389,41 @@ fn verify_signature(
         other => Err(malformed(format!(
             "unsupported alg code point {other} for verification"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod proof_shape_tests {
+    use super::*;
+
+    #[test]
+    fn impossible_proof_shapes_are_malformed() {
+        for (size, index, count) in [
+            (0u64, 0u64, 0usize),
+            (1, 1, 0),
+            (2, 0, 0),
+            (1, 0, 1),
+            ((1u64 << 62) + 1, 0, 0),
+        ] {
+            let value = CborValue::Array(vec![
+                size.into(),
+                index.into(),
+                CborValue::Array(vec![CborValue::Bytes(vec![0; 32]); count]),
+            ]);
+            let mut bytes = Vec::new();
+            coset::cbor::ser::into_writer(&value, &mut bytes).unwrap();
+            assert!(matches!(
+                decode_inclusion_proof(&bytes),
+                Err(ReceiptError::Malformed(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn nested_proof_trailing_bytes_are_malformed() {
+        assert!(matches!(
+            decode_inclusion_proof(&[0x83, 1, 0, 0x80, 0]),
+            Err(ReceiptError::Malformed(_))
+        ));
     }
 }
