@@ -30,7 +30,8 @@ jobs:
   leak-lint:
     runs-on: ubuntu-latest
     steps:
-      # Base repo — TRUSTED. Supplies the scanner. Never the PR's version of it.
+      # Base repo — TRUSTED. Supplies the scanner and its exact-text allowlist.
+      # Neither the scanner nor allowlist from the PR is authoritative.
       - name: Checkout base (trusted — provides the scanner)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
@@ -58,6 +59,7 @@ jobs:
           SCAN_ROOT: ${{ github.event_name == 'pull_request_target' && 'pr' || '.' }}
           # Print matched lines ONLY on a trusted run (not a fork's pull_request_target). The
           # lint redacts by default; on an untrusted run a term hit yields one constant verdict,
-          # so a stranger cannot read the term list back out of the public log.
+          # Detailed matches are withheld; the public pass/fail result still reveals
+          # whether candidate text matches any configured term.
           LEAK_LINT_REVEAL: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: python .github/leak_lint.py "$SCAN_ROOT"

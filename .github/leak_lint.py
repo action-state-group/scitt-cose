@@ -28,14 +28,14 @@ exits 2 rather than passing on the public rule alone -- a missing list must neve
 Output redaction (same model as the sibling ``neutrality_scan.py``): unless
 ``LEAK_LINT_REVEAL`` is truthy, a run on which any term matched prints one constant verdict --
 no path, line, class or count -- because on a fork run the scanned content is the submitter's,
-and anything that varies with which term matched would let a stranger read the list back out
-of the public log one candidate at a time. Bracketed-id hits carry nothing secret and are
+and detailed output would reveal which candidate matched. The public pass/fail result
+still reveals whether a candidate string matches any term; redaction does not hide membership. Bracketed-id hits carry nothing secret and are
 printed in full, but only when no term matched anywhere (otherwise which lines are printed
 would itself be the oracle).
 
 Design:
   - **Exact-text allowlist**, `leak_lint_allowlist.txt` next to this script, for genuine
-    historical record. Never line numbers -- the exact stripped line text.
+    historical record, loaded from the trusted scanner checkout, never the scanned PR. Never line numbers -- the exact stripped line text.
   - **Scans generated artifacts too** (`.txt`, `.xml`), not just sources.
   - **Lockfile URL and hash values are not term-matched** (`package-lock.json`, `yarn.lock`,
     `pnpm-lock.yaml`) when they are what a public registry or a hash looks like: an https URL
@@ -339,7 +339,7 @@ def classify(
 
 def scan(root: Path, terms: dict[str, tuple[str, ...]]) -> tuple[list[str], list[str]]:
     """(bracket-only hits, hits on lines where a term matched), each `path:line:classes: text`."""
-    allow = _load_allowlist(root)
+    allow = _load_allowlist(Path(__file__).resolve().parent.parent)
     bracket_only: list[str] = []
     term_hits: list[str] = []
     for f in _tracked_files(root):

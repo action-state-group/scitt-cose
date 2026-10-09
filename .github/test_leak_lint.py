@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -44,14 +45,21 @@ TERMS = {
 }
 
 
-def _run(repo: Path, *, terms=TERMS, reveal: bool = True) -> subprocess.CompletedProcess:
+def _run(repo: Path, *, terms=TERMS, reveal: bool = True, trusted_allowlist: bool = False) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if not k.startswith("LEAK_LINT_")}
     if terms is not None:
         env["LEAK_LINT_TERMS"] = terms if isinstance(terms, str) else json.dumps(terms)
     if reveal:
         env["LEAK_LINT_REVEAL"] = "1"
+    lint = LINT
+    if trusted_allowlist:
+        trusted = repo.parent / "trusted" / ".github"
+        trusted.mkdir(parents=True)
+        lint = trusted / "leak_lint.py"
+        shutil.copyfile(LINT, lint)
+        shutil.copyfile(repo / ".github/leak_lint_allowlist.txt", trusted / "leak_lint_allowlist.txt")
     return subprocess.run(
-        [sys.executable, str(LINT), str(repo)], capture_output=True, text=True, env=env
+        [sys.executable, str(lint), str(repo)], capture_output=True, text=True, env=env
     )
 
 
@@ -313,7 +321,7 @@ def test_allowlist_exact_text_suppresses_a_hit(tmp_path):
         "Historical record: [an-old-fixed-task-id] was closed.\n",
     )
     _commit_all(repo)
-    result = _run(repo)
+    result = _run(repo, trusted_allowlist=True)
     assert result.returncode == 0, result.stdout
 
 
@@ -334,8 +342,20 @@ def test_allowlist_accepts_a_markdown_heading_line(tmp_path):
         "### Fixed — old bug closed out ([an-old-fixed-task-id])\n",
     )
     _commit_all(repo)
-    result = _run(repo)
+    result = _run(repo, trusted_allowlist=True)
     assert result.returncode == 0, result.stdout
+
+
+def test_untrusted_allowlist_cannot_suppress_a_term_hit(tmp_path):
+    repo = _init_repo(tmp_path)
+    text = "Historical record: SYNTHETIC_QUEUE_WORD\n"
+    _write(repo, "HISTORY.md", text)
+    _write(repo, ".github/leak_lint_allowlist.txt", text)
+    _commit_all(repo)
+    result = _run(repo, reveal=False)
+    assert result.returncode == 1
+    assert "Details are withheld" in result.stdout
+    assert "SYNTHETIC_QUEUE_WORD" not in result.stdout
 
 
 def test_lint_excludes_its_own_files_by_name(tmp_path):
