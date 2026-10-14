@@ -44,7 +44,7 @@ The Go and Rust clean-room implementations run the same manifest:
 
 ```bash
 (cd scitt-cose-go-verify && go test ./...)        # includes vectors_test.go
-(cd rust/scitt-cose && cargo test --test vectors)  # receipt half; valid-ccf-vds2 is asserted rejected
+(cd rust && cargo test --test vectors)             # receipt half; valid-ccf-vds2 is asserted rejected
 ```
 
 All three runners exit non-zero on any mismatch — including a negative vector that

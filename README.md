@@ -517,7 +517,7 @@ or from the published package (the runner ships in **scitt-cose ≥ 0.1.0**):
 machine-readable report). The Go clean-room implementation runs the same
 manifest (`go test ./...` in `scitt-cose-go-verify/`); the Rust clean-room
 implementation runs it too (`cargo test --test vectors` in
-`rust/scitt-cose/`). The append-only promise is enforced, not just stated:
+`rust/`). The append-only promise is enforced, not just stated:
 `test-vectors/SHA256SUMS` pins every published byte and CI fails on any
 mutation. A mismatch against your implementation is exactly the report we
 want — please open an issue. Details and the stability promise:

@@ -12,6 +12,7 @@ python3 -m pytest -q                       # unit + conformance suite
 SCITT_REQUIRE_GO=1 python3 -m pytest -q    # also force the Go cross-check
 python3 -m ruff check .
 python3 -m pytest -q .github/test_release.py   # release helper
+(cd rust && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked)
 ```
 
 CI runs the suite on Python 3.9 and 3.12 with the Go and Rust cross-language
@@ -23,8 +24,9 @@ Code must stay Python 3.9 compatible.
 - `scitt_cose/` is the published package. Its only runtime dependencies are
   `cbor2` and `cryptography`; a test enforces this.
 - `scitt-cose-go-verify/` and `rust/scitt-cose/` are independent
-  cross-verifiers. `hosted_profiles/`, `viewer/`, `demo/` and `interop/` are not
-  part of the package.
+  cross-verifiers. `rust/Cargo.toml` is the Cargo workspace root (one
+  `Cargo.lock`); each crate lives in `rust/<crate>/`. `hosted_profiles/`,
+  `viewer/`, `demo/` and `interop/` are not part of the package.
 - `test-vectors/` is pinned by `test-vectors/SHA256SUMS`; CI fails on any byte
   change without a matching checksum update.
 
