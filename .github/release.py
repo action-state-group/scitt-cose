@@ -19,7 +19,9 @@ Commands:
     Raise the manifest version (and lockfile) and print the new version.
 ``changed BEFORE AFTER``
     Print ``package version tag workflow`` for each package whose manifest
-    version differs between two commits.
+    version differs between two commits. A package whose manifest moved is
+    read at BEFORE from the path BEFORE's ``releases.json`` gave it, so a
+    move alone releases nothing.
 ``check PACKAGE TAG``
     Fail unless TAG is the package's prefix plus its manifest version and
     the checked-out commit is an ancestor of ``origin/main``. Publish
@@ -171,13 +173,26 @@ def version_at(repo: Path, entry: dict, commit: str) -> str | None:
     return read_version(entry["kind"], shown.stdout)
 
 
+def config_at(repo: Path, commit: str) -> dict:
+    """The ``releases.json`` at a (known) commit, or ``{}`` if it has none."""
+    if git(repo, "cat-file", "-e", f"{commit}:{CONFIG.as_posix()}").returncode != 0:
+        return {}
+    shown = git(repo, "show", f"{commit}:{CONFIG.as_posix()}")
+    if shown.returncode != 0:
+        raise ValueError(f"git show failed: {shown.stderr.strip()}")
+    return json.loads(shown.stdout)
+
+
 def changed(repo: Path, config: dict, before: str, after: str) -> list[tuple[str, str, str, str]]:
     require_commit(repo, before)
     require_commit(repo, after)
+    # A package keeps its name when its manifest moves, so its previous
+    # version is read where the previous configuration put it.
+    previous = config_at(repo, before)
     released = []
     for name, entry in config.items():
         new = version_at(repo, entry, after)
-        if new is not None and new != version_at(repo, entry, before):
+        if new is not None and new != version_at(repo, previous.get(name, entry), before):
             released.append((name, new, entry["tag_prefix"] + new, entry["workflow"]))
     return released
 
