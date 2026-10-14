@@ -184,6 +184,49 @@ def test_changed_reports_a_newly_added_package(repo: Path) -> None:
     ]
 
 
+def move_cargo_manifest(repo: Path, version: str | None = None) -> dict:
+    """Move the crate to rust/demo/ in the layout's workspace and commit it."""
+    config = {**CONFIG, "crates/demo": {**CONFIG["crates/demo"], "manifest": "rust/demo/Cargo.toml"}}
+    (repo / "rust/demo").mkdir()
+    git(repo, "mv", "rust/Cargo.toml", "rust/demo/Cargo.toml")
+    (repo / "rust/Cargo.toml").write_text('[workspace]\nmembers = ["demo"]\n')
+    if version is not None:
+        manifest = repo / "rust/demo/Cargo.toml"
+        manifest.write_text(manifest.read_text().replace('version = "0.2.3"', f'version = "{version}"', 1))
+    (repo / ".github/releases.json").write_text(json.dumps(config))
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "move the crate")
+    return config
+
+
+def test_changed_ignores_a_manifest_that_only_moved(repo: Path) -> None:
+    before = git(repo, "rev-parse", "HEAD")
+    config = move_cargo_manifest(repo)
+    after = git(repo, "rev-parse", "HEAD")
+    assert release.changed(repo, config, before, after) == []
+
+
+def test_changed_reports_a_moved_manifest_whose_version_moved(repo: Path) -> None:
+    before = git(repo, "rev-parse", "HEAD")
+    config = move_cargo_manifest(repo, "0.3.0")
+    after = git(repo, "rev-parse", "HEAD")
+    assert release.changed(repo, config, before, after) == [
+        ("crates/demo", "0.3.0", "crates/demo-v0.3.0", "publish-rust.yml"),
+    ]
+
+
+def test_changed_without_a_previous_config_reads_the_current_paths(repo: Path) -> None:
+    git(repo, "rm", "-q", ".github/releases.json")
+    git(repo, "commit", "-q", "-m", "no config yet")
+    before = git(repo, "rev-parse", "HEAD")
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / ".github/releases.json").write_text(json.dumps(CONFIG))
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "adopt the release flow")
+    after = git(repo, "rev-parse", "HEAD")
+    assert release.changed(repo, CONFIG, before, after) == []
+
+
 @pytest.mark.parametrize(
     ("name", "tag"),
     [("python", "python/v0.7.0"), ("ts", "ts/v0.1.0"), ("crates/demo", "crates/demo-v0.2.3")],
