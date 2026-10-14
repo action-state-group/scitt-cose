@@ -39,7 +39,7 @@ Code must stay Python 3.9 compatible.
 ## Releases
 
 Follow [RELEASING.md](RELEASING.md). In short: the package releases under
-`v<version>` tags, created by the Tag release workflow when a version bump
+`v<version>` tags, created by the Release · Tag workflow when a version bump
 merges, never by hand. Do not rename `.github/workflows/release.yml`: the PyPI
 trusted publisher names it, so publishing breaks until PyPI is updated first.
 `.github/release.py` is an identical copy shared with the other

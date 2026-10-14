@@ -16,14 +16,14 @@ other artifacts and never publish to PyPI.
 
 ## Cutting a release
 
-1. **Prepare.** Run [Prepare release](https://github.com/action-state-group/scitt-cose/actions/workflows/prepare-release.yml)
+1. **Prepare.** Run [Release · Prepare](https://github.com/action-state-group/scitt-cose/actions/workflows/prepare-release.yml)
    on `main`, choosing `patch`, `minor` or `major`. It raises the version in
    `pyproject.toml`, commits the bump with a sign-off, and pushes
    `release/python-v<version>`.
 2. **Review.** Open the pull request from the link in the run summary. Open it
    yourself: a pull request opened by the workflow would not start CI. Add the
    CHANGELOG entry on the same branch if it is not in yet.
-3. **Merge.** [Tag release](https://github.com/action-state-group/scitt-cose/actions/workflows/tag-release.yml)
+3. **Merge.** [Release · Tag](https://github.com/action-state-group/scitt-cose/actions/workflows/tag-release.yml)
    runs on the merge. When the version changed it creates `v<version>` and its
    GitHub Release on the merge commit and dispatches `release.yml` on that tag.
 4. **Publish.** `release.yml` checks that the tag is `v` plus the
@@ -41,8 +41,8 @@ If a publish fails after the tag exists:
 - **A defect in the code or the workflow:** a re-run uses the tagged commit
   again, so a fix merged to `main` does not reach it. Release the fix as a new
   version.
-- **Tag release failed before dispatching** (no `release.yml` run exists):
-  re-run the Tag release run. It accepts a tag and GitHub Release it already
+- **Release · Tag failed before dispatching** (no `release.yml` run exists):
+  re-run the Release · Tag run. It accepts a tag and GitHub Release it already
   created on the same commit and dispatches `release.yml` again.
 
 ## Safeguards

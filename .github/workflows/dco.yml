@@ -2,9 +2,9 @@
 # DCO sign-off enforcement — replaces the hosted probot DCO app with a
 # self-contained Actions job that is outage-proof and pinned.
 #
-# Branch protection: require the "dco / dco" check (Settings → Branches →
+# Branch protection: require the "DCO / dco" check (Settings → Branches →
 # Require status checks → search "dco"). Drop the "DCO" probot app entry.
-name: dco
+name: DCO
 
 on:
   pull_request:

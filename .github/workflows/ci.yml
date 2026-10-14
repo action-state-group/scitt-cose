@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
       - name: Install
         run: pip install -e ".[dev,serve]"
       - name: Tests (Go + Rust cross-language checks REQUIRED, never skipped)
@@ -68,8 +70,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
+          toolchain: stable
           components: clippy
       - name: Build + test + lint the independent Rust receipt verifier
         working-directory: rust/scitt-cose
@@ -127,7 +130,9 @@ jobs:
         with:
           go-version: stable
           cache: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
       - name: Published vector bytes are immutable (append-only promise, enforced)
         working-directory: test-vectors
         run: sha256sum -c SHA256SUMS
