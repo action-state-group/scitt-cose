@@ -467,6 +467,11 @@ def verify_receipt(
             return result
 
         last_error = None
+        # The first candidate that reconstructs a root is still reported as a
+        # diagnostic when no signature verifies (ok stays False), as before
+        # 0.4.1 and as the CCF branch does: callers tell a malformed receipt
+        # from one signed by a key they do not hold by checking ``root``.
+        diagnostic = None
         for tree_size, leaf_index, audit_path_hex in candidates:
             try:
                 reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
@@ -475,6 +480,8 @@ def verify_receipt(
                 return result
             if reconstructed is None:
                 continue
+            if diagnostic is None:
+                diagnostic = (tree_size, leaf_index, reconstructed)
             try:
                 verify_sign1(
                     receipt,
@@ -490,6 +497,8 @@ def verify_receipt(
             result.root = reconstructed
             break
         else:
+            if diagnostic is not None:
+                result.tree_size, result.leaf_index, result.root = diagnostic
             result.errors.append(f"receipt signature did not verify: {last_error}")
             result.errors.append(_CLAIMS_WITHHELD)
             return result

@@ -102,6 +102,30 @@ def test_wrong_log_key_fails(eddsa_keys, other_eddsa_keys):
     assert any("signature" in e for e in res.errors)
 
 
+def test_wrong_log_key_still_reports_the_reconstructed_root(eddsa_keys, other_eddsa_keys):
+    """A well-formed receipt signed by a key the caller does not hold fails, but
+    keeps the inclusion-proof diagnostics (root, tree_size, leaf_index): callers
+    use ``root`` to tell it apart from a malformed receipt (regressed in 0.4.1)."""
+    priv, pub = eddsa_keys
+    _o, opub = other_eddsa_keys
+    es = _entries(6)
+    receipt = build_receipt(
+        leaf_entry_hex=es[3], leaf_index=3, tree_entries_hex=es,
+        alg="EdDSA", log_private_key_pem=priv,
+    )
+    good = verify_receipt(receipt, leaf_entry_hex=es[3], log_public_key_pem=pub)
+    res = verify_receipt(receipt, leaf_entry_hex=es[3], log_public_key_pem=opub)
+    assert good.ok and not res.ok
+    assert (res.root, res.tree_size, res.leaf_index) == (good.root, 6, 3)
+    assert any("signature" in e for e in res.errors)
+
+
+def test_bytes_that_are_not_a_receipt_report_no_root(eddsa_keys):
+    _priv, pub = eddsa_keys
+    res = verify_receipt(cbor2.dumps({"not": "a receipt"}), leaf_entry_hex=_entries(1)[0], log_public_key_pem=pub)
+    assert not res.ok and res.root is None
+
+
 def test_tampered_proof_fails(eddsa_keys):
     priv, pub = eddsa_keys
     es = _entries(8)

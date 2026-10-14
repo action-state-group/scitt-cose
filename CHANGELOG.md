@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `verify_receipt` again reports the inclusion proof's `root`, `tree_size` and
+  `leaf_index` when the receipt's signature does not verify (`ok` stays
+  `False`), as 0.4.0 and the CCF path do. 0.4.1 dropped them, so callers that
+  tell a malformed receipt from one signed by a key they do not hold, such as
+  checkpointed-local-log's and capsule-emit's unpinned-witness check, reported
+  a well-formed stamp as invalid.
+
 ## [0.4.1] — 2026-10-14
 
 ### Fixed
