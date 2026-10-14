@@ -98,5 +98,6 @@ above) and `../../test-vectors/receipt-v1/` (the `iat`/`grade` set).
 
 ## Pinning
 
-Pin a git tag (or, once released, an exact version such as `"=0.1.0"`) and
-bump it deliberately; never follow `branch = "main"`.
+Pin a git tag (e.g. `tag = "rust-scitt-cose-v0.1.0"`) and bump it
+deliberately; the crate is not published to crates.io. Never follow
+`branch = "main"`.

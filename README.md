@@ -499,9 +499,10 @@ that tab only), never sent to the server. Files over 16 MiB are refused.
 ## Test vectors (cross-implementation, stable)
 
 [`test-vectors/`](test-vectors/) is a frozen, **append-only** vector set for
-other SCITT/COSE implementations to check themselves against: two happy-path
-vectors (EdDSA, ES256) and three negative vectors (tampered inclusion path,
-unsupported vds, bad statement signature), each with committed bytes, TEST-ONLY
+other SCITT/COSE implementations to check themselves against: four happy-path
+vectors (EdDSA, ES256, a real CCF `ccf.v1` receipt, a multi-proof receipt) and
+four negative vectors (tampered inclusion path, unsupported vds, bad statement
+signature, zero-size proof), each with committed bytes, TEST-ONLY
 keys, and an `expected.json` documenting every protected-header field a
 verifier needs. Verify from a clean checkout:
 

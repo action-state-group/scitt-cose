@@ -1,7 +1,8 @@
 # scitt-cose-go-verify
 
 An **independent, non-Python, profile-opaque** verifier for **generic** SCITT
-`COSE_Sign1` Signed Statements *and* RFC 9162 COSE Receipts.
+`COSE_Sign1` Signed Statements *and* COSE Receipts (RFC 9162 SHA-256, vds=1, or
+CCF `ccf.v1`, vds=2).
 
 This is the durable *external second opinion* on the COSE/SCITT bytes the Python
 `scitt_cose` library produces. It uses
@@ -37,7 +38,7 @@ go build -o scitt-cose-go-verify .
 ./scitt-cose-go-verify \
   --statement statement.cose \   # COSE_Sign1 (CBOR tag 18) bytes
   --pubkey    issuer.pem \        # PEM SubjectPublicKeyInfo public key
-  --alg       EdDSA              # EdDSA | ES256
+  --alg       EdDSA              # EdDSA | ES256 | ES384
 
 # Verify a Receipt (inclusion proof + log signature over the reconstructed root):
 ./scitt-cose-go-verify \
@@ -84,13 +85,12 @@ receipt's `vds` (verifiable-data-structure) is read **only** from the
 integrity-protected header (label 395); a `vds` placed in the unprotected header
 is ignored, defeating that downgrade.
 
-## Draft-tracking
+## Standards status
 
-The receipt structure aligns with **[RFC 9943](https://www.rfc-editor.org/rfc/rfc9943)**
-(SCITT Architecture, published June 2026) and tracks one IETF document that remains
-an **Active Internet-Draft (Work in Progress)** in the **RFC Editor Queue**, NOT yet
-published as an RFC: `draft-ietf-cose-merkle-tree-proofs-18` (COSE Receipts / COSE
-Merkle Tree Proofs). The Merkle
+The receipt structure follows **[RFC 9942](https://www.rfc-editor.org/rfc/rfc9942)**
+(COSE Receipts, formerly `draft-ietf-cose-merkle-tree-proofs-18`) and
+**[RFC 9943](https://www.rfc-editor.org/rfc/rfc9943)** (SCITT Architecture), both
+published June 2026. The Merkle
 primitives follow the published **RFC 9162 / RFC 6962**
 (SHA-256); CWT Claims are at **label 15** (RFC 9597). ML-DSA COSE code points
 referenced elsewhere are per the published **RFC 9964** (*ML-DSA for JOSE and
