@@ -4,8 +4,9 @@
 // Cross-implementation test-vector runner (Go side). Walks the SAME
 // ../test-vectors/manifest.json the Python runner uses and verifies every
 // vector with THIS clean-room implementation, executed as the real CLI binary
-// (the same way a third party would run it). Same files, two runtimes:
-// agreement on accept AND reject is the conformance claim under test.
+// (the same way a third party would run it). The Python and Rust runners read
+// the same files; agreement on accept AND reject is the conformance claim
+// under test.
 //
 // A negative vector that unexpectedly verifies fails the test — rejection
 // agreement matters as much as acceptance agreement.

@@ -65,7 +65,7 @@ def test_cwt_claim_labels():
 
 
 def test_receipt_and_merkle_code_points():
-    # COSE Receipts (draft-ietf-cose-merkle-tree-proofs) header parameters.
+    # COSE Receipts (RFC 9942) header parameters.
     assert HDR_VDS == 395               # verifiable-data-structure (protected)
     assert HDR_VDP == 396               # verifiable-data-proofs (unprotected)
     assert VDS_RFC9162_SHA256 == 1      # RFC9162_SHA256 verifiable data structure

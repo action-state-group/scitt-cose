@@ -40,13 +40,14 @@ pip install "scitt-cose>=0.1.0"
 python -m scitt_cose.vectors path/to/test-vectors          # add --json for machines
 ```
 
-The Go clean-room implementation runs the same manifest:
+The Go and Rust clean-room implementations run the same manifest:
 
 ```bash
-cd scitt-cose-go-verify && go test ./...     # includes vectors_test.go
+(cd scitt-cose-go-verify && go test ./...)        # includes vectors_test.go
+(cd rust/scitt-cose && cargo test --test vectors)  # receipt half; valid-ccf-vds2 is asserted rejected
 ```
 
-Both runners exit non-zero on any mismatch — including a negative vector that
+All three runners exit non-zero on any mismatch — including a negative vector that
 unexpectedly verifies. No network access is needed anywhere in the vector path.
 
 ## Layout
@@ -70,6 +71,7 @@ v1/<vector-id>/
 | `valid-eddsa` | VALID | — |
 | `valid-es256` | VALID | — |
 | `valid-eddsa-multi-proof` | VALID | — |
+| `valid-ccf-vds2` | VALID | — |
 | `fail-zero-size-proof` | INVALID | `MALFORMED_INCLUSION_PROOF` |
 | `fail-tampered-path` | INVALID | `TAMPERED_INCLUSION_PATH` |
 | `fail-unsupported-vds` | INVALID | `UNSUPPORTED_VDS` |
@@ -106,13 +108,15 @@ rejected).
   both runners recompute the digest from `statement.cose` and assert it equals
   `expected.json`'s `leaf_entry`, so an implementation that derives the leaf
   differently fails the suite.
-* **Tree:** RFC 9162 SHA-256 Merkle tree, `tree_size = 8`, leaves in index
+* **Tree** (every vector except `valid-ccf-vds2`, a real scitt-ccf-ledger v7
+  receipt with vds=2 and ES384 and no RFC 9162 tree fields): RFC 9162 SHA-256
+  Merkle tree, `tree_size = 8`, leaves in index
   order. The statement's digest sits at `leaf_index = 2`; every other leaf `i`
   is `SHA-256("scitt-cose test vectors v1 :: <vector-id> :: filler leaf <i>")`
   (ASCII).
 * The receipt's payload is the Merkle root (detached); its unprotected header
   carries the inclusion proof as `cbor([tree_size, leaf_index, [audit_path]])`
-  at vdp (label 396) key `-1`, per draft-ietf-cose-merkle-tree-proofs.
+  at vdp (label 396) key `-1`, per RFC 9942.
 
 ## Keys
 
@@ -125,8 +129,9 @@ generation keys (`*.test-private`) are kept outside the published tree.
 Minted once by [`scripts/generate_test_vectors.py`](../scripts/generate_test_vectors.py)
 (kept for documentation and future versions; it refuses to overwrite a
 published version). The expected values were self-checked at mint time and are
-continuously verified in CI by two independent runtimes: this repo's Python
-library and the clean-room Go implementation.
+continuously verified in CI by three independent runtimes: this repo's Python
+library and the clean-room Go and Rust implementations (the Rust verifier
+supports vds=1 only, so it asserts that `valid-ccf-vds2` is rejected).
 
 ### Proof-array derivatives
 

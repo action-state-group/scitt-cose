@@ -116,7 +116,7 @@ jobs:
 
   vectors:
     # The cross-implementation test-vector set, verified from a FRESH
-    # environment by BOTH runtimes. Deliberately shares no caches with the
+    # environment by the Python, Go and Rust runners. Deliberately shares no caches with the
     # unit-test job: "reproducible from a clean checkout" is the claim under
     # test, so nothing here may reuse another job's state.
     runs-on: ubuntu-latest

@@ -19,9 +19,9 @@
 // wrong" class of bug (e.g. a CWT_Claims label mis-enum on the Python side —
 // the python-cwt CWT_CLAIMS == 13 bug, where the conformant label is 15).
 //
-// Draft-tracking: the receipt structure follows the SCITT / COSE-Receipts
-// documents, which are Active Internet-Drafts (Work in Progress) in the RFC
-// Editor Queue, NOT yet published RFCs. There is no "RFC 9942".
+// Standards status: the receipt structure follows RFC 9942 (COSE Receipts,
+// formerly draft-ietf-cose-merkle-tree-proofs) and RFC 9943 (SCITT
+// Architecture), both published June 2026.
 package main
 
 import (
@@ -112,14 +112,14 @@ func fail(format string, args ...any) {
 func main() {
 	statementPath := flag.String("statement", "", "path to COSE_Sign1 SCITT Signed Statement (CBOR bytes)")
 	pubkeyPath := flag.String("pubkey", "", "path to PEM SubjectPublicKeyInfo public key for the statement")
-	algName := flag.String("alg", "EdDSA", "signature algorithm: EdDSA | ES256")
+	algName := flag.String("alg", "EdDSA", "signature algorithm: EdDSA | ES256 | ES384")
 	receiptPath := flag.String("receipt", "", "path to a COSE Receipt (CBOR bytes); optional")
 	logPubkeyPath := flag.String("log-pubkey", "", "path to PEM public key of the transparency log (with --receipt)")
 	leafEntryHex := flag.String("leaf-entry-hex", "", "hex of the leaf entry the receipt proves (with --receipt)")
 	flag.Parse()
 
 	if *statementPath == "" && *receiptPath == "" {
-		fail("usage: scitt-cose-go-verify --statement <file> --pubkey <pem> [--alg EdDSA|ES256] " +
+		fail("usage: scitt-cose-go-verify --statement <file> --pubkey <pem> [--alg EdDSA|ES256|ES384] " +
 			"[--receipt <file> --log-pubkey <pem> --leaf-entry-hex <hex>]")
 	}
 
