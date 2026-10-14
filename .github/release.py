@@ -45,7 +45,8 @@ VERSION = {
     # PEP 440 pre-releases in normalized form, as pyproject would declare them.
     "python": re.compile(rf"{CORE}(?:(?:a|b|rc)(?:0|[1-9][0-9]*))?"),
     "npm": re.compile(rf"{CORE}(?:-[0-9A-Za-z.-]+)?"),
-    "cargo": re.compile(rf"{CORE}(?:-[0-9A-Za-z.-]+)?"),
+    # publish-rust.yml publishes only major.minor.patch crate versions.
+    "cargo": re.compile(CORE),
 }
 TABLE = {"python": "project", "cargo": "package"}
 

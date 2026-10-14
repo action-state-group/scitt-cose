@@ -206,6 +206,7 @@ def test_check_accepts_the_matching_tag_on_main(repo: Path, name: str, tag: str)
         ("ts", "ts/v0.1.1", "does not match"),
         ("ts", "python/v0.1.0", "not a ts/v"),
         ("crates/demo", "crates/other-v0.2.3", "not a crates/demo-v"),
+        ("crates/demo", "crates/demo-v0.2.3-rc.1", "not a crates/demo-v"),
     ],
 )
 def test_check_rejects_foreign_and_mismatched_tags(repo: Path, name: str, tag: str, message: str) -> None:
