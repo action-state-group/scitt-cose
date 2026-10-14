@@ -75,7 +75,7 @@ jobs:
           toolchain: stable
           components: clippy
       - name: Build + test + lint the independent Rust receipt verifier
-        working-directory: rust/scitt-cose
+        working-directory: rust
         run: |
           cargo build --locked
           cargo test --locked
@@ -151,8 +151,8 @@ jobs:
         working-directory: scitt-cose-go-verify
         run: go test ./... -run TestVectors -v
       - name: Rust clean-room runner — v1 + receipt-v1, same files
-        working-directory: rust/scitt-cose
-        run: cargo test --locked --test vectors
+        working-directory: rust
+        run: cargo test --locked -p scitt-cose-receipt --test vectors
 
   neutrality-gate:
     # The shipped tree must contain no downstream/reserved code references.

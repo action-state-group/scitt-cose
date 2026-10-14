@@ -12,6 +12,7 @@ python3 -m pytest -q                       # unit + conformance suite
 SCITT_REQUIRE_GO=1 python3 -m pytest -q    # also force the Go cross-check
 python3 -m ruff check .
 python3 -m pytest -q .github/test_release.py   # release helper
+(cd rust && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked)
 ```
 
 CI runs the suite on Python 3.9 and 3.12 with the Go and Rust cross-language
@@ -23,8 +24,8 @@ Code must stay Python 3.9 compatible.
 - `scitt_cose/` is the published package. Its only runtime dependencies are
   `cbor2` and `cryptography`; a test enforces this.
 - `scitt-cose-go-verify/` and `rust/scitt-cose/` are independent
-  cross-verifiers. `hosted_profiles/`, `viewer/`, `demo/` and `interop/` are not
-  part of the package.
+  cross-verifiers. `hosted_profiles/`, `viewer/`, `demo/` and `interop/` are
+  not part of the package.
 - `test-vectors/` is pinned by `test-vectors/SHA256SUMS`; CI fails on any byte
   change without a matching checksum update.
 
@@ -33,6 +34,13 @@ Code must stay Python 3.9 compatible.
 - Keep the library profile-agnostic: statement payloads stay opaque bytes, and
   no transparency-service (write) code.
 - Never cite an unassigned RFC number; a test scans source and docs for it.
+- One top-level directory per language other than the root Python package:
+  Go in `scitt-cose-go-verify/`, Rust in `rust/`. In `rust/`, `Cargo.toml` is
+  the workspace, each crate is `rust/<crate>/`, and all crates share
+  `rust/Cargo.lock`. Add a Rust crate as another workspace member, never at
+  `rust/` itself or outside it; its `.github/releases.json` entry names
+  `rust/<crate>/Cargo.toml` and `rust/Cargo.lock`. The other
+  action-state-group repositories use the same Rust layout.
 - Commits use conventional commit messages and a DCO sign-off
   (`git commit -s`). Do not add AI attribution trailers.
 

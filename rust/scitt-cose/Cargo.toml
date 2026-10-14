@@ -10,7 +10,7 @@ keywords = ["scitt", "cose", "rfc9162", "merkle", "receipt"]
 categories = ["cryptography", "command-line-utilities"]
 # The test vectors live at the repository root, outside this crate, so the
 # integration tests run from a checkout and are left out of the package.
-include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE"]
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "NOTICE"]
 
 [lib]
 name = "scitt_cose_receipt"

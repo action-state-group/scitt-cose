@@ -77,8 +77,9 @@ Prints one JSON object to stdout and exits `0` iff the receipt verifies:
 
 ## Tests
 
-Run from a checkout of the repository: the test vectors live at its root and
-are not part of the published crate.
+Run from `rust/` (the Cargo workspace root, which holds `Cargo.lock`) in a
+checkout of the repository: the test vectors live at its root and are not part
+of the published crate.
 
 ```bash
 cargo test                              # unit tests (merkle) + tests/vectors.rs
