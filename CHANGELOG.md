@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-14
+
 ### Fixed
 
 - RFC 9162 receipt verification checks all structurally valid inclusion proofs
