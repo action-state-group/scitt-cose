@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-10-14
+
 ### Fixed
 
 - `verify_receipt` again reports the inclusion proof's `root`, `tree_size` and
