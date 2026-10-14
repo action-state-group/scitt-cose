@@ -9,7 +9,9 @@ Each repository lists the packages it publishes in ``.github/releases.json``::
 
 ``kind`` is ``python`` (pyproject.toml), ``npm`` (package.json, plus the
 sibling package-lock.json) or ``cargo`` (Cargo.toml, plus the ``lockfile``
-the entry names). A package releases under ``tag_prefix + version``.
+the entry names). A crate's bump also updates its entry in the other cargo
+entries' lockfiles, where another crate depends on it by path. A package
+releases under ``tag_prefix + version``.
 
 Commands:
 
@@ -106,7 +108,7 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
-def bump(repo: Path, entry: dict, kind_bump: str) -> str:
+def bump(repo: Path, entry: dict, kind_bump: str, config: dict | None = None) -> str:
     kind = entry["kind"]
     manifest = repo / entry["manifest"]
     current = read_version(kind, manifest.read_text())
@@ -123,18 +125,29 @@ def bump(repo: Path, entry: dict, kind_bump: str) -> str:
             write_json(lock_path, lock)
         return new
     manifest.write_text(replace_toml_version(manifest.read_text(), TABLE[kind], current, new))
-    if kind == "cargo" and entry.get("lockfile"):
+    if kind == "cargo":
         name = tomllib.loads(manifest.read_text())["package"]["name"]
-        lock_path = repo / entry["lockfile"]
-        lock, count = re.subn(
-            rf'(\[\[package\]\]\nname = "{re.escape(name)}"\nversion = "){re.escape(current)}(")',
-            rf"\g<1>{new}\g<2>",
-            lock_path.read_text(),
-        )
-        if count != 1:
-            raise ValueError(f"{entry['lockfile']} has no {name} {current} entry")
-        lock_path.write_text(lock)
+        others = {e["lockfile"] for e in (config or {}).values()
+                  if e["kind"] == "cargo" and e.get("lockfile") and e is not entry}
+        if entry.get("lockfile"):
+            if not replace_lock_version(repo / entry["lockfile"], name, current, new):
+                raise ValueError(f"{entry['lockfile']} has no {name} {current} entry")
+            others.discard(entry["lockfile"])
+        for lockfile in sorted(others):
+            replace_lock_version(repo / lockfile, name, current, new)
     return new
+
+
+def replace_lock_version(lock_path: Path, name: str, old: str, new: str) -> bool:
+    """Set ``name``'s version in a Cargo.lock; report whether it had the entry."""
+    lock, count = re.subn(
+        rf'(\[\[package\]\]\nname = "{re.escape(name)}"\nversion = "){re.escape(old)}(")',
+        rf"\g<1>{new}\g<2>",
+        lock_path.read_text(),
+    )
+    if count:
+        lock_path.write_text(lock)
+    return bool(count)
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -203,7 +216,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         config = load_config(args.repo)
         if args.command == "bump":
-            print(bump(args.repo, package(config, args.package), args.bump))
+            print(bump(args.repo, package(config, args.package), args.bump, config))
         elif args.command == "changed":
             for row in changed(args.repo, config, args.before, args.after):
                 print(" ".join(row))
