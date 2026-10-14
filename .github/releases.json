@@ -1,0 +1,8 @@
+{
+  "python": {
+    "kind": "python",
+    "manifest": "pyproject.toml",
+    "tag_prefix": "v",
+    "workflow": "release.yml"
+  }
+}

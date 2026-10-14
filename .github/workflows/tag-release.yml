@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Step 2 of a release: tag a merged version bump and start its publisher.
+#
+# On every push to main, compare each package's manifest version (listed in
+# .github/releases.json) with the previous main commit. For a package whose
+# version changed, create the <prefix><version> tag and GitHub Release on the
+# pushed commit, then dispatch the package's publish workflow on that tag. A
+# release made with GITHUB_TOKEN would not trigger the publisher's `release`
+# event, so the dispatch is what starts it; the publisher's own guard and
+# environment tag rule still decide whether anything uploads.
+# See RELEASING.md.
+name: Tag release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write  # create the tag and GitHub Release
+  actions: write   # dispatch the publish workflow
+
+# No concurrency group: GitHub keeps only one pending run per group, so a later
+# push would cancel a queued run carrying a version bump. Runs are independent,
+# since each looks only at its own push's before..after range.
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Tag and publish changed versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          python .github/release.py changed "$BEFORE" "$GITHUB_SHA" > "$RUNNER_TEMP/released.txt"
+          if [ ! -s "$RUNNER_TEMP/released.txt" ]; then
+            echo "No package version changed."; exit 0
+          fi
+          while read -r package version tag workflow; do
+            python .github/release.py check "$package" "$tag" --commit "$GITHUB_SHA"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              git fetch --quiet origin "refs/tags/$tag:refs/tags/$tag"
+              if [ "$(git rev-list -n 1 "$tag")" != "$GITHUB_SHA" ]; then
+                echo "::error::$tag already exists on another commit" >&2; exit 1
+              fi
+            fi
+            if ! gh release view "$tag" >/dev/null 2>&1; then
+              prerelease=()
+              # Anything beyond major.minor.patch (0.8.0rc1, 0.8.0-rc.1).
+              case "$version" in *[!0-9.]*) prerelease=(--prerelease) ;; esac
+              gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" "${prerelease[@]}" \
+                --notes "$package $version. See CHANGELOG.md."
+            fi
+            gh workflow run "$workflow" --ref "$tag"
+            echo "Tagged $tag and dispatched $workflow." >> "$GITHUB_STEP_SUMMARY"
+          done < "$RUNNER_TEMP/released.txt"

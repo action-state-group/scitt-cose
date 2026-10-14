@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Step 1 of a release: bump one package's version on a release/* branch.
+#
+# Run from the Actions tab on main, choosing the package and the bump. The
+# workflow raises the version in the package's manifest (and lockfile), commits
+# it with a DCO sign-off, pushes release/<package>-v<version> and links a pull
+# request in the run summary. Open that pull request yourself: a pull request
+# opened with GITHUB_TOKEN would not start CI. Merging it is the release
+# approval; tag-release.yml then tags the merge and starts the publisher.
+# See RELEASING.md.
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to release (.github/releases.json)
+        required: true
+        type: choice
+        options: [python]
+      bump:
+        description: Version part to raise
+        required: true
+        type: choice
+        options: [patch, minor, major]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        run: test "$GITHUB_REF" = refs/heads/main || { echo "::error::run Prepare release on main" >&2; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Bump the version and push a release branch
+        env:
+          PACKAGE: ${{ inputs.package }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          version=$(python .github/release.py bump "$PACKAGE" "$BUMP")
+          prefix=$(python -c 'import json, sys; print(json.load(open(".github/releases.json"))[sys.argv[1]]["tag_prefix"])' "$PACKAGE")
+          tag="$prefix$version"
+          branch="release/${PACKAGE//\//-}-v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists" >&2; exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null; then
+            echo "::error::$branch already exists; merge or delete it first" >&2; exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -s -am "chore(release): $PACKAGE $version"
+          git push origin "$branch"
+          title="chore(release): $PACKAGE $version"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$branch?expand=1&title=$(python -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$title")"
+          {
+            echo "### $PACKAGE $version"
+            echo
+            echo "Pushed \`$branch\`. [Open the release pull request]($url)."
+            echo "Merging it tags \`$tag\` and publishes."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -16,11 +16,11 @@ jobs:
       matrix:
         python-version: ["3.9", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
       - uses: dtolnay/rust-toolchain@stable
@@ -33,8 +33,8 @@ jobs:
           SCITT_REQUIRE_RUST: "1"
       - name: Lint
         run: python -m ruff check .
-      - name: Release guard tests
-        run: python -m pytest -q .github/test_check_python_release.py
+      - name: Release helper tests
+        run: python -m pytest -q .github/test_release.py
 
   third-party-oracle:
     # The pycose oracle skips itself on cbor2>=6 (pycose 1.1 limitation). The
@@ -42,8 +42,8 @@ jobs:
     # the third-party COSE cross-check actually runs on every push.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Install with cbor2<6 (pycose-compatible)
@@ -54,8 +54,8 @@ jobs:
   go-verifier:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
       - name: Build + vet the independent Go verifier
@@ -67,7 +67,7 @@ jobs:
   rust-verifier:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -85,11 +85,11 @@ jobs:
     # Minutes, not hours — a fixed seed + iteration budget keeps it deterministic.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
       - name: Install (runtime deps)
@@ -105,7 +105,7 @@ jobs:
             --write-findings "$RUNNER_TEMP/fuzz-findings"
       - name: Upload reproducing mutants (if any)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-findings
           path: ${{ runner.temp }}/fuzz-findings
@@ -118,12 +118,12 @@ jobs:
     # test, so nothing here may reuse another job's state.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           # no pip cache — fresh-environment reproducibility is the point
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache: false
@@ -155,7 +155,7 @@ jobs:
     # whole tree, including docs and the Go tool.)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: No downstream package references anywhere in the tree
         run: |
           # (pattern split so this workflow file doesn't match itself, in the
