@@ -4,7 +4,7 @@
 # repo. No secret needed (unlike neutrality.yml, whose reserved-term list is intentionally kept
 # out of the repo) -- the patterns this check bans are generic ops-vocabulary shapes, not a
 # list that itself needs hiding -- so this runs on plain pull_request like hostname-lint.yml.
-name: leak-lint
+name: Leak lint
 
 on:
   pull_request:

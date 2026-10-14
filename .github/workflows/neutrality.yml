@@ -62,7 +62,7 @@
 #
 # To make this a required pre-merge gate, enable branch protection on `main`
 # and require the "neutrality" status check (repo Settings → Branches).
-name: neutrality
+name: Neutrality
 
 on:
   pull_request_target:

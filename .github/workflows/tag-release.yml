@@ -9,7 +9,7 @@
 # event, so the dispatch is what starts it; the publisher's own guard and
 # environment tag rule still decide whether anything uploads.
 # See RELEASING.md.
-name: Tag release
+name: Release · Tag
 
 on:
   push:

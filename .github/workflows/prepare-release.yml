@@ -8,7 +8,7 @@
 # opened with GITHUB_TOKEN would not start CI. Merging it is the release
 # approval; tag-release.yml then tags the merge and starts the publisher.
 # See RELEASING.md.
-name: Prepare release
+name: Release · Prepare
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Require main
-        run: test "$GITHUB_REF" = refs/heads/main || { echo "::error::run Prepare release on main" >&2; exit 1; }
+        run: test "$GITHUB_REF" = refs/heads/main || { echo "::error::run Release · Prepare on main" >&2; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
