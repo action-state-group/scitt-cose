@@ -572,4 +572,5 @@ python3 -m ruff check .
 Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions are
 accepted under the Developer Certificate of Origin (sign your commits with
 `git commit -s`); scope rules and the standards-honesty gates are in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). Releases are cut through a reviewed version-bump pull
+request; see [RELEASING.md](RELEASING.md).
