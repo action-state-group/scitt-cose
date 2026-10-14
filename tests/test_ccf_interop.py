@@ -67,7 +67,7 @@ Two parts
         # NOTE: test skips with "CCF requires did:x509 issuer" — known limitation
 
 Draft tracking
-    RFC9162_SHA256 (vds=1) per draft-ietf-cose-merkle-tree-proofs.
+    RFC9162_SHA256 (vds=1) per RFC 9942.
     CCF uses vds=2 (``ccf.v1`` header). Cross-vds verification is the
     open standards gap being brought to IETF 126.
     CCF REST API per scitt-ccf-ledger main (2026-06): legacy SCRAPI

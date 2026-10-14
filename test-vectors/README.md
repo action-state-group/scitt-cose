@@ -43,8 +43,8 @@ python -m scitt_cose.vectors path/to/test-vectors          # add --json for mach
 The Go and Rust clean-room implementations run the same manifest:
 
 ```bash
-cd scitt-cose-go-verify && go test ./...     # includes vectors_test.go
-cd rust/scitt-cose && cargo test --test vectors   # receipt half; valid-ccf-vds2 is asserted rejected
+(cd scitt-cose-go-verify && go test ./...)        # includes vectors_test.go
+(cd rust/scitt-cose && cargo test --test vectors)  # receipt half; valid-ccf-vds2 is asserted rejected
 ```
 
 All three runners exit non-zero on any mismatch — including a negative vector that
@@ -116,7 +116,7 @@ rejected).
   (ASCII).
 * The receipt's payload is the Merkle root (detached); its unprotected header
   carries the inclusion proof as `cbor([tree_size, leaf_index, [audit_path]])`
-  at vdp (label 396) key `-1`, per draft-ietf-cose-merkle-tree-proofs.
+  at vdp (label 396) key `-1`, per RFC 9942.
 
 ## Keys
 
@@ -130,7 +130,8 @@ Minted once by [`scripts/generate_test_vectors.py`](../scripts/generate_test_vec
 (kept for documentation and future versions; it refuses to overwrite a
 published version). The expected values were self-checked at mint time and are
 continuously verified in CI by three independent runtimes: this repo's Python
-library and the clean-room Go and Rust implementations.
+library and the clean-room Go and Rust implementations (the Rust verifier
+supports vds=1 only, so it asserts that `valid-ccf-vds2` is rejected).
 
 ### Proof-array derivatives
 
