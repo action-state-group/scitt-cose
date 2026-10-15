@@ -37,8 +37,11 @@ it can never silently disappear.
 ## Install
 
 ```bash
-# the scitt-cose-rust-verify CLI, from this repository
-cargo install --locked --git https://github.com/action-state-group/scitt-cose scitt-cose-receipt
+# the library, from crates.io
+cargo add scitt-cose-receipt
+
+# the scitt-cose-rust-verify CLI
+cargo install --locked scitt-cose-receipt
 ```
 
 ## Usage (library)
@@ -82,7 +85,7 @@ checkout of the repository: the test vectors live at its root and are not part
 of the published crate.
 
 ```bash
-cargo test                              # unit tests (merkle) + tests/vectors.rs
+cargo test                              # unit tests (merkle, receipt) + tests/vectors.rs
 cargo clippy --all-targets -- -D warnings
 ```
 
@@ -99,6 +102,8 @@ above) and `../../test-vectors/receipt-v1/` (the `iat`/`grade` set).
 
 ## Pinning
 
-Pin a git tag (e.g. `tag = "rust-scitt-cose-v0.1.0"`) and bump it
-deliberately; the crate is not published to crates.io. Never follow
-`branch = "main"`.
+The crate is published to crates.io from 0.1.1 on; depend on it by version
+(`scitt-cose-receipt = "0.1"`). Each published version has a matching git tag
+`rust-scitt-cose-v<version>`. `rust-scitt-cose-v0.1.0` is a git tag only:
+0.1.0 was never published, and its code predates the inclusion-proof checks
+in 0.1.1. Never follow `branch = "main"`.

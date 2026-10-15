@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Releasing
 
-`scitt-cose` publishes one package, the Python distribution on PyPI. A release
+`scitt-cose` publishes the Python distribution on PyPI through the flow below,
+and the Rust crate `scitt-cose-receipt` on crates.io by hand (see
+[The Rust crate](#the-rust-crate)). A Python release
 is a merged version bump: you choose the bump, review it as a pull request,
 and merging it tags and publishes. The package is listed in
 [`.github/releases.json`](.github/releases.json), which
@@ -13,6 +15,24 @@ and merging it tags and publishes. The package is listed in
 
 Other tags in this repository (`rust-scitt-cose-v*`, `vectors-*`) belong to
 other artifacts and never publish to PyPI.
+
+## The Rust crate
+
+`scitt-cose-receipt` (`rust/scitt-cose`) is published to crates.io by hand and
+is not in `.github/releases.json`. Raise `version` in
+`rust/scitt-cose/Cargo.toml` and `rust/Cargo.lock` in a pull request with a
+CHANGELOG entry. After it merges, from that commit on `main`:
+
+```bash
+cd rust
+cargo publish --dry-run -p scitt-cose-receipt
+cargo publish -p scitt-cose-receipt
+git tag -a rust-scitt-cose-v<version> -m "scitt-cose-receipt <version>"
+git push origin rust-scitt-cose-v<version>
+```
+
+A crate's first publish needs a crates.io API token. crates.io Trusted
+Publishing is set up per crate, and only once the crate exists.
 
 ## Cutting a release
 

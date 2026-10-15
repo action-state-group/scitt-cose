@@ -81,11 +81,13 @@ fn malformed(msg: impl Into<String>) -> ReceiptError {
 /// Outcome of [`verify_receipt`]. `ok` is `true` only when the inclusion
 /// proof reconstructs a root *and* the COSE_Sign1 over that root verifies
 /// under the supplied log key. On any failure `ok` is `false` and `errors`
-/// explains why. `root`/`tree_size`/`leaf_index` may still carry what the
-/// inclusion proof yielded before the failing check, but the protected-header
-/// claims (`iat`, `grade`) are populated ONLY when `ok` is `true` -- a claim
-/// from a receipt that failed verification is never surfaced (same rule as
-/// the Python `ReceiptResult`).
+/// explains why. `root`/`tree_size`/`leaf_index` are set only when `ok` is
+/// `true`: they come from the inclusion proof the signature verified under,
+/// and none is chosen when it verifies under none. (The Python
+/// `verify_receipt` keeps them on a signature failure, as of 0.4.2.) The
+/// protected-header claims (`iat`, `grade`) are likewise populated ONLY when
+/// `ok` is `true` -- a claim from a receipt that failed verification is never
+/// surfaced (same rule as the Python `ReceiptResult`).
 #[derive(Debug, Clone, Default)]
 pub struct ReceiptResult {
     pub ok: bool,
