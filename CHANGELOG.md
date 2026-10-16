@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-10-16
+
 ### Added
 
 - **Rust crate: the receipt verifier is published to crates.io as
