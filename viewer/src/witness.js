@@ -226,6 +226,9 @@ export async function verifyReceipt(entry, receiptBytes, leafIndex, treeSize, ke
     if (receiptBytes.length < 2 || receiptBytes[0] !== 0xd2) return false;
     const items = decode(receiptBytes.subarray(1), cborOptions);
     if (!Array.isArray(items) || items.length !== 4 || !(items[0] instanceof Uint8Array) || !(items[1] instanceof Map) || !(items[3] instanceof Uint8Array)) return false;
+    // A receipt's payload is detached: the signature must cover the root
+    // rebuilt below, so an attached payload is refused, never ignored.
+    if (items[2] !== null) return false;
     const headers = decode(items[0], cborOptions);
     if (!(headers instanceof Map) || headers.get(1) !== -8 || headers.get(395) !== 1) return false;
     const vdp = items[1].get(396);

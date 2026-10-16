@@ -62,6 +62,14 @@ ALG_NAME_TO_CODE = {
 }
 ALG_CODE_TO_NAME = {v: k for k, v in ALG_NAME_TO_CODE.items()}
 
+#: ECDSA code point -> (curve, hash, byte width of r and s). RFC 9053 §2.1
+#: binds each algorithm to one curve.
+_ECDSA = {
+    COSE_ALG_ES256: (ec.SECP256R1, hashes.SHA256, 32),
+    COSE_ALG_ES384: (ec.SECP384R1, hashes.SHA384, 48),
+}
+_CURVE_NAME = {ec.SECP256R1: "P-256", ec.SECP384R1: "P-384"}
+
 PemLike = Union[bytes, str]
 
 
@@ -107,7 +115,8 @@ def sign_sign1(
 ) -> bytes:
     """Produce a COSE_Sign1 message (CBOR tag-18) over ``payload``.
 
-    ``alg`` is ``"EdDSA"`` or ``"ES256"``; its code point is forced into
+    ``alg`` is ``"EdDSA"``, ``"ES256"`` or ``"ES384"``, and the key must match
+    it (Ed25519, P-256, P-384); its code point is forced into
     ``protected[1]`` regardless of any caller-supplied value, so the signed
     protected header always declares the algorithm actually used. Any other
     entries in ``protected`` / ``unprotected`` are passed through verbatim.
@@ -132,12 +141,13 @@ def sign_sign1(
         if not isinstance(key, ed25519.Ed25519PrivateKey):
             raise CoseError("alg EdDSA requires an Ed25519 private key")
         signature = key.sign(tbs)
-    else:  # ES256
-        if not isinstance(key, ec.EllipticCurvePrivateKey):
-            raise CoseError("alg ES256 requires an EC (P-256) private key")
-        der = key.sign(tbs, ec.ECDSA(hashes.SHA256()))
+    else:
+        curve, digest, width = _ECDSA[ALG_NAME_TO_CODE[alg]]
+        if not (isinstance(key, ec.EllipticCurvePrivateKey) and isinstance(key.curve, curve)):
+            raise CoseError(f"alg {alg} requires an EC ({_CURVE_NAME[curve]}) private key")
+        der = key.sign(tbs, ec.ECDSA(digest()))
         r, s = decode_dss_signature(der)
-        signature = r.to_bytes(32, "big") + s.to_bytes(32, "big")
+        signature = r.to_bytes(width, "big") + s.to_bytes(width, "big")
 
     payload_slot = None if detached else payload
     return cbor2.dumps(
@@ -362,28 +372,24 @@ def verify_sign1(
             if not isinstance(pubkey, ed25519.Ed25519PublicKey):
                 raise CoseError("alg is EdDSA (-8) but the public key is not Ed25519")
             pubkey.verify(signature, tbs)
-        elif alg == COSE_ALG_ES256:
+        elif alg in _ECDSA:
+            # RFC 9053 §2.1 fixes the curve with the algorithm: ES256 is
+            # ECDSA over P-256 and ES384 over P-384. A key on another curve
+            # is refused before the signature is checked.
+            curve, digest, width = _ECDSA[alg]
+            name = f"{ALG_CODE_TO_NAME[alg]} ({alg})"
             if not isinstance(pubkey, ec.EllipticCurvePublicKey):
-                raise CoseError("alg is ES256 (-7) but the public key is not EC")
-            if len(signature) != 64:
+                raise CoseError(f"alg is {name} but the public key is not EC")
+            if not isinstance(pubkey.curve, curve):
+                raise CoseError(f"alg is {name} but the public key is not {_CURVE_NAME[curve]}")
+            if len(signature) != 2 * width:
                 raise CoseError(
-                    f"ES256 COSE signature must be 64 raw bytes (r||s), got {len(signature)}"
+                    f"{ALG_CODE_TO_NAME[alg]} COSE signature must be {2 * width} raw bytes (r||s), got {len(signature)}"
                 )
-            r = int.from_bytes(signature[:32], "big")
-            s = int.from_bytes(signature[32:], "big")
+            r = int.from_bytes(signature[:width], "big")
+            s = int.from_bytes(signature[width:], "big")
             der = encode_dss_signature(r, s)
-            pubkey.verify(der, tbs, ec.ECDSA(hashes.SHA256()))
-        elif alg == COSE_ALG_ES384:
-            if not isinstance(pubkey, ec.EllipticCurvePublicKey):
-                raise CoseError("alg is ES384 (-35) but the public key is not EC")
-            if len(signature) != 96:
-                raise CoseError(
-                    f"ES384 COSE signature must be 96 raw bytes (r||s), got {len(signature)}"
-                )
-            r = int.from_bytes(signature[:48], "big")
-            s = int.from_bytes(signature[48:], "big")
-            der = encode_dss_signature(r, s)
-            pubkey.verify(der, tbs, ec.ECDSA(hashes.SHA384()))
+            pubkey.verify(der, tbs, ec.ECDSA(digest()))
         else:
             raise CoseError(f"unsupported alg code point {alg} for verification")
     except InvalidSignature as exc:

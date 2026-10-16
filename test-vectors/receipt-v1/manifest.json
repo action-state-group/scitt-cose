@@ -37,6 +37,31 @@
       "id": "synthetic-es256-iat-grade-observed-only",
       "dir": "receipt-v1/synthetic-es256-iat-grade-observed-only",
       "ok": true
+    },
+    {
+      "id": "fail-attached-payload",
+      "dir": "receipt-v1/fail-attached-payload",
+      "ok": false
+    },
+    {
+      "id": "fail-attached-payload-root",
+      "dir": "receipt-v1/fail-attached-payload-root",
+      "ok": false
+    },
+    {
+      "id": "fail-es256-secp256k1-key",
+      "dir": "receipt-v1/fail-es256-secp256k1-key",
+      "ok": false
+    },
+    {
+      "id": "fail-es384-p256-key",
+      "dir": "receipt-v1/fail-es384-p256-key",
+      "ok": false
+    },
+    {
+      "id": "fail-eddsa-p256-key",
+      "dir": "receipt-v1/fail-eddsa-p256-key",
+      "ok": false
     }
   ]
 }

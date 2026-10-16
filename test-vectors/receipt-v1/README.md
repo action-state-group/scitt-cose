@@ -41,6 +41,11 @@ to existing files.
 | `fail-tampered-iat` | false | — | — | false | false |
 | `fail-tampered-grade` | false | — | — | false | false |
 | `synthetic-es256-iat-grade-observed-only` | true | ✓ | ✓ | true | true |
+| `fail-attached-payload` | false | — | — | false | false |
+| `fail-attached-payload-root` | false | — | — | false | false |
+| `fail-es256-secp256k1-key` | false | — | — | false | false |
+| `fail-es384-p256-key` | false | — | — | false | false |
+| `fail-eddsa-p256-key` | false | — | — | false | false |
 
 `trace-sept7-witness` is not synthetic: it is the real COSE Receipt bytes
 from the Action State Group's live TRACE-registry witness, captured
@@ -62,11 +67,25 @@ merely carried alongside it. Both must fail signature verification; a
 verifier that reports either boolean `true` here has a real vulnerability
 (a value inside the signed header that isn't actually checked).
 
+The last five (appended, scitt-cose#87) each carry a valid inclusion proof
+and a signature that is genuine under `log-key.pub`, and must still fail:
+
+* `fail-attached-payload` attaches bytes other than the root and signs them.
+  A verifier that checks the signature over the attached payload binds
+  nothing to the leaf. `fail-attached-payload-root` attaches the root itself;
+  a verifier that ignores the payload slot accepts it. A Receipt's payload is
+  detached, so both fail with an error naming the payload as attached.
+* `fail-es256-secp256k1-key` (ES256 under secp256k1), `fail-es384-p256-key`
+  (ES384 under P-256, r and s padded to 48 bytes) and `fail-eddsa-p256-key`
+  (EdDSA with a P-256 key) break the alg/key pairing: RFC 9053 §2.1 binds
+  ES256 to P-256 and ES384 to P-384, and EdDSA here is Ed25519. A P-384 key
+  cannot stand in for the ES256 case, since its r and s do not fit 64 bytes.
+
 ## `expected.json` fields
 
 | field | meaning |
 |---|---|
-| `alg` | `EdDSA` or `ES256` |
+| `alg` | `EdDSA`, `ES256` or `ES384` |
 | `leaf_entry_hex` | hex of the leaf entry the receipt proves |
 | `tree_size`, `leaf_index` | position of the leaf and size of the log |
 | `ok` | must the receipt verify? |
@@ -79,8 +98,10 @@ verifier that reports either boolean `true` here has a real vulnerability
 ## Provenance
 
 Minted once by
-[`scripts/generate_receipt_grade_vectors.py`](../../scripts/generate_receipt_grade_vectors.py)
-(kept for documentation and future versions; it refuses to overwrite a
+[`scripts/generate_receipt_grade_vectors.py`](../../scripts/generate_receipt_grade_vectors.py),
+with appends by `scripts/append_receipt_v1_observed_only.py` and
+[`scripts/append_receipt_v1_strict_negatives.py`](../../scripts/append_receipt_v1_strict_negatives.py)
+(kept for documentation and future versions; each refuses to overwrite a
 published version). The expected values were self-checked at mint time
 against this repo's Python library and are cross-checked in CI against the
-Rust verifier (`rust/scitt-cose`).
+Rust verifier (`rust/scitt-cose`) and the Go verifier (`scitt-cose-go-verify`).

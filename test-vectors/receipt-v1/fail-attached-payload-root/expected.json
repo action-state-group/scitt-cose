@@ -1,0 +1,14 @@
+{
+  "description": "Payload slot carries the root itself, signed. A Receipt's payload is detached; must be rejected as attached even though the bytes match.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "attached"
+}

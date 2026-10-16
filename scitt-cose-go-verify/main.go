@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
@@ -172,7 +173,10 @@ func verifyStatement(out *result, statementPath, pubkeyPath, algName string) {
 		fail("decode COSE_Sign1: %v", err)
 	}
 
-	verifier := newVerifier(algName, pub)
+	verifier, err := newVerifier(algName, pub)
+	if err != nil {
+		fail("%v", err)
+	}
 	if verr := msg.Verify(nil, verifier); verr != nil {
 		// Nothing in an unverified protected header may be surfaced: the
 		// header-derived fields stay empty and the withholding is stated.
@@ -213,6 +217,14 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	var msg cose.Sign1Message
 	if err := msg.UnmarshalCBOR(data); err != nil {
 		r.Error = fmt.Sprintf("decode receipt COSE_Sign1: %v", err)
+		return r
+	}
+
+	// The signature must cover the root rebuilt from the leaf, which is set
+	// as the payload below. A Receipt's payload is detached; an attached one
+	// is refused rather than silently replaced.
+	if msg.Payload != nil {
+		r.Error = "receipt payload is attached; a receipt's payload must be detached"
 		return r
 	}
 
@@ -296,7 +308,11 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 			}
 			candidates = append(candidates, candidate{size, index, path})
 		}
-		verifier := newVerifier(algName, logPub)
+		verifier, err := newVerifier(algName, logPub)
+		if err != nil {
+			r.Error = err.Error()
+			return r
+		}
 		for _, proof := range candidates {
 			computed, ok := rootFromInclusionProof(leafBytes, proof.index, proof.size, proof.path)
 			if !ok {
@@ -333,7 +349,11 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 
 	// Verify the log's COSE_Sign1 over the reconstructed (detached) root.
 	msg.Payload = root
-	verifier := newVerifier(algName, logPub)
+	verifier, err := newVerifier(algName, logPub)
+	if err != nil {
+		r.Error = err.Error()
+		return r
+	}
 	if err := msg.Verify(nil, verifier); err != nil {
 		r.Error = fmt.Sprintf("receipt signature did not verify over reconstructed root: %v", err)
 		return r
@@ -583,32 +603,40 @@ func loadPublicKey(path string) any {
 	return pub
 }
 
-func newVerifier(algName string, pub any) cose.Verifier {
-	var coseAlg cose.Algorithm
+func newVerifier(algName string, pub any) (cose.Verifier, error) {
 	switch algName {
 	case "EdDSA":
-		coseAlg = cose.AlgorithmEdDSA
 		if _, ok := pub.(ed25519.PublicKey); !ok {
-			fail("alg EdDSA requires an ed25519 public key, got %T", pub)
+			return nil, fmt.Errorf("alg EdDSA requires an ed25519 public key, got %T", pub)
 		}
-	case "ES256":
-		coseAlg = cose.AlgorithmES256
-		if _, ok := pub.(*ecdsa.PublicKey); !ok {
-			fail("alg ES256 requires an *ecdsa.PublicKey, got %T", pub)
+		return newCoseVerifier(cose.AlgorithmEdDSA, pub)
+	case "ES256", "ES384":
+		// RFC 9053 §2.1 fixes the curve with the algorithm. go-cose checks
+		// only that the key is ECDSA, so the curve is checked here.
+		coseAlg, curve, code := cose.AlgorithmES256, elliptic.P256(), algES256
+		if algName == "ES384" {
+			coseAlg, curve, code = cose.AlgorithmES384, elliptic.P384(), algES384
 		}
-	case "ES384":
-		coseAlg = cose.AlgorithmES384
-		if _, ok := pub.(*ecdsa.PublicKey); !ok {
-			fail("alg ES384 requires an *ecdsa.PublicKey, got %T", pub)
+		key, ok := pub.(*ecdsa.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("alg %s requires an *ecdsa.PublicKey, got %T", algName, pub)
 		}
+		if key.Curve != curve {
+			return nil, fmt.Errorf("alg %s (%d) requires a %s public key, got %s",
+				algName, code, curve.Params().Name, key.Curve.Params().Name)
+		}
+		return newCoseVerifier(coseAlg, pub)
 	default:
-		fail("unknown alg %q (want EdDSA, ES256, or ES384)", algName)
+		return nil, fmt.Errorf("unknown alg %q (want EdDSA, ES256, or ES384)", algName)
 	}
-	verifier, err := cose.NewVerifier(coseAlg, pub)
+}
+
+func newCoseVerifier(alg cose.Algorithm, pub any) (cose.Verifier, error) {
+	verifier, err := cose.NewVerifier(alg, pub)
 	if err != nil {
-		fail("new verifier: %v", err)
+		return nil, fmt.Errorf("new verifier: %w", err)
 	}
-	return verifier
+	return verifier, nil
 }
 
 func algNameFromCode(code int64) (string, error) {

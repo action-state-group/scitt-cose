@@ -21,6 +21,30 @@ All notable changes to this project will be documented in this file.
 
   The `verify_receipt` signature and the `ReceiptResult` fields are unchanged.
 
+### Fixed
+
+- **`verify_receipt` rejects a receipt with an attached payload** (#87). A
+  Receipt's payload is the Merkle root, detached; the verifier rebuilds it from
+  the leaf and the proof. An attached payload was verified as given, so a
+  receipt whose log key signed any bytes, with any proof that rebuilt a root,
+  verified for the leaf. It now fails with `receipt payload is attached`, even
+  when the attached bytes equal the root. `build_receipt(detached=False)` now
+  raises `CoseError`. The Go verifier, which replaced an attached payload with
+  the rebuilt root, and the bundle page's witness check, which ignored it,
+  reject it too; the Rust crate already did.
+- **ES256 and ES384 signatures must be under a key on their curve** (#87).
+  `verify_sign1`, and so `verify_receipt` and `parse_signed_statement`,
+  accepted an ES256 signature under any EC key (secp256k1, for one) and an
+  ES384 signature under a P-256 key. RFC 9053 §2.1 fixes the curve: ES256 needs
+  P-256 and ES384 needs P-384. `sign_sign1` refuses the same mismatches, and
+  `alg="ES384"` now signs with SHA-384 and a 96-byte signature (it produced a
+  signature no verifier accepts). The Go verifier checks the curve too; the
+  Rust crate already did.
+- New `receipt-v1` negative vectors pin both rules in every implementation:
+  `fail-attached-payload`, `fail-attached-payload-root`,
+  `fail-es256-secp256k1-key`, `fail-es384-p256-key` and `fail-eddsa-p256-key`.
+  The Go runner now reads `receipt-v1` as well.
+
 ## [0.4.2] — 2026-10-14
 
 ### Fixed

@@ -200,6 +200,34 @@ fn receipt_v1_tampered_grade_fails_signature() {
     assert_matches("fail-tampered-grade");
 }
 
+// Attached payloads and alg/key pairings (scitt-cose#87). Each receipt has a
+// valid proof and a genuine signature under its log key, and must still fail.
+
+#[test]
+fn receipt_v1_attached_payload_rejected() {
+    assert_matches("fail-attached-payload");
+}
+
+#[test]
+fn receipt_v1_attached_root_payload_rejected() {
+    assert_matches("fail-attached-payload-root");
+}
+
+#[test]
+fn receipt_v1_es256_under_secp256k1_rejected() {
+    assert_matches("fail-es256-secp256k1-key");
+}
+
+#[test]
+fn receipt_v1_es384_under_p256_rejected() {
+    assert_matches("fail-es384-p256-key");
+}
+
+#[test]
+fn receipt_v1_eddsa_under_p256_rejected() {
+    assert_matches("fail-eddsa-p256-key");
+}
+
 // --- header claims are never surfaced from a receipt whose signature fails --
 // Grade-forgery class, mirroring the Python tests: a receipt carrying grade
 // "mmr-verified" that does not verify under the pinned key must expose no

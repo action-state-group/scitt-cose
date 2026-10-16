@@ -28,11 +28,14 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import cbor2
 import pytest
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from hosted_profiles.hosted import _PUBLISHED_WITNESS_LIST, BUNDLE_JS, MMR_JS, WITNESS_LIST_JS
+from scitt_cose import merkle
 from scitt_cose.receipt import build_receipt, verify_receipt
 
 HERE = Path(__file__).parent
@@ -305,6 +308,46 @@ def test_a_receipt_for_another_checkpoint_fails(js_paths):
     checked, _ = check(js_paths, b, load("direct-witnesses.json"))
     assert checked["receipts"][0]["status"] == "fail"
     assert "different checkpoint" in checked["receipts"][0]["reason"]
+
+
+def test_a_receipt_with_an_attached_payload_fails(js_paths):
+    # The payload slot carries the root itself, so the signature verifies over
+    # the rebuilt root; a Receipt's payload is detached, so it still fails.
+    b = load("direct.json")
+    w = b["checkpoint"]["witnesses"][0]
+    receipt, raw, _ = _larger_log_receipt(w["entry_hash"])
+    tag = cbor2.loads(receipt)
+    protected, unprotected, _, signature = tag.value
+    proof = cbor2.loads(unprotected[396][-1][0])
+    root = merkle.root_from_inclusion_proof(w["entry_hash"], 4, 7, [p.hex() for p in proof[2]])
+    attached = cbor2.dumps(cbor2.CBORTag(18, [protected, unprotected, bytes.fromhex(root), signature]))
+    lst = {"witnesses": [{"name": "w", "endpoint": w["ts_url"], "key_ids": [raw.hex()]}]}
+    w.update(receipt_b64=base64.b64encode(receipt).decode(), leaf_index=4, tree_size=7)
+    checked, _ = check(js_paths, copy.deepcopy(b), lst)
+    assert checked["receipts"][0]["status"] == "pass", checked
+    w["receipt_b64"] = base64.b64encode(attached).decode()
+    checked, _ = check(js_paths, b, lst)
+    assert checked["receipts"][0]["status"] == "fail", checked
+
+
+def test_an_es256_receipt_never_passes(js_paths):
+    # The page checks EdDSA receipts under Ed25519 keys only. A list row's
+    # P-256 key is not one it loads, and the 64-hex key id it then reads as a
+    # raw Ed25519 key cannot verify an ES256 receipt, so the receipt fails.
+    b = load("direct.json")
+    w = b["checkpoint"]["witnesses"][0]
+    key = ec.generate_private_key(ec.SECP256R1())
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    der = key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    entries = [hashlib.sha256(bytes([i])).hexdigest() for i in range(7)]
+    entries[4] = w["entry_hash"]
+    receipt = build_receipt(leaf_entry_hex=w["entry_hash"], leaf_index=4, tree_entries_hex=entries,
+                            alg="ES256", log_private_key_pem=pem)
+    w.update(receipt_b64=base64.b64encode(receipt).decode(), leaf_index=4, tree_size=7)
+    row = {"name": "w", "endpoint": w["ts_url"], "public_keys": [base64.b64encode(der).decode()],
+           "key_ids": [hashlib.sha256(der).hexdigest()]}
+    checked, _ = check(js_paths, b, {"witnesses": [row]})
+    assert checked["receipts"][0]["status"] == "fail", checked
 
 
 # ---------------------------------------------------------------------------

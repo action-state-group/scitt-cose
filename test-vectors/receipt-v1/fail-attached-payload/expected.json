@@ -1,0 +1,14 @@
+{
+  "description": "Payload slot carries bytes other than the root, signed by the log key. The signature binds nothing to the proven leaf; must be rejected as attached.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "attached"
+}

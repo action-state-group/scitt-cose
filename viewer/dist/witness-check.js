@@ -1928,6 +1928,8 @@
       const items = decode(receiptBytes.subarray(1), cborOptions);
       if (!Array.isArray(items) || items.length !== 4 || !(items[0] instanceof Uint8Array) || !(items[1] instanceof Map) || !(items[3] instanceof Uint8Array))
         return false;
+      if (items[2] !== null)
+        return false;
       const headers = decode(items[0], cborOptions);
       if (!(headers instanceof Map) || headers.get(1) !== -8 || headers.get(395) !== 1)
         return false;
