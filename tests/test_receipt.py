@@ -9,7 +9,7 @@ import cbor2
 import pytest
 
 from scitt_cose import merkle
-from scitt_cose.cose_sign1 import CoseError
+from scitt_cose.cose_sign1 import CoseError, sign_sign1
 from scitt_cose.receipt import (
     CWT_CLAIM_IAT,
     CWT_CLAIM_ISS,
@@ -44,19 +44,37 @@ def test_build_verify_detached(alg_keys):
     assert res.leaf_index == 4
 
 
-def test_build_verify_attached(alg_keys):
+def test_build_refuses_an_attached_payload(alg_keys):
+    alg, priv, _pub = alg_keys
+    es = _entries(5)
+    with pytest.raises(CoseError, match="must be detached"):
+        build_receipt(
+            leaf_entry_hex=es[2], leaf_index=2, tree_entries_hex=es,
+            alg=alg, log_private_key_pem=priv, detached=False,
+        )
+
+
+@pytest.mark.parametrize("attached", ["root", "other"])
+def test_verify_rejects_an_attached_payload(alg_keys, attached):
+    """An attached payload is refused whether or not it equals the rebuilt
+    root: COSE verifies attached bytes as given, so they bind nothing."""
     alg, priv, pub = alg_keys
     es = _entries(5)
-    idx = 2
-    receipt = build_receipt(
-        leaf_entry_hex=es[idx], leaf_index=idx, tree_entries_hex=es,
-        alg=alg, log_private_key_pem=priv, detached=False,
+    detached = build_receipt(
+        leaf_entry_hex=es[2], leaf_index=2, tree_entries_hex=es,
+        alg=alg, log_private_key_pem=priv,
     )
-    # payload slot must carry the root bytes
-    payload = cbor2.loads(receipt).value[2]
-    assert payload == bytes.fromhex(merkle.merkle_root(es))
-    res = verify_receipt(receipt, leaf_entry_hex=es[idx], log_public_key_pem=pub)
-    assert res.ok, res.errors
+    protected_bstr, unprotected, _, _ = cbor2.loads(detached).value
+    payload = bytes.fromhex(merkle.merkle_root(es)) if attached == "root" else b"anything"
+    receipt = sign_sign1(
+        payload, alg=alg, private_key_pem=priv,
+        protected={k: v for k, v in cbor2.loads(protected_bstr).items() if k != 1},
+        unprotected=dict(unprotected),
+    )
+    res = verify_receipt(receipt, leaf_entry_hex=es[2], log_public_key_pem=pub)
+    assert not res.ok
+    assert any("attached" in e for e in res.errors), res.errors
+    assert res.root is None
 
 
 def test_vds_in_protected_and_vdp_shape(eddsa_keys):

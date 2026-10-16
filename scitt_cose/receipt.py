@@ -16,8 +16,9 @@ Encoding (RFC 9942 COSE Receipts; unchanged from draft-ietf-cose-merkle-tree-pro
 * unprotected header:
     * label ``396`` = verifiable-data-proofs (vdp) map; key ``-1``
       ("inclusion proofs") -> array of inclusion-proof bstrs
-* payload = the Merkle root bytes (detached by default; supplied by the verifier
-  out of band, or attached)
+* payload = the Merkle root bytes, always detached (``nil``): the verifier
+  rebuilds the root from the leaf and the proof. A receipt that carries an
+  attached payload is rejected, since nothing ties those bytes to the leaf.
 
 Each inclusion-proof bstr is ``cbor([tree_size, leaf_index, [audit_path bstrs]])``.
 
@@ -312,8 +313,9 @@ def build_receipt(
 
     Computes the root and the inclusion proof over ``tree_entries_hex`` for the
     entry at ``leaf_index`` (which must equal ``leaf_entry_hex``), then signs a
-    COSE_Sign1 over the root with the log key. By default the payload (the root)
-    is detached.
+    COSE_Sign1 over the root with the log key. The payload (the root) is
+    detached; ``detached=False`` raises :class:`CoseError`, because
+    :func:`verify_receipt` rejects an attached payload.
 
     ``iss``/``sub``/``kid`` are ADDITIVE and OPTIONAL (``None`` omits each) --
     a call passing none of them produces the exact pre-existing wire shape,
@@ -346,6 +348,8 @@ def build_receipt(
         raise CoseError(f"leaf_index {leaf_index} out of range for {len(tree_entries_hex)} entries")
     if tree_entries_hex[leaf_index] != leaf_entry_hex:
         raise CoseError("leaf_entry_hex does not match tree_entries_hex[leaf_index]")
+    if not detached:
+        raise CoseError("a receipt's payload must be detached")
 
     root_hex = merkle.merkle_root(tree_entries_hex)
     audit_path = merkle.inclusion_proof(tree_entries_hex, leaf_index)
@@ -373,7 +377,7 @@ def build_receipt(
         private_key_pem=log_private_key_pem,
         protected=protected,
         unprotected=unprotected,
-        detached=detached,
+        detached=True,
     )
 
 
@@ -412,7 +416,13 @@ def verify_receipt(
         result.errors.append("receipt is not a COSE_Sign1 message")
         return result
 
-    protected_bstr, unprotected, _payload_slot, _signature = outer.value
+    protected_bstr, unprotected, payload_slot, _signature = outer.value
+    # The signature must cover the root rebuilt from the leaf. COSE verifies an
+    # attached payload as given, so one would bind nothing to the leaf; a
+    # Receipt's payload is detached, and anything else is refused.
+    if payload_slot is not None:
+        result.errors.append("receipt payload is attached; a receipt's payload must be detached")
+        return result
     unprotected = _plain(unprotected)
     try:
         protected = _plain(cbor2.loads(protected_bstr)) if protected_bstr else {}

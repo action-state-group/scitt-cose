@@ -1,0 +1,14 @@
+{
+  "description": "alg EdDSA (-8) with a P-256 log key. EdDSA here is Ed25519; must be rejected.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "public key"
+}

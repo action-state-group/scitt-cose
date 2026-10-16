@@ -1,0 +1,14 @@
+{
+  "description": "alg ES256 (-7) with a genuine signature under a secp256k1 log key. ES256 is ECDSA over P-256 (RFC 9053 \u00a72.1); must be rejected.",
+  "alg": "ES256",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "public key"
+}

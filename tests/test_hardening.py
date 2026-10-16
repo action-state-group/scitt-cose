@@ -108,7 +108,7 @@ def test_h1_giant_int_inclusion_proof_no_alloc(good_receipt, eddsa_keys):
     # A tiny receipt declaring an ~8 GB inclusion-proof element. Must be rejected
     # without ever calling bytes() on the integer.
     mutant = cbor2.dumps(cbor2.CBORTag(18, [
-        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: [8_000_000_000]}}, b"x" * 32, b"s",
+        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: [8_000_000_000]}}, None, b"s",
     ]))
     res = verify_receipt(mutant, leaf_entry_hex="78" * 32, log_public_key_pem=pub)
     assert res.ok is False
@@ -120,7 +120,7 @@ def test_h1_too_many_inclusion_proofs_rejected(good_receipt, eddsa_keys):
     protected = cbor2.dumps({HDR_ALG: -8, HDR_VDS: 1})
     proofs = [cbor2.dumps([8, 2, []])] * 64
     mutant = cbor2.dumps(cbor2.CBORTag(18, [
-        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: proofs}}, b"x" * 32, b"s",
+        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: proofs}}, None, b"s",
     ]))
     res = verify_receipt(mutant, leaf_entry_hex="78" * 32, log_public_key_pem=pub)
     assert res.ok is False
@@ -155,7 +155,7 @@ def test_h3_huge_tree_size_receipt_returns_cleanly(good_receipt, eddsa_keys):
     protected = cbor2.dumps({HDR_ALG: -8, HDR_VDS: 1})
     proof = cbor2.dumps([1 << 100, 0, [b"\x00" * 32]])  # tree_size > ceiling
     mutant = cbor2.dumps(cbor2.CBORTag(18, [
-        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: [proof]}}, b"x" * 32, b"s",
+        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: [proof]}}, None, b"s",
     ]))
     # Must return a ReceiptResult (never raise), ok=False.
     res = verify_receipt(mutant, leaf_entry_hex="00" * 32, log_public_key_pem=pub)
@@ -182,7 +182,7 @@ def test_m6_verify_receipt_never_raises(good_receipt, signed_statement, eddsa_ke
     # Inclusion proof that is not valid CBOR inside an otherwise-shaped receipt.
     protected = cbor2.dumps({HDR_ALG: -8, HDR_VDS: 1})
     mutant = cbor2.dumps(cbor2.CBORTag(18, [
-        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: [b"\x9f\x9f"]}}, b"x" * 32, b"s",
+        protected, {HDR_VDP: {VDP_INCLUSION_PROOFS: [b"\x9f\x9f"]}}, None, b"s",
     ]))
     assert verify_receipt(mutant, leaf_entry_hex="00" * 32, log_public_key_pem=pub).ok is False
 

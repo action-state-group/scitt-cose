@@ -1,0 +1,14 @@
+{
+  "description": "alg ES384 (-35) with a genuine SHA-384 signature under a P-256 log key, r and s padded to 48 bytes. ES384 is ECDSA over P-384; must be rejected.",
+  "alg": "ES384",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "-35"
+}
