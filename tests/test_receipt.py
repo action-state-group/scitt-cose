@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""COSE Receipt build/verify (detached + attached) and negatives."""
+"""COSE Receipt build/verify (detached only; attached rejected) and negatives."""
 from __future__ import annotations
 
 import json

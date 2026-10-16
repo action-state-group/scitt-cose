@@ -263,7 +263,8 @@ from draft-ietf-cose-merkle-tree-proofs-18, which this library was first built a
 - protected `1` = alg, protected `395` = vds (`1` = `RFC9162_SHA256`);
 - unprotected `396` = vdp map with key `-1` → array of inclusion-proof bstrs;
 - each inclusion-proof bstr = `cbor([tree_size, leaf_index, [audit_path bstrs]])`;
-- payload = the Merkle root (detached by default).
+- payload = the Merkle root, always detached; `verify_receipt` rejects a receipt
+  with an attached payload.
 
 `verify_receipt` reads **vds from the protected header only** (it is
 security-relevant and must be integrity-protected), reconstructs the root from
