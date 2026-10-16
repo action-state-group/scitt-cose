@@ -4,12 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-10-16
+
 ### Added
 
 - **Rust crate: the receipt verifier is published to crates.io as
   `scitt-cose-receipt` 0.1.1** (`rust/scitt-cose`). Depend on it by version
-  instead of a git pin. The Python package's version does not change. Against
-  the `rust-scitt-cose-v0.1.0` tag (never published), 0.1.1:
+  instead of a git pin. The crate is versioned and released apart from the
+  Python package. Against the `rust-scitt-cose-v0.1.0` tag (never
+  published), 0.1.1:
   - withholds `iat` and the grade when the receipt's signature fails (#53);
   - checks the shape of every inclusion proof a receipt carries, rejecting
     the receipt when any proof has trailing CBOR or an impossible tree size,
