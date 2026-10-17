@@ -54,7 +54,7 @@ from .statement import (
 # reports a PEP 440 local version rather than a guessed release.
 try:
     __version__ = _distribution_version("scitt-cose")
-except PackageNotFoundError:  # pragma: no cover - only without an install
+except PackageNotFoundError:
     __version__ = "0+unknown"
 
 __all__ = [

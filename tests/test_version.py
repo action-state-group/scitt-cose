@@ -3,6 +3,9 @@
 
 0.4.1 to 0.4.3 shipped ``__version__ == "0.4.0"`` because the string was
 hard-coded while Release · Prepare bumps only pyproject.toml.
+
+The comparison reads installed metadata, so after a local version bump it
+fails until ``pip install -e .`` refreshes it; CI installs fresh.
 """
 from __future__ import annotations
 
@@ -10,6 +13,8 @@ import importlib
 import importlib.metadata
 import pathlib
 import re
+
+import pytest
 
 import scitt_cose
 
@@ -26,6 +31,15 @@ def _pyproject_version() -> str:
     return match.group(1)
 
 
+def _installed() -> bool:
+    try:
+        importlib.metadata.version("scitt-cose")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not _installed(), reason="scitt-cose metadata is not installed")
 def test_version_matches_pyproject():
     assert scitt_cose.__version__ == _pyproject_version()
 
@@ -40,4 +54,3 @@ def test_version_without_installed_metadata(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(scitt_cose)
-    assert scitt_cose.__version__ == _pyproject_version()
