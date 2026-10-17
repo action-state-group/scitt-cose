@@ -19,8 +19,7 @@ claimed anywhere (test-enforced).
 """
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _distribution_version
+import importlib.metadata as _metadata
 
 from . import cll
 from ._status import (
@@ -53,8 +52,8 @@ from .statement import (
 # a stale hard-coded string). A bare source tree with no installed metadata
 # reports a PEP 440 local version rather than a guessed release.
 try:
-    __version__ = _distribution_version("scitt-cose")
-except PackageNotFoundError:
+    __version__ = _metadata.version("scitt-cose")
+except _metadata.PackageNotFoundError:
     __version__ = "0+unknown"
 
 __all__ = [
