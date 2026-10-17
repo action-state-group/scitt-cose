@@ -19,6 +19,8 @@ claimed anywhere (test-enforced).
 """
 from __future__ import annotations
 
+import importlib.metadata as _metadata
+
 from . import cll
 from ._status import (
     DRAFT_COSE_MERKLE_TREE_PROOFS,
@@ -45,7 +47,14 @@ from .statement import (
     parse_signed_statement,
 )
 
-__version__ = "0.4.0"
+# Read from the installed distribution so it cannot drift from the
+# pyproject.toml version that Release · Prepare bumps (0.4.1 to 0.4.3 shipped
+# a stale hard-coded string). A bare source tree with no installed metadata
+# reports a PEP 440 local version rather than a guessed release.
+try:
+    __version__ = _metadata.version("scitt-cose")
+except _metadata.PackageNotFoundError:
+    __version__ = "0+unknown"
 
 __all__ = [
     # version + status

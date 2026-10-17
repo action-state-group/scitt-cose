@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`scitt_cose.__version__` reports the installed release.** It is now read
+  from the distribution metadata instead of a hard-coded string, which had
+  left 0.4.1, 0.4.2 and 0.4.3 reporting `0.4.0`. Without installed metadata
+  (a bare source tree) it is `0+unknown`.
+
 ## [0.4.3] — 2026-10-16
 
 ### Added
