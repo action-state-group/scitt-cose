@@ -21,8 +21,9 @@ All notable changes to this project will be documented in this file.
   true, so its next release should be 0.2.0. The Rust verifier now refuses an
   attached payload before reading any proof, so that case still reports
   nothing. New `receipt-v1` vectors `fail-wrong-log-key`,
-  `fail-unsupported-alg` and `fail-malformed-proof` pin the shape in every
-  implementation, through a new `returned` field in `expected.json`. Known
+  `fail-unsupported-alg`, `fail-malformed-proof` and
+  `fail-malformed-tail-proof` (a valid proof followed by a malformed one,
+  which reports nothing) pin the shape in every implementation, through a new `returned` field in `expected.json`. Known
   gaps: a key Go cannot load at all (secp256k1) ends its run before any
   result exists, and Rust and Go reject a non-integer alg or (not processing
   `crit`) never fail on an unknown critical label, both of which Python

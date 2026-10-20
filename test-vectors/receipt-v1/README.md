@@ -49,6 +49,7 @@ to existing files.
 | `fail-wrong-log-key` | false | — | — | false | false |
 | `fail-unsupported-alg` | false | — | — | false | false |
 | `fail-malformed-proof` | false | — | — | false | false |
+| `fail-malformed-tail-proof` | false | — | — | false | false |
 
 `trace-sept7-witness` is not synthetic: it is the real COSE Receipt bytes
 from the Action State Group's live TRACE-registry witness, captured
@@ -84,7 +85,7 @@ and a signature that is genuine under `log-key.pub`, and must still fail:
   ES256 to P-256 and ES384 to P-384, and EdDSA here is Ed25519. A P-384 key
   cannot stand in for the ES256 case, since its r and s do not fit 64 bytes.
 
-The last three (appended, scitt-cose#91) pin what a failed verify reports for
+The last four (appended, scitt-cose#91) pin what a failed verify reports for
 `root`, `tree_size` and `leaf_index`, in their `returned` field:
 
 * `fail-wrong-log-key` (signed by a key other than `log-key.pub`) and
@@ -99,6 +100,10 @@ The last three (appended, scitt-cose#91) pin what a failed verify reports for
   all, so on `fail-es256-secp256k1-key` it reports nothing.
 * `fail-malformed-proof` (a leaf index outside its tree) fails before the
   signature step, so nothing is reported.
+* `fail-malformed-tail-proof` is a genuine receipt whose valid proof is
+  followed by a malformed one, `[0, 0, []]`. Every proof is checked before any
+  is used, so it also fails before the signature step and reports nothing,
+  although its first proof would rebuild a root.
 
 ## `expected.json` fields
 

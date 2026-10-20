@@ -77,6 +77,11 @@
       "id": "fail-malformed-proof",
       "dir": "receipt-v1/fail-malformed-proof",
       "ok": false
+    },
+    {
+      "id": "fail-malformed-tail-proof",
+      "dir": "receipt-v1/fail-malformed-tail-proof",
+      "ok": false
     }
   ]
 }

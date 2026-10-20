@@ -274,6 +274,13 @@ fn receipt_v1_malformed_proof_reports_nothing() {
 }
 
 #[test]
+fn receipt_v1_malformed_tail_proof_reports_nothing() {
+    // A valid first proof does not make a malformed later one a signature-step
+    // failure: every proof is checked first, so no diagnostic is reported.
+    assert_matches("fail-malformed-tail-proof");
+}
+
+#[test]
 fn receipt_v1_attached_payload_reports_nothing() {
     // The attached-payload check runs before any proof is read.
     for id in ["fail-attached-payload", "fail-attached-payload-root"] {
