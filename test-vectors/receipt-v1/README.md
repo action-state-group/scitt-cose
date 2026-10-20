@@ -124,8 +124,10 @@ The last four (appended, scitt-cose#91) pin what a failed verify reports for
 
 Minted once by
 [`scripts/generate_receipt_grade_vectors.py`](../../scripts/generate_receipt_grade_vectors.py),
-with appends by `scripts/append_receipt_v1_observed_only.py` and
-[`scripts/append_receipt_v1_strict_negatives.py`](../../scripts/append_receipt_v1_strict_negatives.py)
+with appends by `scripts/append_receipt_v1_observed_only.py`,
+[`scripts/append_receipt_v1_strict_negatives.py`](../../scripts/append_receipt_v1_strict_negatives.py),
+[`scripts/append_receipt_v1_failure_shape.py`](../../scripts/append_receipt_v1_failure_shape.py) and
+[`scripts/append_receipt_v1_malformed_tail.py`](../../scripts/append_receipt_v1_malformed_tail.py)
 (kept for documentation and future versions; each refuses to overwrite a
 published version). The expected values were self-checked at mint time
 against this repo's Python library and are cross-checked in CI against the
