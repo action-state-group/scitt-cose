@@ -62,6 +62,21 @@
       "id": "fail-eddsa-p256-key",
       "dir": "receipt-v1/fail-eddsa-p256-key",
       "ok": false
+    },
+    {
+      "id": "fail-wrong-log-key",
+      "dir": "receipt-v1/fail-wrong-log-key",
+      "ok": false
+    },
+    {
+      "id": "fail-unsupported-alg",
+      "dir": "receipt-v1/fail-unsupported-alg",
+      "ok": false
+    },
+    {
+      "id": "fail-malformed-proof",
+      "dir": "receipt-v1/fail-malformed-proof",
+      "ok": false
     }
   ]
 }

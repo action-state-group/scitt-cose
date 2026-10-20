@@ -87,4 +87,36 @@ func TestMalformedProofAfterValidCandidate(t *testing.T) {
 	if result.Ok || !strings.Contains(result.Error, "invalid tree size or leaf index") {
 		t.Fatalf("malformed tail accepted: %+v", result)
 	}
+	if result.Root != "" {
+		t.Fatalf("malformed tail reported a root: %+v", result)
+	}
+}
+
+// TestWrongKeyReportsFirstProofInEitherOrder: with no proof verifying, the
+// diagnostic is the first proof that rebuilds a root, whichever order the
+// proofs come in (scitt-cose#91).
+func TestWrongKeyReportsFirstProofInEitherOrder(t *testing.T) {
+	dir := filepath.Join(vectorsRoot, "v1", "valid-eddsa-multi-proof")
+	data, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exp expected
+	if err := json.Unmarshal(data, &exp); err != nil {
+		t.Fatal(err)
+	}
+	wrong := filepath.Join(vectorsRoot, "receipt-v1", "fail-wrong-log-key", "log-key.pub")
+	cases := []struct {
+		name, root string
+		index      int64
+	}{
+		{"receipt.cose", "188f4dc7ce35a72f065bcfa3f8387889ae06a2a84c8eb5e04b92cd6849d819f1", 1},
+		{"receipt-reordered.cose", exp.ReconstructedRoot, 2},
+	}
+	for _, c := range cases {
+		result := verifyReceipt(filepath.Join(dir, c.name), wrong, exp.LeafEntry)
+		if result.Ok || result.Root != c.root || result.TreeSize != 8 || result.LeafIndex != c.index {
+			t.Errorf("%s: %+v, expected root %s at 8/%d", c.name, result, c.root, c.index)
+		}
+	}
 }

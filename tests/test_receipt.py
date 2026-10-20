@@ -627,6 +627,10 @@ def test_frozen_receipt_v1_vectors_unchanged(vid):
     assert r.protected_header_ext.get(HDR_GRADE) == exp["grade"]
     if exp["ok"]:
         assert r.root == exp["root"]
+    if "returned" in exp:
+        assert {"root": r.root, "tree_size": r.tree_size, "leaf_index": r.leaf_index} == exp["returned"]
+    if not exp["ok"]:
+        assert any(exp["failure_contains"] in e for e in r.errors), r.errors
 
 
 def test_donated_multi_proof_orders_and_malformed_tail():
@@ -645,6 +649,25 @@ def test_donated_multi_proof_orders_and_malformed_tail():
     malformed = cbor2.dumps(cbor2.CBORTag(18, [protected, {396: {-1: proofs}}, payload, signature]))
     result = verify_receipt(malformed, leaf_entry_hex=expected["leaf_entry"], log_public_key_pem=key)
     assert result.errors == ["invalid tree size or leaf index"]
+    assert result.root is None
+
+
+def test_wrong_key_reports_the_first_proof_in_either_order():
+    """scitt-cose#91: with no proof verifying, the diagnostic is the first proof
+    that rebuilds a root, whichever order the proofs come in."""
+    directory = Path(__file__).parents[1] / "test-vectors/v1/valid-eddsa-multi-proof"
+    expected = json.loads((directory / "expected.json").read_text())
+    wrong = (_RECEIPT_V1 / "fail-wrong-log-key" / "log-key.pub").read_bytes()
+    decoy_root = "188f4dc7ce35a72f065bcfa3f8387889ae06a2a84c8eb5e04b92cd6849d819f1"
+    for name, root, index in (
+        ("receipt.cose", decoy_root, 1),
+        ("receipt-reordered.cose", expected["reconstructed_root"], 2),
+    ):
+        result = verify_receipt(
+            (directory / name).read_bytes(), leaf_entry_hex=expected["leaf_entry"], log_public_key_pem=wrong
+        )
+        assert not result.ok
+        assert (result.root, result.tree_size, result.leaf_index) == (root, 8, index), name
 
 
 def test_inclusion_proof_rejects_trailing_cbor():

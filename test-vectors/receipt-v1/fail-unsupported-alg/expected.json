@@ -1,0 +1,19 @@
+{
+  "description": "Well-formed receipt whose protected alg is ES512 (-36), which no verifier here supports. Fails in the signature step; the first proof's values are reported.",
+  "alg": "ES512",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "unsupported alg code point",
+  "returned": {
+    "root": "9bcd51240af4005168f033121ba85be5a6ed4f0e6a5fac262066729b8fbfdecb",
+    "tree_size": 4,
+    "leaf_index": 1
+  }
+}

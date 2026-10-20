@@ -11,8 +11,9 @@ import (
 
 // TestVectorsReceiptV1 runs the receipt-only vectors in ../test-vectors/receipt-v1
 // through the CLI binary, as the Python and Rust runners do. This verifier
-// surfaces no iat or grade, so only the verdict, the root and, on a failure,
-// the named error are compared.
+// surfaces no iat or grade, so only the verdict, the root, the reported
+// root/tree_size/leaf_index where a vector pins them and, on a failure, the
+// named error are compared.
 func TestVectorsReceiptV1(t *testing.T) {
 	root := filepath.Join(vectorsRoot, "receipt-v1")
 	raw, err := os.ReadFile(filepath.Join(root, "manifest.json"))
@@ -45,6 +46,13 @@ func TestVectorsReceiptV1(t *testing.T) {
 				Ok              bool    `json:"ok"`
 				Root            *string `json:"root"`
 				FailureContains string  `json:"failure_contains"`
+				// Returned pins what is reported on vectors that carry it
+				// (scitt-cose#91); older vectors leave it out.
+				Returned *struct {
+					Root      *string `json:"root"`
+					TreeSize  *int64  `json:"tree_size"`
+					LeafIndex *int64  `json:"leaf_index"`
+				} `json:"returned"`
 			}
 			if err := json.Unmarshal(rawExp, &exp); err != nil {
 				t.Fatalf("parse expected.json: %v", err)
@@ -67,6 +75,28 @@ func TestVectorsReceiptV1(t *testing.T) {
 			if ok != exp.Ok {
 				t.Fatalf("ok=%v (%s), expected %v (a negative vector that verifies is a FAIL)", ok, errText, exp.Ok)
 			}
+			if ret := exp.Returned; ret != nil {
+				// Go's coordinates are non-nullable: absent is an empty root
+				// and zero coordinates.
+				wantRoot, wantSize, wantIndex := "", int64(0), int64(0)
+				if ret.Root != nil {
+					wantRoot = *ret.Root
+				}
+				if ret.TreeSize != nil {
+					wantSize = *ret.TreeSize
+				}
+				if ret.LeafIndex != nil {
+					wantIndex = *ret.LeafIndex
+				}
+				if out.Receipt == nil {
+					t.Fatalf("no receipt sub-result to compare returned against")
+				}
+				got := out.Receipt
+				if got.Root != wantRoot || got.TreeSize != wantSize || got.LeafIndex != wantIndex {
+					t.Errorf("returned root/tree_size/leaf_index %q/%d/%d, expected %q/%d/%d",
+						got.Root, got.TreeSize, got.LeafIndex, wantRoot, wantSize, wantIndex)
+				}
+			}
 			if exp.Ok {
 				if exp.Root == nil || out.Receipt.Root != *exp.Root {
 					t.Errorf("root %s != expected %v", out.Receipt.Root, exp.Root)
@@ -75,5 +105,38 @@ func TestVectorsReceiptV1(t *testing.T) {
 				t.Errorf("error %q does not contain %q", errText, exp.FailureContains)
 			}
 		})
+	}
+}
+
+// TestAlgKeyMismatchReportsDiagnostic: an alg/key mismatch fails in the
+// signature step, so the first proof's root and coordinates stay as a
+// diagnostic, as in the Python and Rust verifiers (scitt-cose#91). The
+// secp256k1 vector is left out: Go cannot load that key at all.
+func TestAlgKeyMismatchReportsDiagnostic(t *testing.T) {
+	root := filepath.Join(vectorsRoot, "receipt-v1")
+	rawGood, err := os.ReadFile(filepath.Join(root, "synthetic-eddsa-iat-only", "expected.json"))
+	if err != nil {
+		t.Fatalf("read expected.json: %v", err)
+	}
+	var good struct {
+		Root string `json:"root"`
+	}
+	if err := json.Unmarshal(rawGood, &good); err != nil {
+		t.Fatalf("parse expected.json: %v", err)
+	}
+	for _, id := range []string{"fail-es384-p256-key", "fail-eddsa-p256-key"} {
+		dir := filepath.Join(root, id)
+		out := runBinary(t,
+			"--receipt", filepath.Join(dir, "receipt.cose"),
+			"--log-pubkey", filepath.Join(dir, "log-key.pub"),
+			"--leaf-entry-hex", "01",
+		)
+		r := out.Receipt
+		if r == nil || r.Ok {
+			t.Fatalf("%s: expected a failed receipt sub-result, got %+v", id, r)
+		}
+		if r.Root != good.Root || r.TreeSize != 4 || r.LeafIndex != 1 {
+			t.Errorf("%s: root/tree_size/leaf_index %q/%d/%d, expected %q/4/1", id, r.Root, r.TreeSize, r.LeafIndex, good.Root)
+		}
 	}
 }

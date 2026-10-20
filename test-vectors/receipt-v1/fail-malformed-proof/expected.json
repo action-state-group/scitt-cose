@@ -1,0 +1,19 @@
+{
+  "description": "Inclusion proof whose leaf_index lies outside its tree. Fails before the signature step; no root, tree_size or leaf_index is reported.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "invalid tree size or leaf index",
+  "returned": {
+    "root": null,
+    "tree_size": null,
+    "leaf_index": null
+  }
+}

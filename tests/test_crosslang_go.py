@@ -299,3 +299,30 @@ def test_verified_statement_exposes_claims_in_python_and_go(go_verifier, tmp_pat
     assert report["content_type"] == py["content_type"] == "application/widget+json"
     assert report["string_claims"]["profile_thing"] == py["claims"]["profile_thing"] == "abc"
     assert _CLAIMS_WITHHELD_PREFIX not in report.get("error", "")
+
+
+def test_ccf_unsupported_alg_keeps_the_root_like_python(go_verifier, tmp_path):
+    """scitt-cose#91: an unsupported alg fails the signature step after the CCF
+    root is rebuilt, so Go reports that root with ok false, as Python does."""
+    import hashlib
+
+    from scitt_cose import verify_receipt
+
+    vector = Path(__file__).resolve().parents[1] / "test-vectors" / "v1" / "valid-ccf-vds2"
+    leaf = hashlib.sha256((vector / "statement.cose").read_bytes()).hexdigest()
+    tagged = cbor2.loads((vector / "receipt.cose").read_bytes())
+    protected, unprotected, payload, signature = tagged.value
+    header = cbor2.loads(protected)
+    header[1] = -36  # ES512, which neither verifier supports
+    receipt = cbor2.dumps(cbor2.CBORTag(18, [cbor2.dumps(header), unprotected, payload, signature]))
+    log_pub = (vector / "log-key.pub").read_bytes()
+
+    py_res = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=log_pub)
+    assert not py_res.ok and py_res.root is not None
+
+    r = _write(tmp_path, "r.cose", receipt)
+    k = _write(tmp_path, "log.pem", log_pub)
+    _proc, report = _run_go(go_verifier, ["--receipt", r, "--log-pubkey", k, "--leaf-entry-hex", leaf])
+    assert report["receipt"]["ok"] is False
+    assert report["receipt"]["root"] == py_res.root
+    assert "unsupported alg code point" in report["receipt"]["error"]
