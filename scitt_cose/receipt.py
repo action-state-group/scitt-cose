@@ -144,8 +144,11 @@ class ReceiptResult:
     rebuilds a root, as an unauthenticated diagnostic: the proof sits in the
     unprotected header, so they are never a log root, size or position. They
     tell a malformed receipt from one signed by a key the caller does not
-    hold. On any earlier failure they stay ``None``. The Rust crate and the
-    Go verifier report the same (scitt-cose#91).
+    hold. On any earlier failure they stay ``None``. For RFC 9162 receipts the
+    Rust crate and the Go verifier report the same (scitt-cose#91), except
+    for a key Go cannot load, a non-integer alg, or an unknown ``crit``
+    label, which they handle before reading proofs or not at all. The CCF
+    path keeps the rebuilt root on any signature-step failure.
 
     New in 0.3.0:
 

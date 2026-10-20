@@ -94,7 +94,9 @@ The last three (appended, scitt-cose#91) pin what a failed verify reports for
   These values are an unauthenticated diagnostic: the proof sits in the
   unprotected header, so they show only that the receipt is shaped right for
   this leaf, never a log root, size or position. Callers use them to tell a
-  malformed receipt from one signed by a key they do not hold.
+  malformed receipt from one signed by a key they do not hold. One exception
+  is outside these vectors: the Go verifier cannot load a secp256k1 key at
+  all, so on `fail-es256-secp256k1-key` it reports nothing.
 * `fail-malformed-proof` (a leaf index outside its tree) fails before the
   signature step, so nothing is reported.
 

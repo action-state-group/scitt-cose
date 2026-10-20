@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - **Rust crate (`scitt-cose-receipt`) and Go verifier: a failed receipt
   reports the same `root`, `tree_size` and `leaf_index` as the Python
-  package (#91).** When every inclusion proof is well-formed but the
+  package (#91).** For an RFC 9162 receipt (vds=1), when every inclusion proof is well-formed but the
   signature step fails under each of them (a wrong key, an alg/key mismatch,
   an unsupported alg, a bad signature), all three verifiers now report the
   first proof that rebuilds a root, with `ok` still false. On any earlier
@@ -22,7 +22,11 @@ All notable changes to this project will be documented in this file.
   attached payload before reading any proof, so that case still reports
   nothing. New `receipt-v1` vectors `fail-wrong-log-key`,
   `fail-unsupported-alg` and `fail-malformed-proof` pin the shape in every
-  implementation, through a new `returned` field in `expected.json`.
+  implementation, through a new `returned` field in `expected.json`. Known
+  gaps: a key Go cannot load at all (secp256k1) ends its run before any
+  result exists, and Rust and Go reject a non-integer alg or (not processing
+  `crit`) never fail on an unknown critical label, both of which Python
+  counts as the signature step.
 
 ### Fixed
 

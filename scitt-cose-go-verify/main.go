@@ -345,10 +345,6 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 
 	case vdsCCFLedgerSHA256:
 		// --- vds=2: CCF ccf.v1 Merkle receipt ---
-		if algErr != nil {
-			r.Error = algErr.Error()
-			return r
-		}
 		var ccfErr error
 		root, ccfErr = verifyCCFV1Proof(proofBlob, leafBytes)
 		if ccfErr != nil {
@@ -363,6 +359,12 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	}
 
 	r.Root = hex.EncodeToString(root)
+
+	// An unusable alg fails the signature step, after the root is rebuilt.
+	if algErr != nil {
+		r.Error = algErr.Error()
+		return r
+	}
 
 	// Verify the log's COSE_Sign1 over the reconstructed (detached) root.
 	msg.Payload = root
