@@ -87,6 +87,7 @@ def _verify_receipt(args) -> dict | None:
         "root": result.root,
         "tree_size": result.tree_size,
         "leaf_index": result.leaf_index,
+        "failed_at": result.failed_at,
         "errors": list(result.errors),
     }
 

@@ -79,7 +79,18 @@ type receiptOut struct {
 	TreeSize  int64  `json:"tree_size"`
 	LeafIndex int64  `json:"leaf_index"`
 	Error     string `json:"error,omitempty"`
+	// FailedAt names the step a failed verify stopped at, as the Python and
+	// Rust verifiers do (scitt-cose#93): failedAtSignature when a proof
+	// rebuilt a root and the signature step failed, failedAtStructure on any
+	// earlier failure, and omitted when Ok.
+	FailedAt string `json:"failed_at,omitempty"`
 }
+
+// Values of receiptOut.FailedAt.
+const (
+	failedAtStructure = "structure"
+	failedAtSignature = "signature"
+)
 
 // result is the JSON shape printed to stdout. It is PROFILE-OPAQUE: only generic
 // SCITT/COSE/CWT fields are surfaced. Any application-profile claims are exposed
@@ -207,6 +218,13 @@ func verifyStatement(out *result, statementPath, pubkeyPath, algName string) {
 // then checks the log's COSE_Sign1 over that reconstructed root.
 func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut {
 	r := &receiptOut{}
+	// Failures in the signature step set failedAtSignature where they occur;
+	// every other failure stopped earlier.
+	defer func() {
+		if !r.Ok && r.FailedAt == "" {
+			r.FailedAt = failedAtStructure
+		}
+	}()
 	data, err := os.ReadFile(receiptPath)
 	if err != nil {
 		r.Error = fmt.Sprintf("read receipt: %v", err)
@@ -336,6 +354,9 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 			r.Ok = true
 			return r
 		}
+		if r.Root != "" {
+			r.FailedAt = failedAtSignature
+		}
 		if verifierErr != nil {
 			r.Error = verifierErr.Error()
 			return r
@@ -359,6 +380,8 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	}
 
 	r.Root = hex.EncodeToString(root)
+	// Any failure from here on is in the signature step; success clears it.
+	r.FailedAt = failedAtSignature
 
 	// An unusable alg fails the signature step, after the root is rebuilt.
 	if algErr != nil {
@@ -379,6 +402,7 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	}
 
 	r.Ok = true
+	r.FailedAt = ""
 	return r
 }
 

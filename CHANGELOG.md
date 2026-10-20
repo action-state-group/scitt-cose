@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`verify_receipt` names the step a failure stopped at, in Python, Rust and
+  Go (#93).** The new `failed_at` field is `"signature"` when a proof rebuilt
+  a root for the leaf and the signature step failed, `"structure"` on any
+  earlier failure, and `None`/omitted when `ok` is true. Read it, rather than
+  whether `root` is set, to tell a malformed receipt from one signed by a key
+  you do not hold; its values agree with that test on every receipt. The
+  Rust crate adds a non-exhaustive `FailedAt` enum and a
+  `ReceiptResult::failed_at` field (a new public field, covered by the
+  crate's planned 0.2.0), and the Python, Rust and Go CLIs print
+  `failed_at`. Existing fields and verdicts are unchanged. The new
+  `test-vectors/receipt-v1/failed-at.json` pins the stage for every
+  `receipt-v1` vector in all three runners. As with `returned`, Go reports
+  no stage on `fail-es256-secp256k1-key`, whose key it cannot load.
+
 ### Changed
 
 - **Rust crate (`scitt-cose-receipt`) and Go verifier: a failed receipt

@@ -33,6 +33,18 @@ func TestVectorsReceiptV1(t *testing.T) {
 	if len(man.Vectors) == 0 {
 		t.Fatal("manifest has no vectors")
 	}
+	// failed-at.json pins each vector's failure stage (scitt-cose#93); a
+	// later vector may carry failed_at in its own expected.json instead.
+	rawStages, err := os.ReadFile(filepath.Join(root, "failed-at.json"))
+	if err != nil {
+		t.Fatalf("read failed-at.json: %v", err)
+	}
+	var stages struct {
+		FailedAt map[string]*string `json:"failed_at"`
+	}
+	if err := json.Unmarshal(rawStages, &stages); err != nil {
+		t.Fatalf("parse failed-at.json: %v", err)
+	}
 	for _, v := range man.Vectors {
 		v := v
 		t.Run(v.ID, func(t *testing.T) {
@@ -57,6 +69,20 @@ func TestVectorsReceiptV1(t *testing.T) {
 			if err := json.Unmarshal(rawExp, &exp); err != nil {
 				t.Fatalf("parse expected.json: %v", err)
 			}
+			var own map[string]json.RawMessage
+			if err := json.Unmarshal(rawExp, &own); err != nil {
+				t.Fatalf("parse expected.json: %v", err)
+			}
+			wantStage, pinned := stages.FailedAt[v.ID]
+			if rawStage, ok := own["failed_at"]; ok {
+				wantStage, pinned = nil, true
+				if err := json.Unmarshal(rawStage, &wantStage); err != nil {
+					t.Fatalf("parse failed_at: %v", err)
+				}
+			}
+			if !pinned {
+				t.Fatalf("no failed_at pinned")
+			}
 			if v.Ok != exp.Ok {
 				t.Errorf("manifest ok=%v != expected.json ok=%v", v.Ok, exp.Ok)
 			}
@@ -74,6 +100,20 @@ func TestVectorsReceiptV1(t *testing.T) {
 			}
 			if ok != exp.Ok {
 				t.Fatalf("ok=%v (%s), expected %v (a negative vector that verifies is a FAIL)", ok, errText, exp.Ok)
+			}
+			// Go cannot load a secp256k1 key, so that run ends before a
+			// receipt sub-result exists and reports no stage.
+			if out.Receipt != nil || v.ID != "fail-es256-secp256k1-key" {
+				if out.Receipt == nil {
+					t.Fatalf("no receipt sub-result to compare failed_at against")
+				}
+				want := ""
+				if wantStage != nil {
+					want = *wantStage
+				}
+				if out.Receipt.FailedAt != want {
+					t.Errorf("failed_at %q, expected %q", out.Receipt.FailedAt, want)
+				}
 			}
 			if ret := exp.Returned; ret != nil {
 				// Go's coordinates are non-nullable: absent is an empty root
@@ -137,6 +177,41 @@ func TestAlgKeyMismatchReportsDiagnostic(t *testing.T) {
 		}
 		if r.Root != good.Root || r.TreeSize != 4 || r.LeafIndex != 1 {
 			t.Errorf("%s: root/tree_size/leaf_index %q/%d/%d, expected %q/4/1", id, r.Root, r.TreeSize, r.LeafIndex, good.Root)
+		}
+	}
+}
+
+// TestCCFFailedAt: the CCF (vds=2) path names its failure stage as the
+// RFC 9162 path does (scitt-cose#93).
+func TestCCFFailedAt(t *testing.T) {
+	dir := filepath.Join(vectorsRoot, "v1", "valid-ccf-vds2")
+	rawExp, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+	if err != nil {
+		t.Fatalf("read expected.json: %v", err)
+	}
+	var exp struct {
+		LeafEntry string `json:"leaf_entry"`
+	}
+	if err := json.Unmarshal(rawExp, &exp); err != nil {
+		t.Fatalf("parse expected.json: %v", err)
+	}
+	otherKey := filepath.Join(vectorsRoot, "receipt-v1", "fail-wrong-log-key", "log-key.pub")
+	for _, tc := range []struct {
+		name, key, leaf, want string
+		ok                    bool
+	}{
+		{"ok", filepath.Join(dir, "log-key.pub"), exp.LeafEntry, "", true},
+		{"wrong key", otherKey, exp.LeafEntry, failedAtSignature, false},
+		{"bad leaf", otherKey, "zz", failedAtStructure, false},
+	} {
+		out := runBinary(t,
+			"--receipt", filepath.Join(dir, "receipt.cose"),
+			"--log-pubkey", tc.key,
+			"--leaf-entry-hex", tc.leaf,
+		)
+		r := out.Receipt
+		if r == nil || r.Ok != tc.ok || r.FailedAt != tc.want {
+			t.Errorf("%s: got %+v, expected ok=%v failed_at=%q", tc.name, r, tc.ok, tc.want)
 		}
 	}
 }

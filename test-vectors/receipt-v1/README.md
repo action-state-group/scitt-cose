@@ -105,6 +105,19 @@ The last four (appended, scitt-cose#91) pin what a failed verify reports for
   is used, so it also fails before the signature step and reports nothing,
   although its first proof would rebuild a root.
 
+## Failure stage (`failed-at.json`)
+
+`failed-at.json` (appended, scitt-cose#93) names the `failed_at` every
+verifier must report for each vector above: `"signature"` when a proof
+rebuilt a root for the leaf and the signature step failed, `"structure"` on
+any earlier failure, and `null` when `ok` is true. Callers read it, instead of
+whether `root` is set, to tell a malformed receipt from one signed by a key
+they do not hold. It is a separate file because the published `expected.json`
+files cannot change; a later vector may carry `failed_at` in its own
+`expected.json` instead, and every vector must pin it in one place or the
+other. Go cannot load the key of `fail-es256-secp256k1-key`, so it reports no
+stage there.
+
 ## `expected.json` fields
 
 | field | meaning |
@@ -118,6 +131,7 @@ The last four (appended, scitt-cose#91) pin what a failed verify reports for
 | `witness_time_established`, `grade_cryptographically_bound` | expected booleans |
 | `failure_contains` | substring expected somewhere in the verifier's error list (present on `ok: false` vectors only) |
 | `returned` | present only on the scitt-cose#91 vectors: the `root`, `tree_size` and `leaf_index` the verifier must report, each a value or `null` |
+| `failed_at` | optional, for vectors appended after `failed-at.json`: `"signature"`, `"structure"` or `null` (see above) |
 | `provenance` | present only on `trace-sept7-witness`: where the real bytes came from |
 
 ## Provenance

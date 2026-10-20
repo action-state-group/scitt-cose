@@ -78,6 +78,33 @@ fn malformed(msg: impl Into<String>) -> ReceiptError {
     ReceiptError::Malformed(msg.into())
 }
 
+/// The step a failed [`verify_receipt`] stopped at (scitt-cose#93). Match
+/// on [`FailedAt::Signature`] rather than [`FailedAt::Structure`]: the type
+/// is non-exhaustive so that a finer split of the earlier steps stays
+/// compatible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FailedAt {
+    /// The receipt failed before the signature step: it is not a usable
+    /// COSE_Sign1 receipt, or no inclusion proof rebuilds a root for this
+    /// leaf.
+    Structure,
+    /// A proof rebuilt a root for this leaf and the signature step failed
+    /// under every proof: a wrong key, an alg/key mismatch, an unsupported
+    /// alg or a bad signature. Never evidence of anything.
+    Signature,
+}
+
+impl FailedAt {
+    /// The wire name shared with the Python and Go verifiers.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FailedAt::Structure => "structure",
+            FailedAt::Signature => "signature",
+        }
+    }
+}
+
 /// Outcome of [`verify_receipt`]. `ok` is `true` only when the inclusion
 /// proof reconstructs a root *and* the COSE_Sign1 over that root verifies
 /// under the supplied log key. On any failure `ok` is `false` and `errors`
@@ -91,7 +118,10 @@ fn malformed(msg: impl Into<String>) -> ReceiptError {
 /// Python and Go verifiers report the same. The
 /// protected-header claims (`iat`, `grade`) are likewise populated ONLY when
 /// `ok` is `true` -- a claim from a receipt that failed verification is never
-/// surfaced (same rule as the Python `ReceiptResult`).
+/// surfaced (same rule as the Python `ReceiptResult`). `failed_at` names the
+/// step a failure stopped at and is `None` when `ok` is `true`; read it, not
+/// whether `root` is set, to tell a malformed receipt from one signed by a
+/// key the caller does not hold.
 #[derive(Debug, Clone, Default)]
 pub struct ReceiptResult {
     pub ok: bool,
@@ -114,6 +144,8 @@ pub struct ReceiptResult {
     /// caller's own untrusted metadata *agrees* with it is that caller's
     /// concern, not this generic verifier's).
     pub grade_cryptographically_bound: bool,
+    /// The step a failed verify stopped at; `None` when `ok` is `true`.
+    pub failed_at: Option<FailedAt>,
 }
 
 impl ReceiptResult {
@@ -123,6 +155,7 @@ impl ReceiptResult {
         self.grade = None;
         self.witness_time_established = false;
         self.grade_cryptographically_bound = false;
+        self.failed_at.get_or_insert(FailedAt::Structure);
         self.errors.push(msg.into());
         self
     }
@@ -351,6 +384,7 @@ pub fn verify_receipt(
             result.tree_size = Some(tree_size);
             result.leaf_index = Some(leaf_index);
             result.root = Some(root);
+            result.failed_at = Some(FailedAt::Signature);
         }
         return result
             .fail(format!(
