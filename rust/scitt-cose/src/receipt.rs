@@ -81,10 +81,14 @@ fn malformed(msg: impl Into<String>) -> ReceiptError {
 /// Outcome of [`verify_receipt`]. `ok` is `true` only when the inclusion
 /// proof reconstructs a root *and* the COSE_Sign1 over that root verifies
 /// under the supplied log key. On any failure `ok` is `false` and `errors`
-/// explains why. `root`/`tree_size`/`leaf_index` are set only when `ok` is
-/// `true`: they come from the inclusion proof the signature verified under,
-/// and none is chosen when it verifies under none. (The Python
-/// `verify_receipt` keeps them on a signature failure, as of 0.4.2.) The
+/// explains why. When `ok` is `true`, `root`/`tree_size`/`leaf_index` come
+/// from the inclusion proof the signature verified under. When every proof is
+/// well-formed but the signature step fails under each of them (a wrong key,
+/// an alg/key mismatch, a bad signature), they are a diagnostic from the
+/// first proof: the receipt is shaped right for this leaf, but the values are
+/// unauthenticated (the proof sits in the unprotected header) and are never a
+/// log root, size or position. On any earlier failure they stay `None`. The
+/// Python and Go verifiers report the same. The
 /// protected-header claims (`iat`, `grade`) are likewise populated ONLY when
 /// `ok` is `true` -- a claim from a receipt that failed verification is never
 /// surfaced (same rule as the Python `ReceiptResult`).
@@ -226,6 +230,14 @@ pub fn verify_receipt(
         Err(e) => return result.fail(format!("receipt is not a COSE_Sign1 message: {e:?}")),
     };
 
+    // The signature must cover the root rebuilt from the leaf, so the payload
+    // is detached; an attached one is refused before any proof is read.
+    if sign1.payload.is_some() {
+        return result.fail(
+            "receipt carries an attached payload; this verifier only accepts the detached form",
+        );
+    }
+
     let prot = protected_map(&sign1);
 
     // vds MUST come from the protected (integrity-protected) header.
@@ -315,12 +327,17 @@ pub fn verify_receipt(
     }
     let mut matched = false;
     let mut last_error = None;
+    // When no proof's root verifies, the first proof's values stay as a
+    // diagnostic (ok stays false): callers tell a malformed receipt from one
+    // signed by a key they do not hold by checking `root`.
+    let mut diagnostic = None;
     for (tree_size, leaf_index, audit_path) in candidates {
         let reconstructed =
             root_from_inclusion_proof(leaf_entry, leaf_index, tree_size, &audit_path)
                 .expect("decoded proof has validated shape");
         if let Err(error) = verify_signature(&sign1, alg_code, log_public_key_pem, &reconstructed) {
             last_error = Some(error);
+            diagnostic.get_or_insert((tree_size, leaf_index, reconstructed));
         } else {
             result.tree_size = Some(tree_size);
             result.leaf_index = Some(leaf_index);
@@ -330,6 +347,11 @@ pub fn verify_receipt(
         }
     }
     if !matched {
+        if let Some((tree_size, leaf_index, root)) = diagnostic {
+            result.tree_size = Some(tree_size);
+            result.leaf_index = Some(leaf_index);
+            result.root = Some(root);
+        }
         return result
             .fail(format!(
                 "receipt signature did not verify for any inclusion proof: {}",
@@ -352,11 +374,6 @@ fn verify_signature(
     public_key_pem: &str,
     detached_payload: &[u8; 32],
 ) -> Result<(), ReceiptError> {
-    if sign1.payload.is_some() {
-        return Err(malformed(
-            "receipt carries an attached payload; this verifier only accepts the detached form",
-        ));
-    }
     let tbs = sign1.tbs_detached_data(detached_payload, &[]);
     match alg_code {
         ALG_EDDSA => {

@@ -137,6 +137,16 @@ class ReceiptResult:
     the COSE_Sign1 over that root verifies under the log key. On any failure
     ``ok`` is ``False`` and ``errors`` explains why.
 
+    ``root`` / ``tree_size`` / ``leaf_index`` come from the proof the
+    signature verified under when ``ok`` is ``True``. When every proof is
+    well-formed but the signature step fails under each (a wrong key, an
+    alg/key mismatch, a bad signature), they hold the first proof that
+    rebuilds a root, as an unauthenticated diagnostic: the proof sits in the
+    unprotected header, so they are never a log root, size or position. They
+    tell a malformed receipt from one signed by a key the caller does not
+    hold. On any earlier failure they stay ``None``. The Rust crate and the
+    Go verifier report the same (scitt-cose#91).
+
     New in 0.3.0:
 
     ``iat`` — the ``iat`` (issued-at) integer from the protected header's CWT

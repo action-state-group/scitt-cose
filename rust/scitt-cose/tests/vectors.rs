@@ -117,6 +117,16 @@ struct ReceiptV1Expected {
     witness_time_established: bool,
     grade_cryptographically_bound: bool,
     failure_contains: Option<String>,
+    /// What the verifier must report for `root`/`tree_size`/`leaf_index`,
+    /// on vectors that pin it (scitt-cose#91); older vectors leave it out.
+    returned: Option<ReceiptV1Returned>,
+}
+
+#[derive(Deserialize)]
+struct ReceiptV1Returned {
+    root: Option<String>,
+    tree_size: Option<u64>,
+    leaf_index: Option<u64>,
 }
 
 fn run_receipt_v1(id: &str) -> (ReceiptV1Expected, scitt_cose_receipt::ReceiptResult) {
@@ -145,6 +155,21 @@ fn assert_matches(id: &str) {
     // freeze them as null, i.e. never surfaced from an unverified receipt.
     assert_eq!(result.iat, expected.iat, "{id}: iat");
     assert_eq!(result.grade, expected.grade, "{id}: grade");
+    if let Some(returned) = &expected.returned {
+        assert_eq!(
+            result.root.map(hex::encode),
+            returned.root,
+            "{id}: returned root"
+        );
+        assert_eq!(
+            result.tree_size, returned.tree_size,
+            "{id}: returned tree_size"
+        );
+        assert_eq!(
+            result.leaf_index, returned.leaf_index,
+            "{id}: returned leaf_index"
+        );
+    }
     if expected.ok {
         assert_eq!(result.root.map(hex::encode), expected.root, "{id}: root");
     } else if let Some(needle) = &expected.failure_contains {
@@ -226,6 +251,59 @@ fn receipt_v1_es384_under_p256_rejected() {
 #[test]
 fn receipt_v1_eddsa_under_p256_rejected() {
     assert_matches("fail-eddsa-p256-key");
+}
+
+// Failure shape (scitt-cose#91): a failure in the signature step reports the
+// first proof's root/tree_size/leaf_index as a diagnostic; an earlier failure
+// reports none. The vectors pin `returned`.
+
+#[test]
+fn receipt_v1_wrong_log_key_reports_diagnostic() {
+    assert_matches("fail-wrong-log-key");
+}
+
+#[test]
+fn receipt_v1_unsupported_alg_reports_diagnostic() {
+    assert_matches("fail-unsupported-alg");
+}
+
+#[test]
+fn receipt_v1_malformed_proof_reports_nothing() {
+    assert_matches("fail-malformed-proof");
+}
+
+#[test]
+fn receipt_v1_attached_payload_reports_nothing() {
+    // The attached-payload check runs before any proof is read.
+    for id in ["fail-attached-payload", "fail-attached-payload-root"] {
+        let (_, result) = run_receipt_v1(id);
+        assert!(!result.ok, "{id}");
+        assert_eq!(
+            (result.root, result.tree_size, result.leaf_index),
+            (None, None, None),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn receipt_v1_alg_key_mismatch_reports_diagnostic() {
+    // A mismatch fails in the signature step, as in the Python verifier.
+    let (_, good) = run_receipt_v1("synthetic-eddsa-iat-only");
+    for id in [
+        "fail-es256-secp256k1-key",
+        "fail-es384-p256-key",
+        "fail-eddsa-p256-key",
+    ] {
+        let (_, result) = run_receipt_v1(id);
+        assert!(!result.ok, "{id}");
+        assert_eq!(result.root, good.root, "{id}: root");
+        assert_eq!(
+            (result.tree_size, result.leaf_index),
+            (Some(4), Some(1)),
+            "{id}"
+        );
+    }
 }
 
 // --- header claims are never surfaced from a receipt whose signature fails --

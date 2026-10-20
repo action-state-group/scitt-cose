@@ -241,11 +241,9 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		r.Error = "receipt protected header missing alg (label 1)"
 		return r
 	}
-	algName, err := algNameFromCode(algCode)
-	if err != nil {
-		r.Error = err.Error()
-		return r
-	}
+	// An alg this verifier cannot use fails the signature step, which for
+	// vds=1 runs after the proofs are read (see below).
+	algName, algErr := algNameFromCode(algCode)
 
 	// Decode the proof blob from the unprotected vdp map (shared by both vds paths).
 	unprot := rawAnyMap(msg.Headers.RawUnprotected)
@@ -308,14 +306,25 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 			}
 			candidates = append(candidates, candidate{size, index, path})
 		}
-		verifier, err := newVerifier(algName, logPub)
-		if err != nil {
-			r.Error = err.Error()
-			return r
+		// When the signature step fails for every proof (an unusable alg or
+		// key, or a signature that does not verify), the first proof that
+		// rebuilds a root stays as an unauthenticated diagnostic with Ok
+		// false, as in the Python and Rust verifiers.
+		var verifier cose.Verifier
+		verifierErr := algErr
+		if verifierErr == nil {
+			verifier, verifierErr = newVerifier(algName, logPub)
 		}
 		for _, proof := range candidates {
 			computed, ok := rootFromInclusionProof(leafBytes, proof.index, proof.size, proof.path)
 			if !ok {
+				continue
+			}
+			if r.Root == "" {
+				r.TreeSize, r.LeafIndex = proof.size, proof.index
+				r.Root = hex.EncodeToString(computed)
+			}
+			if verifierErr != nil {
 				continue
 			}
 			msg.Payload = computed
@@ -327,11 +336,19 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 			r.Ok = true
 			return r
 		}
+		if verifierErr != nil {
+			r.Error = verifierErr.Error()
+			return r
+		}
 		r.Error = "receipt signature did not verify over any reconstructed root"
 		return r
 
 	case vdsCCFLedgerSHA256:
 		// --- vds=2: CCF ccf.v1 Merkle receipt ---
+		if algErr != nil {
+			r.Error = algErr.Error()
+			return r
+		}
 		var ccfErr error
 		root, ccfErr = verifyCCFV1Proof(proofBlob, leafBytes)
 		if ccfErr != nil {

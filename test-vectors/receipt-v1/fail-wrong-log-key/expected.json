@@ -1,0 +1,19 @@
+{
+  "description": "Well-formed receipt signed by an Ed25519 key other than log-key.pub. Fails in the signature step; the first proof's root, tree_size and leaf_index are reported as an unauthenticated diagnostic.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "01",
+  "tree_size": 4,
+  "leaf_index": 1,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "signature",
+  "returned": {
+    "root": "9bcd51240af4005168f033121ba85be5a6ed4f0e6a5fac262066729b8fbfdecb",
+    "tree_size": 4,
+    "leaf_index": 1
+  }
+}

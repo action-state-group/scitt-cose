@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Rust crate (`scitt-cose-receipt`) and Go verifier: a failed receipt
+  reports the same `root`, `tree_size` and `leaf_index` as the Python
+  package (#91).** When every inclusion proof is well-formed but the
+  signature step fails under each of them (a wrong key, an alg/key mismatch,
+  an unsupported alg, a bad signature), all three verifiers now report the
+  first proof that rebuilds a root, with `ok` still false. On any earlier
+  failure they report nothing. Python has done this since 0.4.2; Rust 0.1.1
+  and Go left the fields empty, a side effect of #76. The values are an
+  unauthenticated diagnostic, never a log root, size or position: read them
+  only to tell a malformed receipt from one signed by a key you do not hold,
+  and treat a receipt as verified only when `ok` is true. For the crate this
+  reverses the 0.1.1 doc comment, which promised the fields only when `ok` is
+  true, so its next release should be 0.2.0. The Rust verifier now refuses an
+  attached payload before reading any proof, so that case still reports
+  nothing. New `receipt-v1` vectors `fail-wrong-log-key`,
+  `fail-unsupported-alg` and `fail-malformed-proof` pin the shape in every
+  implementation, through a new `returned` field in `expected.json`.
+
 ### Fixed
 
 - **`scitt_cose.__version__` reports the installed release.** It is now read

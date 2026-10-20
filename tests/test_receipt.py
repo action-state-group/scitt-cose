@@ -627,6 +627,10 @@ def test_frozen_receipt_v1_vectors_unchanged(vid):
     assert r.protected_header_ext.get(HDR_GRADE) == exp["grade"]
     if exp["ok"]:
         assert r.root == exp["root"]
+    if "returned" in exp:
+        assert {"root": r.root, "tree_size": r.tree_size, "leaf_index": r.leaf_index} == exp["returned"]
+    if not exp["ok"]:
+        assert any(exp["failure_contains"] in e for e in r.errors), r.errors
 
 
 def test_donated_multi_proof_orders_and_malformed_tail():
