@@ -141,8 +141,30 @@ fn run_receipt_v1(id: &str) -> (ReceiptV1Expected, scitt_cose_receipt::ReceiptRe
     (expected, result)
 }
 
+/// The `failed_at` a receipt-v1 vector pins (scitt-cose#93): from its own
+/// `expected.json` when it carries one, otherwise from `failed-at.json`.
+/// Every vector must pin one; `null` (ok) reads as `None`.
+fn pinned_failed_at(id: &str) -> Option<String> {
+    let dir = repo_root().join("test-vectors/receipt-v1");
+    let read = |p: PathBuf| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+    };
+    let own = read(dir.join(id).join("expected.json"));
+    let shared = read(dir.join("failed-at.json"));
+    let pinned = own
+        .get("failed_at")
+        .or_else(|| shared["failed_at"].get(id))
+        .unwrap_or_else(|| panic!("{id}: no failed_at pinned"));
+    pinned.as_str().map(str::to_owned)
+}
+
 fn assert_matches(id: &str) {
     let (expected, result) = run_receipt_v1(id);
+    assert_eq!(
+        result.failed_at.map(|f| f.as_str().to_owned()),
+        pinned_failed_at(id),
+        "{id}: failed_at"
+    );
     assert_eq!(result.ok, expected.ok, "{id}: errors={:?}", result.errors);
     assert_eq!(
         result.witness_time_established, expected.witness_time_established,

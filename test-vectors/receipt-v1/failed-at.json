@@ -1,0 +1,21 @@
+{
+  "description": "The failed_at every verifier must report for each receipt-v1 vector (scitt-cose#93): \"signature\" when a proof rebuilt a root for the leaf and the signature step failed, \"structure\" on any earlier failure, null when ok is true. A later vector may instead carry failed_at in its own expected.json.",
+  "failed_at": {
+    "trace-sept7-witness": null,
+    "synthetic-eddsa-iat-grade": null,
+    "synthetic-es256-iat-grade": null,
+    "synthetic-eddsa-iat-only": null,
+    "fail-tampered-iat": "signature",
+    "fail-tampered-grade": "signature",
+    "synthetic-es256-iat-grade-observed-only": null,
+    "fail-attached-payload": "structure",
+    "fail-attached-payload-root": "structure",
+    "fail-es256-secp256k1-key": "signature",
+    "fail-es384-p256-key": "signature",
+    "fail-eddsa-p256-key": "signature",
+    "fail-wrong-log-key": "signature",
+    "fail-unsupported-alg": "signature",
+    "fail-malformed-proof": "structure",
+    "fail-malformed-tail-proof": "structure"
+  }
+}

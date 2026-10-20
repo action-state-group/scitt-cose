@@ -74,9 +74,13 @@ Prints one JSON object to stdout and exits `0` iff the receipt verifies:
   "grade": "mmr-verified",
   "witness_time_established": true,
   "grade_cryptographically_bound": true,
+  "failed_at": null,
   "errors": []
 }
 ```
+
+On a failure, `failed_at` is `"signature"` when a proof rebuilt a root for the
+leaf and the signature step failed, and `"structure"` on any earlier failure.
 
 ## Tests
 

@@ -607,6 +607,7 @@ def test_tampered_grade_value_fails_signature(eddsa_keys):
 
 
 _RECEIPT_V1 = Path(__file__).resolve().parent.parent / "test-vectors" / "receipt-v1"
+_FAILED_AT = json.loads((_RECEIPT_V1 / "failed-at.json").read_text())["failed_at"]
 
 
 @pytest.mark.parametrize(
@@ -631,6 +632,16 @@ def test_frozen_receipt_v1_vectors_unchanged(vid):
         assert {"root": r.root, "tree_size": r.tree_size, "leaf_index": r.leaf_index} == exp["returned"]
     if not exp["ok"]:
         assert any(exp["failure_contains"] in e for e in r.errors), r.errors
+    # scitt-cose#93: every vector names its failure stage, in failed-at.json
+    # or, for a later vector, in its own expected.json.
+    assert "failed_at" in exp or vid in _FAILED_AT, f"{vid}: no failed_at pinned"
+    assert r.failed_at == exp.get("failed_at", _FAILED_AT.get(vid))
+
+
+def test_receipt_v1_failed_at_covers_every_stage():
+    """failed-at.json names only published vectors and pins each stage."""
+    assert set(_FAILED_AT) <= {p.name for p in _RECEIPT_V1.iterdir() if p.is_dir()}
+    assert set(_FAILED_AT.values()) == {None, "structure", "signature"}
 
 
 def test_donated_multi_proof_orders_and_malformed_tail():

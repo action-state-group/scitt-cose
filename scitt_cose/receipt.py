@@ -176,6 +176,18 @@ class ReceiptResult:
     ``iat``, ``issuer``, ``subject`` and ``protected_header_ext`` are populated
     ONLY when ``ok`` is ``True``. On any failure they stay ``None``/empty; a
     failed signature additionally adds a "claims withheld" entry to ``errors``.
+
+    Added by scitt-cose#93:
+
+    ``failed_at`` — the step a failed verify stopped at: ``"signature"`` when
+    the receipt is shaped right for this leaf (a proof rebuilt a root) and the
+    signature step failed, ``"structure"`` on any earlier failure, and
+    ``None`` when ``ok`` is ``True``. Use it, not whether ``root`` is set, to
+    tell a malformed receipt from one signed by a key the caller does not
+    hold. ``"signature"`` is never evidence of anything: the signature did
+    not verify. Compare against ``"signature"`` rather than ``"structure"``,
+    so that a finer split of the earlier steps stays compatible. The Rust
+    crate and the Go verifier report the same.
     """
 
     ok: bool = False
@@ -187,6 +199,7 @@ class ReceiptResult:
     issuer: str | None = None
     subject: str | None = None
     protected_header_ext: dict = field(default_factory=dict)
+    failed_at: str | None = None
 
 
 def _encode_inclusion_proof(tree_size: int, leaf_index: int, audit_path_hex: list[str]) -> bytes:
@@ -412,8 +425,26 @@ def verify_receipt(
       root computed by SHA-256 over the CCF leaf formula then walked up an
       RFC 6962–style sibling path; COSE_Sign1 (ES384) verified over that root.
 
-    Never raises — failures land in :attr:`ReceiptResult.errors`.
+    Never raises — failures land in :attr:`ReceiptResult.errors`, and
+    :attr:`ReceiptResult.failed_at` names the step that failed.
     """
+    result = _verify_receipt(
+        receipt, leaf_entry_hex=leaf_entry_hex, log_public_key_pem=log_public_key_pem
+    )
+    if not result.ok and result.failed_at is None:
+        result.failed_at = "structure"
+    return result
+
+
+def _verify_receipt(
+    receipt: bytes,
+    *,
+    leaf_entry_hex: str,
+    log_public_key_pem: PemLike,
+) -> ReceiptResult:
+    """:func:`verify_receipt` without the default ``failed_at``: the
+    signature-step failures set ``"signature"``, and every other failure is
+    left for the caller to mark ``"structure"``."""
     result = ReceiptResult()
 
     # Strict decode at the trust boundary: rejects trailing bytes, indefinite-
@@ -522,6 +553,7 @@ def verify_receipt(
         else:
             if diagnostic is not None:
                 result.tree_size, result.leaf_index, result.root = diagnostic
+                result.failed_at = "signature"
             result.errors.append(f"receipt signature did not verify: {last_error}")
             result.errors.append(_CLAIMS_WITHHELD)
             return result
@@ -547,6 +579,7 @@ def verify_receipt(
                 understood_labels=_CCF_RECEIPT_UNDERSTOOD,
             )
         except CoseError as exc:
+            result.failed_at = "signature"
             result.errors.append(f"receipt signature did not verify: {exc}")
             result.errors.append(_CLAIMS_WITHHELD)
             return result

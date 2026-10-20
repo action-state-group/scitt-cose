@@ -26,6 +26,7 @@ struct Output {
     grade: Option<String>,
     witness_time_established: bool,
     grade_cryptographically_bound: bool,
+    failed_at: Option<&'static str>,
     errors: Vec<String>,
 }
 
@@ -75,6 +76,7 @@ fn main() -> ExitCode {
         grade: result.grade,
         witness_time_established: result.witness_time_established,
         grade_cryptographically_bound: result.grade_cryptographically_bound,
+        failed_at: result.failed_at.map(scitt_cose_receipt::FailedAt::as_str),
         errors: result.errors,
     };
     println!(
@@ -98,6 +100,8 @@ fn emit_error(msg: String) -> ExitCode {
         grade: None,
         witness_time_established: false,
         grade_cryptographically_bound: false,
+        // Not a verify result: the inputs could not be read.
+        failed_at: None,
         errors: vec![msg],
     };
     println!(

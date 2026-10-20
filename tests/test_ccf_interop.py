@@ -734,3 +734,26 @@ def test_ccf_vds2_frozen_vector() -> None:
     assert result.tree_size is None
     assert result.leaf_index is None
     assert result.errors == []
+
+
+def test_ccf_vds2_failed_at() -> None:
+    """scitt-cose#93: the CCF path names its failure stage like vds=1 does."""
+    from pathlib import Path
+
+    vectors = Path(__file__).resolve().parents[1] / "test-vectors"
+    vector_dir = vectors / "v1" / "valid-ccf-vds2"
+    receipt = (vector_dir / "receipt.cose").read_bytes()
+    leaf_hex = json.loads((vector_dir / "expected.json").read_text())["leaf_entry"]
+
+    ok = verify_receipt(
+        receipt, leaf_entry_hex=leaf_hex, log_public_key_pem=(vector_dir / "log-key.pub").read_bytes()
+    )
+    assert ok.ok and ok.failed_at is None
+
+    other_key = (vectors / "receipt-v1" / "fail-wrong-log-key" / "log-key.pub").read_bytes()
+    wrong_key = verify_receipt(receipt, leaf_entry_hex=leaf_hex, log_public_key_pem=other_key)
+    assert not wrong_key.ok
+    assert wrong_key.failed_at == "signature"
+
+    bad_leaf = verify_receipt(receipt, leaf_entry_hex="zz", log_public_key_pem=other_key)
+    assert bad_leaf.failed_at == "structure"
