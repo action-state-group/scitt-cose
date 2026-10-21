@@ -13,10 +13,15 @@ All notable changes to this project will be documented in this file.
   - `ReceiptResult` gains the public field `failed_at` and is not
     `#[non_exhaustive]`, so code that builds it with a struct literal must
     set the new field (or use `..Default::default()`);
-  - `root`, `tree_size` and `leaf_index` are now set when the signature step
-    fails under a well-formed proof, reversing the 0.1.1 doc comment that
-    promised them only when `ok` is true.
+  - for an RFC 9162 receipt (vds=1), `root`, `tree_size` and `leaf_index`
+    are now set, from the first proof, when every inclusion proof is
+    well-formed but the signature step fails under each of them, reversing
+    the 0.1.1 doc comment that promised them only when `ok` is true. The
+    values are an unauthenticated diagnostic; treat a receipt as verified
+    only when `ok` is true.
 
+  The crate's `scitt-cose-rust-verify` binary prints `failed_at` in its JSON
+  output, and an attached payload is now refused before any proof is read.
   Depend on `scitt-cose-receipt = "0.2"`.
 
 ## [0.5.0] — 2026-10-21
@@ -78,8 +83,8 @@ All notable changes to this project will be documented in this file.
 - **Rust crate: the receipt verifier is published to crates.io as
   `scitt-cose-receipt` 0.1.1** (`rust/scitt-cose`). Depend on it by version
   instead of a git pin. The crate is versioned and released apart from the
-  Python package. Against the `rust-scitt-cose-v0.1.0` tag (never
-  published), 0.1.1:
+  Python package. Against the `rust-scitt-cose-v0.1.0` tag
+  (published, then yanked), 0.1.1:
   - withholds `iat` and the grade when the receipt's signature fails (#53);
   - checks the shape of every inclusion proof a receipt carries, rejecting
     the receipt when any proof has trailing CBOR or an impossible tree size,
