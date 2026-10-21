@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-10-21
+
 ### Added
 
 - **`verify_receipt` names the step a failure stopped at, in Python, Rust and
