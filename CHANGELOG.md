@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-21
+
 ### Added
 
 - **`verify_receipt` names the step a failure stopped at, in Python, Rust and
@@ -40,7 +42,9 @@ All notable changes to this project will be documented in this file.
   `fail-unsupported-alg`, `fail-malformed-proof` and
   `fail-malformed-tail-proof` (a valid proof followed by a malformed one,
   which reports nothing) pin the shape in every implementation, through a new
-  `returned` field in `expected.json`. Known gaps: a key Go cannot load at all
+  `returned` field in `expected.json`. For a CCF receipt (vds=2) with an
+  unsupported alg, Go now also reports the rebuilt root with `ok` false, as
+  Python does. Known gaps: a key Go cannot load at all
   (secp256k1) ends its run before any result exists, and Rust and Go reject a
   non-integer alg or (not processing `crit`) never fail on an unknown critical
   label, both of which Python counts as the signature step.
