@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Rust crate: `scitt-cose-receipt` 0.2.0** (`rust/scitt-cose`). It carries
+  the Rust side of 0.5.0: the shared failure shape (#91) and the
+  `failed_at` field with its non-exhaustive `FailedAt` enum (#93). It is a
+  breaking release for the crate, so it raises 0.1 to 0.2:
+  - `ReceiptResult` gains the public field `failed_at` and is not
+    `#[non_exhaustive]`, so code that builds it with a struct literal must
+    set the new field (or use `..Default::default()`);
+  - `root`, `tree_size` and `leaf_index` are now set when the signature step
+    fails under a well-formed proof, reversing the 0.1.1 doc comment that
+    promised them only when `ok` is true.
+
+  Depend on `scitt-cose-receipt = "0.2"`.
+
 ## [0.5.0] — 2026-10-21
 
 ### Added
