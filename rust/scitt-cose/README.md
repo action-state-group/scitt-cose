@@ -106,8 +106,7 @@ above) and `../../test-vectors/receipt-v1/` (the `iat`/`grade` set).
 
 ## Pinning
 
-The crate is published to crates.io from 0.1.1 on; depend on it by version
-(`scitt-cose-receipt = "0.1"`). Each published version has a matching git tag
-`rust-scitt-cose-v<version>`. `rust-scitt-cose-v0.1.0` is a git tag only:
-0.1.0 was never published, and its code predates the inclusion-proof checks
-in 0.1.1. Never follow `branch = "main"`.
+Depend on the crate by version from crates.io
+(`scitt-cose-receipt = "0.2"`). Each published version has a matching git tag
+`rust-scitt-cose-v<version>`. 0.1.0 is yanked: its code predates the
+inclusion-proof checks in 0.1.1. Never follow `branch = "main"`.
