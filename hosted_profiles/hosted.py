@@ -3780,8 +3780,8 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
 </nav>
 
 <div class="wrap" style="padding:32px 0 16px">
-  <div class="pill">ledger bundle · range membership certificate</div>
-  <h1 style="margin-top:12px">Ledger bundle verifier</h1>
+  <div class="pill">evidence bundle · range membership certificate</div>
+  <h1 style="margin-top:12px">Evidence Bundle verifier</h1>
   <p class="mono" id="bundleSummary" style="font-size:13px;color:var(--muted);margin-top:6px">No bundle loaded yet.</p>
 </div>
 
@@ -3889,8 +3889,8 @@ def _bundle_page_body(*, embed_placeholder: bool) -> str:
         <a class="brand" href="https://agentactioncapsule.org">
           <span class="glyph"></span> Agent Action Capsule <span class="svc">Verifier</span>
         </a>
-        <p>Stateless public verification surface for capsule-ledger bundles.
-        Free and neutral for any capsule-ledger installation — self-hosted or hosted, no account, no gating.</p>
+        <p>Stateless public verification surface for Agent Action Capsule Evidence Bundles.
+        Free and neutral for any implementation — self-hosted or hosted, no account, no gating.</p>
       </div>
       <div class="foot-cols">
         <div class="foot-col">
@@ -3951,7 +3951,7 @@ def render_bundle_page(*, offline: bool = False) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ledger bundle verifier — capsule-ledger</title>
+<title>Evidence Bundle verifier — Agent Action Capsule</title>
 <style>
 {_PAGE_CSS}
 {_CAPSULE_CSS}
