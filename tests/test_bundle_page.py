@@ -189,8 +189,8 @@ def test_stdlib_routes_wired():
     host, port = httpd.server_address
     try:
         for path, needle in (
-            ("/bundle", "Ledger bundle verifier"),
-            ("/bundle/offline-shell", "Ledger bundle verifier"),
+            ("/bundle", "Evidence Bundle verifier"),
+            ("/bundle/offline-shell", "Evidence Bundle verifier"),
             ("/static/mmr.js", "verifyInclusion"),
             ("/static/bundle.js", "checkCompleteness"),
             ("/static/witness-check.js", "checkWitnessEvidence"),
@@ -229,7 +229,7 @@ def _drive_asgi(app, path):
 def test_asgi_routes_wired():
     app = make_asgi_app()
     status, body = _drive_asgi(app, "/bundle")
-    assert status == 200 and "Ledger bundle verifier" in body.decode()
+    assert status == 200 and "Evidence Bundle verifier" in body.decode()
     status, body = _drive_asgi(app, "/bundle/offline-shell")
     assert status == 200 and "@@BUNDLE_FRAGMENT@@" in body.decode()
     status, body = _drive_asgi(app, "/static/mmr.js")
