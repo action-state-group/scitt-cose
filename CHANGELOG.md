@@ -104,7 +104,7 @@ All notable changes to this project will be documented in this file.
   `fail-es256-secp256k1-key`, `fail-es384-p256-key` and `fail-eddsa-p256-key`.
   The Go runner now reads `receipt-v1` as well.
 
-## [rust scitt-cose-receipt 0.1.1] — 2026-10-14
+## [rust scitt-cose-receipt 0.1.1] — 2026-10-15
 
 ### Added
 
