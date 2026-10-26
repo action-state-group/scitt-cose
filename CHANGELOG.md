@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [rust scitt-cose-receipt 0.2.0] — 2026-10-21
+
 ### Changed
 
 - **Rust crate: `scitt-cose-receipt` 0.2.0** (`rust/scitt-cose`). It carries
@@ -78,24 +80,6 @@ All notable changes to this project will be documented in this file.
 
 ## [0.4.3] — 2026-10-16
 
-### Added
-
-- **Rust crate: the receipt verifier is published to crates.io as
-  `scitt-cose-receipt` 0.1.1** (`rust/scitt-cose`). Depend on it by version
-  instead of a git pin. The crate is versioned and released apart from the
-  Python package. Against the `rust-scitt-cose-v0.1.0` tag
-  (published, then yanked), 0.1.1:
-  - withholds `iat` and the grade when the receipt's signature fails (#53);
-  - checks the shape of every inclusion proof a receipt carries, rejecting
-    the receipt when any proof has trailing CBOR or an impossible tree size,
-    leaf index or path length, and accepts it when one proof rebuilds a root
-    the signature verifies under (#76);
-  - sets `root`, `tree_size` and `leaf_index` only when the receipt verifies,
-    where 0.1.0 also set them on a signature failure, and words that failure
-    `receipt signature did not verify for any inclusion proof: …` (#76).
-
-  The `verify_receipt` signature and the `ReceiptResult` fields are unchanged.
-
 ### Fixed
 
 - **`verify_receipt` rejects a receipt with an attached payload** (#87). A
@@ -119,6 +103,26 @@ All notable changes to this project will be documented in this file.
   `fail-attached-payload`, `fail-attached-payload-root`,
   `fail-es256-secp256k1-key`, `fail-es384-p256-key` and `fail-eddsa-p256-key`.
   The Go runner now reads `receipt-v1` as well.
+
+## [rust scitt-cose-receipt 0.1.1] — 2026-10-15
+
+### Added
+
+- **Rust crate: the receipt verifier is published to crates.io as
+  `scitt-cose-receipt` 0.1.1** (`rust/scitt-cose`). Depend on it by version
+  instead of a git pin. The crate is versioned and released apart from the
+  Python package. Against the `rust-scitt-cose-v0.1.0` tag
+  (published, then yanked), 0.1.1:
+  - withholds `iat` and the grade when the receipt's signature fails (#53);
+  - checks the shape of every inclusion proof a receipt carries, rejecting
+    the receipt when any proof has trailing CBOR or an impossible tree size,
+    leaf index or path length, and accepts it when one proof rebuilds a root
+    the signature verifies under (#76);
+  - sets `root`, `tree_size` and `leaf_index` only when the receipt verifies,
+    where 0.1.0 also set them on a signature failure, and words that failure
+    `receipt signature did not verify for any inclusion proof: …` (#76).
+
+  The `verify_receipt` signature and the `ReceiptResult` fields are unchanged.
 
 ## [0.4.2] — 2026-10-14
 
