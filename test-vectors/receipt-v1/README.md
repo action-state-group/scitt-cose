@@ -50,6 +50,7 @@ to existing files.
 | `fail-unsupported-alg` | false | — | — | false | false |
 | `fail-malformed-proof` | false | — | — | false | false |
 | `fail-malformed-tail-proof` | false | — | — | false | false |
+| `fail-undefined-payload` | false | — | — | false | false |
 
 `trace-sept7-witness` is not synthetic: it is the real COSE Receipt bytes
 from the Action State Group's live TRACE-registry witness, captured
@@ -104,6 +105,14 @@ The last four (appended, scitt-cose#91) pin what a failed verify reports for
   followed by a malformed one, `[0, 0, []]`. Every proof is checked before any
   is used, so it also fails before the signature step and reports nothing,
   although its first proof would rebuild a root.
+* `fail-undefined-payload` (appended, scitt-cose#104) is the receipt of
+  agent-action-capsule's shared strict vector
+  `neg-witness-cll-undefined-payload`: a genuine EdDSA receipt over the
+  right root whose payload slot is CBOR undefined (`0xf7`) instead of null
+  (`0xf6`). Only null is detached, so it fails before any proof is read and
+  reports nothing. Its leaf entry is that vector's 32-byte `entry_hash`, and
+  `log-key.pub` is the witness's raw Ed25519 key as a PEM
+  SubjectPublicKeyInfo. It carries `failed_at` in its own `expected.json`.
 
 ## Failure stage (`failed-at.json`)
 

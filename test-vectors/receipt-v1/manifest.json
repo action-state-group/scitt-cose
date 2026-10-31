@@ -82,6 +82,11 @@
       "id": "fail-malformed-tail-proof",
       "dir": "receipt-v1/fail-malformed-tail-proof",
       "ok": false
+    },
+    {
+      "id": "fail-undefined-payload",
+      "dir": "receipt-v1/fail-undefined-payload",
+      "ok": false
     }
   ]
 }

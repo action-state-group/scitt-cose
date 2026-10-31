@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rust crate `scitt-cose-receipt`**: a receipt whose payload is CBOR
+  undefined (`0xf7`) is refused (#104). `coset` reads undefined as an absent
+  payload, so the crate took such a receipt as detached and verified it;
+  only null (`0xf6`) is detached, as the Python verifier already had it. The
+  Go verifier already refused it with a decode error and now reports the
+  same attached-payload error as Python and Rust. New `receipt-v1` vector
+  `fail-undefined-payload`, the receipt of agent-action-capsule's shared
+  strict vector `neg-witness-cll-undefined-payload`, pins this in all three
+  runners.
+
 ## [rust scitt-cose-receipt 0.2.0] — 2026-10-21
 
 ### Changed

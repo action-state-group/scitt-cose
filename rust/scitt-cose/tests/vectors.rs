@@ -305,7 +305,11 @@ fn receipt_v1_malformed_tail_proof_reports_nothing() {
 #[test]
 fn receipt_v1_attached_payload_reports_nothing() {
     // The attached-payload check runs before any proof is read.
-    for id in ["fail-attached-payload", "fail-attached-payload-root"] {
+    for id in [
+        "fail-attached-payload",
+        "fail-attached-payload-root",
+        "fail-undefined-payload",
+    ] {
         let (_, result) = run_receipt_v1(id);
         assert!(!result.ok, "{id}");
         assert_eq!(
@@ -314,6 +318,45 @@ fn receipt_v1_attached_payload_reports_nothing() {
             "{id}"
         );
     }
+}
+
+#[test]
+fn receipt_v1_undefined_payload_rejected() {
+    // scitt-cose#104: coset reads a payload of CBOR undefined (0xf7) as
+    // absent, so only the raw payload slot tells it from null.
+    assert_matches("fail-undefined-payload");
+}
+
+#[test]
+fn receipt_v1_undefined_payload_is_the_only_defect() {
+    // The same bytes with the payload slot set back to null verify, so the
+    // vector fails on the payload alone. The slot sits just before the
+    // 64-byte signature and its two-byte head. Re-encoding the tag and array
+    // heads non-minimally or indefinitely must not change the verdict either.
+    let (expected, _) = run_receipt_v1("fail-undefined-payload");
+    let dir = repo_root().join("test-vectors/receipt-v1/fail-undefined-payload");
+    let mut receipt = std::fs::read(dir.join("receipt.cose")).unwrap();
+    let log_pub = read_pem(&dir.join("log-key.pub"));
+    let leaf = hex::decode(&expected.leaf_entry_hex).unwrap();
+    let slot = receipt.len() - 67;
+    assert_eq!(&receipt[..2], &[0xd2, 0x84]);
+    assert_eq!(receipt[slot], 0xf7);
+    receipt[slot] = 0xf6;
+    let null = scitt_cose_receipt::verify_receipt(&receipt, &leaf, &log_pub);
+    assert!(null.ok, "{:?}", null.errors);
+    let mut long_heads = vec![0xd8, 0x12, 0x98, 0x04];
+    long_heads.extend_from_slice(&receipt[2..]);
+    let result = scitt_cose_receipt::verify_receipt(&long_heads, &leaf, &log_pub);
+    assert!(result.ok, "{:?}", result.errors);
+    let mut indefinite = vec![0xd2, 0x9f];
+    indefinite.extend_from_slice(&receipt[2..]);
+    indefinite.push(0xff);
+    let result = scitt_cose_receipt::verify_receipt(&indefinite, &leaf, &log_pub);
+    assert!(result.ok, "{:?}", result.errors);
+    indefinite[slot] = 0xf7;
+    let result = scitt_cose_receipt::verify_receipt(&indefinite, &leaf, &log_pub);
+    assert!(!result.ok);
+    assert!(result.errors.iter().any(|e| e.contains("detached")));
 }
 
 #[test]
