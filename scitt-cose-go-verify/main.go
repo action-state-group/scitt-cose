@@ -240,7 +240,8 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	const attachedPayload = "receipt payload is attached; a receipt's payload must be detached"
 	var outer cbor.RawTag
 	var items []cbor.RawMessage
-	if cbor.Unmarshal(data, &outer) == nil && cbor.Unmarshal(outer.Content, &items) == nil &&
+	if cbor.Unmarshal(data, &outer) == nil && outer.Number == 18 &&
+		cbor.Unmarshal(outer.Content, &items) == nil &&
 		len(items) == 4 && !bytes.Equal(items[2], []byte{0xf6}) {
 		r.Error = attachedPayload
 		return r
