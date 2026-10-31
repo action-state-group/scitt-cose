@@ -1,0 +1,20 @@
+{
+  "description": "The shared AAC strict vector neg-witness-cll-undefined-payload's receipt: a genuine EdDSA receipt over the right root whose payload slot is CBOR undefined (0xf7), not null (0xf6). Only null is detached, so it fails before any proof is read; no root, tree_size or leaf_index is reported.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "f61612292ad19dc4387cddff06fba0e18055a5ac5fddbc144d08d53859d17be7",
+  "tree_size": 1,
+  "leaf_index": 0,
+  "ok": false,
+  "root": null,
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failure_contains": "detached",
+  "failed_at": "structure",
+  "returned": {
+    "root": null,
+    "tree_size": null,
+    "leaf_index": null
+  }
+}

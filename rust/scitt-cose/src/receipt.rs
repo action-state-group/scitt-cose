@@ -219,6 +219,35 @@ fn decode_inclusion_proof(blob: &[u8]) -> Result<(u64, u64, Vec<[u8; 32]>), Rece
     Ok((tree_size, leaf_index, path))
 }
 
+/// Whether the payload item of a tagged COSE_Sign1 that coset has already
+/// decoded is CBOR null (`0xf6`), the only detached form. Skips the tag and
+/// array heads, lets ciborium consume the protected and unprotected items,
+/// and reads the next byte.
+fn payload_slot_is_null(receipt: &[u8]) -> bool {
+    // Length of a tag or array head: the initial byte plus 0, 1, 2, 4 or 8
+    // argument bytes (31 is an indefinite-length array with none).
+    fn head_len(initial: u8) -> Option<usize> {
+        match initial & 31 {
+            0..=23 | 31 => Some(1),
+            info @ 24..=27 => Some(1 + (1 << (info - 24))),
+            _ => None,
+        }
+    }
+    let mut rest = receipt;
+    for _ in 0..2 {
+        match rest.first().copied().and_then(head_len) {
+            Some(n) if n <= rest.len() => rest = &rest[n..],
+            _ => return false,
+        }
+    }
+    for _ in 0..2 {
+        if coset::cbor::de::from_reader::<CborValue, _>(&mut rest).is_err() {
+            return false;
+        }
+    }
+    rest.first() == Some(&0xf6)
+}
+
 /// Read the protected header's integer-labeled entries into a lookup map,
 /// tolerating both `Label::Int` (registered) and any other label shape by
 /// simply skipping it -- callers here only ever look up known int labels.
@@ -265,7 +294,9 @@ pub fn verify_receipt(
 
     // The signature must cover the root rebuilt from the leaf, so the payload
     // is detached; an attached one is refused before any proof is read.
-    if sign1.payload.is_some() {
+    // coset reads CBOR undefined (0xf7) as an absent payload too, so the raw
+    // slot must also be null (scitt-cose#104).
+    if sign1.payload.is_some() || !payload_slot_is_null(receipt) {
         return result.fail(
             "receipt carries an attached payload; this verifier only accepts the detached form",
         );

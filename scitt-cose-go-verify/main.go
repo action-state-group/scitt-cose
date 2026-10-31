@@ -232,17 +232,27 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	}
 	logPub := loadPublicKey(logPubkeyPath)
 
+	// The signature must cover the root rebuilt from the leaf, which is set
+	// as the payload below. A Receipt's payload is detached; an attached one
+	// is refused rather than silently replaced. Only null (0xf6) is detached:
+	// the raw slot is read first, since go-cose refuses undefined (0xf7) only
+	// as a decode error (scitt-cose#104).
+	const attachedPayload = "receipt payload is attached; a receipt's payload must be detached"
+	var outer cbor.RawTag
+	var items []cbor.RawMessage
+	if cbor.Unmarshal(data, &outer) == nil && cbor.Unmarshal(outer.Content, &items) == nil &&
+		len(items) == 4 && !bytes.Equal(items[2], []byte{0xf6}) {
+		r.Error = attachedPayload
+		return r
+	}
+
 	var msg cose.Sign1Message
 	if err := msg.UnmarshalCBOR(data); err != nil {
 		r.Error = fmt.Sprintf("decode receipt COSE_Sign1: %v", err)
 		return r
 	}
-
-	// The signature must cover the root rebuilt from the leaf, which is set
-	// as the payload below. A Receipt's payload is detached; an attached one
-	// is refused rather than silently replaced.
 	if msg.Payload != nil {
-		r.Error = "receipt payload is attached; a receipt's payload must be detached"
+		r.Error = attachedPayload
 		return r
 	}
 
