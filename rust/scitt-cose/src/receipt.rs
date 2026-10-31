@@ -63,6 +63,10 @@ const CWT_CLAIM_IAT: i64 = 6;
 /// IANA registration.
 const HDR_GRADE: i64 = -65537;
 
+/// The receipt encoding rule's octet limit, the Python package's
+/// `MAX_MESSAGE_BYTES`.
+pub const MAX_RECEIPT_OCTETS: usize = 10 * 1024 * 1024;
+
 /// A receipt carries one inclusion proof per leaf; an array longer than this
 /// is hostile padding, capped before any per-element work (same ceiling as
 /// the Python/Go verifiers).
@@ -358,6 +362,11 @@ pub fn verify_receipt(
 ) -> ReceiptResult {
     let mut result = ReceiptResult::default();
 
+    if receipt.is_empty() || receipt.len() > MAX_RECEIPT_OCTETS {
+        return result.fail(format!(
+            "receipt size is not 1 to {MAX_RECEIPT_OCTETS} octets"
+        ));
+    }
     let sign1 = match parse_sign1(receipt) {
         Ok(s) => s,
         Err(e) => return result.fail(format!("receipt is not a COSE_Sign1 message: {e}")),
@@ -416,7 +425,8 @@ pub fn verify_receipt(
     let mut grade: Option<String> = None;
     if let Some(claims) = find_label(&prot, HDR_CWT_CLAIMS).and_then(CborValue::as_map) {
         if let Some(n) = find_label(claims, CWT_CLAIM_IAT).and_then(CborValue::as_integer) {
-            iat = Some(i128::from(n) as i64);
+            // An iat beyond i64 is not reported rather than truncated.
+            iat = i64::try_from(n).ok();
         }
     }
     if let Some(g) = find_label(&prot, HDR_GRADE).and_then(CborValue::as_text) {
@@ -593,5 +603,143 @@ mod proof_shape_tests {
             decode_inclusion_proof(&[0x83, 1, 0, 0x80, 0]),
             Err(ReceiptError::Malformed(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use super::*;
+    use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
+    use ed25519_dalek::Signer;
+    use sha2::{Digest, Sha256};
+
+    fn encode(value: &CborValue) -> Vec<u8> {
+        let mut out = Vec::new();
+        ciborium::ser::into_writer(value, &mut out).unwrap();
+        out
+    }
+
+    /// A one-leaf EdDSA receipt over leaf 0xaa with exactly `protected` as
+    /// its header and `extra` added to its unprotected header, and the PEM
+    /// key it verifies under.
+    fn signed(
+        protected: Vec<(CborValue, CborValue)>,
+        extra: Vec<(CborValue, CborValue)>,
+    ) -> (Vec<u8>, String) {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let protected = encode(&CborValue::Map(protected));
+        let root: [u8; 32] = Sha256::new().chain_update([0x00, 0xaa]).finalize().into();
+        let signature = key.sign(&sig_structure(&protected, &root));
+        let proof = encode(&CborValue::Array(vec![
+            1.into(),
+            0.into(),
+            CborValue::Array(vec![]),
+        ]));
+        let mut unprotected = vec![(
+            HDR_VDP.into(),
+            CborValue::Map(vec![(
+                VDP_INCLUSION_PROOFS.into(),
+                CborValue::Array(vec![CborValue::Bytes(proof)]),
+            )]),
+        )];
+        unprotected.extend(extra);
+        let receipt = encode(&CborValue::Tag(
+            18,
+            Box::new(CborValue::Array(vec![
+                CborValue::Bytes(protected),
+                CborValue::Map(unprotected),
+                CborValue::Null,
+                CborValue::Bytes(signature.to_bytes().to_vec()),
+            ])),
+        ));
+        let pem = key
+            .verifying_key()
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap();
+        (receipt, pem)
+    }
+
+    fn eddsa() -> Vec<(CborValue, CborValue)> {
+        vec![
+            (HDR_ALG.into(), ALG_EDDSA.into()),
+            (HDR_VDS.into(), 1.into()),
+        ]
+    }
+
+    #[test]
+    fn a_long_array_under_an_unread_label_is_accepted() {
+        let long = CborValue::Array(vec![0.into(); 131_073]);
+        let wide = CborValue::Map((0..131_073).map(|i| (i.into(), 0.into())).collect());
+        let (receipt, pem) = signed(
+            eddsa(),
+            vec![((-70000).into(), long), ((-70001).into(), wide)],
+        );
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(r.ok, "{:?}", r.errors);
+    }
+
+    #[test]
+    fn octet_limit() {
+        let padded = |n: usize| {
+            signed(
+                eddsa(),
+                vec![((-70000).into(), CborValue::Bytes(vec![0; n]))],
+            )
+        };
+        let base = padded(70_000).0.len();
+        let pad = MAX_RECEIPT_OCTETS - base + 70_000;
+        let (receipt, pem) = padded(pad);
+        assert_eq!(receipt.len(), MAX_RECEIPT_OCTETS);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(r.ok, "{:?}", r.errors);
+        let (receipt, pem) = padded(pad + 1);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(!r.ok);
+        assert_eq!(r.failed_at, Some(FailedAt::Structure));
+    }
+
+    #[test]
+    fn an_alg_above_int64_is_not_eddsa() {
+        let (receipt, pem) = signed(eddsa(), vec![]);
+        assert!(verify_receipt(&receipt, &[0xaa], &pem).ok);
+        let (receipt, pem) = signed(
+            vec![
+                (HDR_ALG.into(), (u64::MAX - 7).into()),
+                (HDR_VDS.into(), 1.into()),
+            ],
+            vec![],
+        );
+        assert!(!verify_receipt(&receipt, &[0xaa], &pem).ok);
+    }
+
+    #[test]
+    fn an_iat_beyond_i64_is_not_truncated() {
+        let mut protected = eddsa();
+        protected.push((
+            HDR_CWT_CLAIMS.into(),
+            CborValue::Map(vec![(CWT_CLAIM_IAT.into(), (1u64 << 63).into())]),
+        ));
+        let (receipt, pem) = signed(protected, vec![]);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(r.ok, "{:?}", r.errors);
+        assert_eq!(r.iat, None);
+    }
+
+    #[test]
+    fn a_bad_crit_fails_before_any_proof_is_read() {
+        let mut protected = eddsa();
+        protected.push((HDR_CRIT.into(), CborValue::Array(vec![99.into()])));
+        protected.push((99.into(), 0.into()));
+        let (receipt, pem) = signed(protected, vec![]);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(!r.ok);
+        assert_eq!(r.failed_at, Some(FailedAt::Structure));
+        assert_eq!(r.root, None);
+        assert!(
+            r.errors.iter().any(|e| e.contains("does not understand")),
+            "{:?}",
+            r.errors
+        );
     }
 }

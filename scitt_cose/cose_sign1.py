@@ -335,6 +335,10 @@ def verify_sign1(
             raise CoseError(f"protected header is not valid CBOR ({type(exc).__name__})") from exc
         if not isinstance(protected, dict):
             raise CoseError("decoded protected header is not a map")
+        # RFC 9052 labels are integers or text. A CBOR true key would
+        # otherwise answer a lookup of the alg label 1.
+        if any(type(k) not in (int, str) for k in protected):
+            raise CoseError("protected header has a label that is not an integer or a text string")
     else:
         protected = {}
 

@@ -149,3 +149,91 @@ def test_crit_label_must_be_an_integer_or_text(eddsa_keys):
         else:
             with pytest.raises(CoseError, match="not an integer or a text string"):
                 verify_sign1(msg, public_key_pem=pub)
+
+
+def _signed(protected: dict, leaf_hex: str, key) -> bytes:
+    """A one-leaf EdDSA receipt with exactly ``protected`` as its header, so
+    a test can sign labels ``build_receipt`` would not write."""
+    import hashlib
+
+    from scitt_cose.cose_sign1 import _sig_structure
+
+    root = hashlib.sha256(b"\x00" + bytes.fromhex(leaf_hex)).digest()
+    protected_bstr = cbor2.dumps(protected)
+    signature = key.sign(_sig_structure(protected_bstr, root))
+    proof = cbor2.dumps([1, 0, []])
+    return cbor2.dumps(cbor2.CBORTag(18, [protected_bstr, {396: {-1: [proof]}}, None, signature]))
+
+
+def _key():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    key = Ed25519PrivateKey.generate()
+    pem = key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return key, pem
+
+
+def test_a_long_array_under_an_unread_label_is_accepted(eddsa_keys):
+    """The rule limits no array or map other than by the octet limit; a CBOR
+    library's default cap (fxamacker's 131,072) must not decide it."""
+    priv, pub = eddsa_keys
+    es = _entries(3)
+    receipt = build_receipt(
+        leaf_entry_hex=es[1], leaf_index=1, tree_entries_hex=es, alg="EdDSA", log_private_key_pem=priv
+    )
+    long = _with_unprotected(receipt, {-70000: [0] * 131073, -70001: {i: 0 for i in range(131073)}})
+    assert verify_receipt(long, leaf_entry_hex=es[1], log_public_key_pem=pub).ok
+
+
+def test_octet_limit(eddsa_keys):
+    from scitt_cose.cose_sign1 import MAX_MESSAGE_BYTES
+
+    priv, pub = eddsa_keys
+    es = _entries(3)
+    receipt = build_receipt(
+        leaf_entry_hex=es[1], leaf_index=1, tree_entries_hex=es, alg="EdDSA", log_private_key_pem=priv
+    )
+    pad = MAX_MESSAGE_BYTES - len(_with_unprotected(receipt, {-70000: b"\x00" * 70000})) + 70000
+    at_limit = _with_unprotected(receipt, {-70000: b"\x00" * pad})
+    assert len(at_limit) == MAX_MESSAGE_BYTES
+    assert verify_receipt(at_limit, leaf_entry_hex=es[1], log_public_key_pem=pub).ok
+    over = _with_unprotected(receipt, {-70000: b"\x00" * (pad + 1)})
+    r = verify_receipt(over, leaf_entry_hex=es[1], log_public_key_pem=pub)
+    assert not r.ok and r.failed_at == "structure"
+
+
+def test_an_alg_above_int64_is_not_eddsa():
+    """2^64-8 must not wrap to -8 (EdDSA) in any verifier."""
+    key, pem = _key()
+    leaf = "aa"
+    assert verify_receipt(_signed({1: -8, 395: 1}, leaf, key), leaf_entry_hex=leaf, log_public_key_pem=pem).ok
+    r = verify_receipt(_signed({1: 2**64 - 8, 395: 1}, leaf, key), leaf_entry_hex=leaf, log_public_key_pem=pem)
+    assert not r.ok
+
+
+def test_a_bad_crit_fails_before_any_proof_is_read():
+    """As in the Rust and Go verifiers: failed_at is structure, no root."""
+    key, pem = _key()
+    leaf = "aa"
+    r = verify_receipt(_signed({1: -8, 2: [99], 99: 0, 395: 1}, leaf, key), leaf_entry_hex=leaf, log_public_key_pem=pem)
+    assert not r.ok
+    assert r.failed_at == "structure"
+    assert (r.root, r.tree_size, r.leaf_index) == (None, None, None)
+    assert any("does not understand" in e for e in r.errors), r.errors
+
+
+def test_a_boolean_protected_label_is_not_the_alg_label(eddsa_keys):
+    """A CBOR true key equals 1 in a Python dict; it must not pose as alg."""
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    from scitt_cose.cose_sign1 import _sig_structure
+
+    priv, pub = eddsa_keys
+    key = load_pem_private_key(priv, None)
+    protected_bstr = cbor2.dumps({True: -8})
+    signature = key.sign(_sig_structure(protected_bstr, b"x"))
+    msg = cbor2.dumps(cbor2.CBORTag(18, [protected_bstr, {}, b"x", signature]))
+    with pytest.raises(CoseError, match="not an integer or a text string"):
+        verify_sign1(msg, public_key_pem=pub)

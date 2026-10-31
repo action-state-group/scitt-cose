@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // checkpointed-local-log's shared receipt vectors: this verifier accepts
@@ -130,5 +132,122 @@ func TestEncodingRuleRefuses(t *testing.T) {
 	}
 	if err := checkEncoding([]byte{0x81, 0xd2, 0x84, 0x40, 0xa0, 0xf6, 0x40}, "item", true); err == nil {
 		t.Error("nested tag 18 accepted")
+	}
+}
+
+// withUnprotected writes the receipt-v1 synthetic-eddsa-iat-grade receipt with
+// labels added to its unsigned header, so its signature still verifies, and
+// returns the receipt and key paths.
+func withUnprotected(t *testing.T, extra map[int64]any) (string, string, int) {
+	t.Helper()
+	dir := filepath.Join(vectorsRoot, "receipt-v1", "synthetic-eddsa-iat-grade")
+	data, err := os.ReadFile(filepath.Join(dir, "receipt.cose"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tagged cbor.Tag
+	if err := cbor.Unmarshal(data, &tagged); err != nil {
+		t.Fatal(err)
+	}
+	items := tagged.Content.([]any)
+	unprot := items[1].(map[any]any)
+	for k, v := range extra {
+		unprot[k] = v
+	}
+	out, err := cbor.Marshal(cbor.Tag{Number: 18, Content: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "receipt.cose")
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, filepath.Join(dir, "log-key.pub"), len(out)
+}
+
+// The rule limits no array or map other than by the octet limit, so
+// fxamacker's default cap of 131,072 must not decide it.
+func TestLongArrayUnderUnreadLabelAccepted(t *testing.T) {
+	long := make([]any, 131073)
+	for i := range long {
+		long[i] = 0
+	}
+	wide := make(map[int64]any, 131073)
+	for i := int64(0); i < 131073; i++ {
+		wide[i] = 0
+	}
+	path, key, _ := withUnprotected(t, map[int64]any{-70000: long, -70001: wide})
+	if r := verifyReceipt(path, key, "02"); !r.Ok {
+		t.Fatalf("long array refused: %+v", r)
+	}
+}
+
+func TestOctetLimit(t *testing.T) {
+	_, _, base := withUnprotected(t, map[int64]any{-70000: make([]byte, 70000)})
+	pad := maxReceiptOctets - base + 70000
+	path, key, n := withUnprotected(t, map[int64]any{-70000: make([]byte, pad)})
+	if n != maxReceiptOctets {
+		t.Fatalf("padded receipt is %d octets", n)
+	}
+	if r := verifyReceipt(path, key, "02"); !r.Ok {
+		t.Fatalf("receipt at the limit refused: %+v", r)
+	}
+	path, key, _ = withUnprotected(t, map[int64]any{-70000: make([]byte, pad+1)})
+	if r := verifyReceipt(path, key, "02"); r.Ok || r.FailedAt != failedAtStructure || !strings.Contains(r.Error, "size") {
+		t.Fatalf("receipt over the limit not refused: %+v", r)
+	}
+}
+
+// signedReceipt writes a one-leaf EdDSA receipt over leaf 0xaa with exactly
+// protected as its header.
+func signedReceipt(t *testing.T, protected map[any]any) (string, string) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	protBytes, err := cbor.Marshal(protected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := ed25519.Sign(priv, sigStructure(protBytes, leafHash([]byte{0xaa})))
+	proof, _ := cbor.Marshal([]any{1, 0, []any{}})
+	receipt, err := cbor.Marshal(cbor.Tag{Number: 18, Content: []any{
+		protBytes, map[any]any{396: map[any]any{-1: []any{proof}}}, nil, signature,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, _ := x509.MarshalPKIXPublicKey(pub)
+	dir := t.TempDir()
+	path, keyPath := filepath.Join(dir, "receipt.cose"), filepath.Join(dir, "log-key.pub")
+	if err := os.WriteFile(path, receipt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, keyPath
+}
+
+// 2^64-8 must not wrap to -8 (EdDSA).
+func TestAlgAboveInt64IsNotEdDSA(t *testing.T) {
+	path, key := signedReceipt(t, map[any]any{1: -8, 395: 1})
+	if r := verifyReceipt(path, key, "aa"); !r.Ok {
+		t.Fatalf("control receipt refused: %+v", r)
+	}
+	path, key = signedReceipt(t, map[any]any{1: uint64(1<<64 - 8), 395: 1})
+	if r := verifyReceipt(path, key, "aa"); r.Ok {
+		t.Fatalf("alg 2^64-8 accepted as EdDSA: %+v", r)
+	}
+}
+
+// As in the Python and Rust verifiers: a bad crit fails at structure, with
+// no diagnostic root.
+func TestBadCritFailsBeforeProofs(t *testing.T) {
+	path, key := signedReceipt(t, map[any]any{1: -8, 2: []any{99}, 99: 0, 395: 1})
+	r := verifyReceipt(path, key, "aa")
+	if r.Ok || r.FailedAt != failedAtStructure || r.Root != "" || !strings.Contains(r.Error, "does not understand") {
+		t.Fatalf("bad crit: %+v", r)
 	}
 }

@@ -38,6 +38,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 
 	"github.com/fxamacker/cbor/v2"
@@ -233,6 +234,10 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		r.Error = fmt.Sprintf("read receipt: %v", err)
 		return r
 	}
+	if len(data) == 0 || len(data) > maxReceiptOctets {
+		r.Error = fmt.Sprintf("receipt size is not 1 to %d octets", maxReceiptOctets)
+		return r
+	}
 	logPub := loadPublicKey(logPubkeyPath)
 
 	// The receipt is read item by item rather than through go-cose's
@@ -241,8 +246,8 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	// their value, as the receipt encoding rule's other verifiers do.
 	var outer cbor.RawTag
 	var items []cbor.RawMessage
-	if err := cbor.Unmarshal(data, &outer); err != nil || outer.Number != 18 ||
-		cbor.Unmarshal(outer.Content, &items) != nil || len(items) != 4 {
+	if err := receiptDec.Unmarshal(data, &outer); err != nil || outer.Number != 18 ||
+		receiptDec.Unmarshal(outer.Content, &items) != nil || len(items) != 4 {
 		r.Error = "decode receipt COSE_Sign1: not a tag-18 array of four items"
 		return r
 	}
@@ -264,11 +269,11 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		return r
 	}
 	var protBytes, signature []byte
-	if items[0][0]>>5 != 2 || cbor.Unmarshal(items[0], &protBytes) != nil {
+	if items[0][0]>>5 != 2 || receiptDec.Unmarshal(items[0], &protBytes) != nil {
 		r.Error = "receipt protected header is not a byte string"
 		return r
 	}
-	if items[3][0]>>5 != 2 || cbor.Unmarshal(items[3], &signature) != nil {
+	if items[3][0]>>5 != 2 || receiptDec.Unmarshal(items[3], &signature) != nil {
 		r.Error = "receipt signature is not a byte string"
 		return r
 	}
@@ -282,7 +287,7 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 			r.Error = "receipt rejected: " + err.Error()
 			return r
 		}
-		if prot = rawAnyMap(protBytes); prot == nil {
+		if prot = receiptMap(protBytes); prot == nil {
 			r.Error = "receipt protected header is not a map"
 			return r
 		}
@@ -308,7 +313,7 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	algName, algErr := algNameFromCode(algCode)
 
 	// Decode the proof blob from the unprotected vdp map (shared by both vds paths).
-	unprot := rawAnyMap(items[1])
+	unprot := receiptMap(items[1])
 	vdpAny, ok := mapGet(unprot, hdrVDP)
 	if !ok {
 		r.Error = "unprotected vdp (label 396) missing"
@@ -623,7 +628,7 @@ func rootFromInclusionProof(leafEntry []byte, index, treeSize int64, auditPath [
 // decodeInclusionProof decodes cbor([tree_size, leaf_index, [audit_path bstrs]]).
 func decodeInclusionProof(blob []byte) (int64, int64, [][]byte, error) {
 	var arr []cbor.RawMessage
-	if err := cbor.Unmarshal(blob, &arr); err != nil || len(arr) != 3 {
+	if err := receiptDec.Unmarshal(blob, &arr); err != nil || len(arr) != 3 {
 		return 0, 0, nil, fmt.Errorf("inclusion proof must be [tree_size, leaf_index, [path]]")
 	}
 	// fxamacker reads CBOR null or undefined into an int64 or a slice as its
@@ -636,14 +641,14 @@ func decodeInclusionProof(blob []byte) (int64, int64, [][]byte, error) {
 		return 0, 0, nil, fmt.Errorf("inclusion proof path must be an array")
 	}
 	var treeSize, leafIndex int64
-	if err := cbor.Unmarshal(arr[0], &treeSize); err != nil {
+	if err := receiptDec.Unmarshal(arr[0], &treeSize); err != nil {
 		return 0, 0, nil, fmt.Errorf("inclusion proof tree_size not an int: %v", err)
 	}
-	if err := cbor.Unmarshal(arr[1], &leafIndex); err != nil {
+	if err := receiptDec.Unmarshal(arr[1], &leafIndex); err != nil {
 		return 0, 0, nil, fmt.Errorf("inclusion proof leaf_index not an int: %v", err)
 	}
 	var path [][]byte
-	if err := cbor.Unmarshal(arr[2], &path); err != nil {
+	if err := receiptDec.Unmarshal(arr[2], &path); err != nil {
 		return 0, 0, nil, fmt.Errorf("inclusion proof path not an array of bstr: %v", err)
 	}
 	if treeSize <= 0 || leafIndex < 0 || leafIndex >= treeSize || treeSize > maxTreeSize {
@@ -673,7 +678,7 @@ func decodeInclusionProof(blob []byte) (int64, int64, [][]byte, error) {
 //	    else:    acc = SHA-256(acc    || sibling)
 func verifyCCFV1Proof(proofBlob []byte, claimDigest []byte) ([]byte, error) {
 	var proof map[any]any
-	if err := cbor.Unmarshal(proofBlob, &proof); err != nil {
+	if err := receiptDec.Unmarshal(proofBlob, &proof); err != nil {
 		return nil, fmt.Errorf("CCF proof is not valid CBOR: %v", err)
 	}
 	leafAny, ok := mapGet(proof, 1)
@@ -828,6 +833,31 @@ func rawProtectedMap(rawProtected cbor.RawMessage) map[any]any {
 	return rawAnyMap(inner)
 }
 
+// maxReceiptOctets is the receipt encoding rule's octet limit, the same as the
+// Python package's MAX_MESSAGE_BYTES.
+const maxReceiptOctets = 10 * 1024 * 1024
+
+// receiptDec decodes receipt items. The receipt encoding rule limits no array
+// or map other than by the octet limit, so fxamacker's default caps of 131,072
+// elements or pairs, which would refuse a receipt the rule accepts, are lifted
+// to the largest values fxamacker allows.
+var receiptDec = func() cbor.DecMode {
+	dm, err := cbor.DecOptions{MaxArrayElements: 2147483647, MaxMapPairs: 2147483647}.DecMode()
+	if err != nil {
+		panic(err)
+	}
+	return dm
+}()
+
+// receiptMap decodes a CBOR map in a receipt into map[any]any, or nil.
+func receiptMap(raw []byte) map[any]any {
+	var m map[any]any
+	if len(raw) == 0 || receiptDec.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	return m
+}
+
 // rawAnyMap decodes a CBOR map (not bstr-wrapped) into map[any]any.
 func rawAnyMap(raw cbor.RawMessage) map[any]any {
 	if len(raw) == 0 {
@@ -871,6 +901,11 @@ func intAt(m map[any]any, label int64) (int64, bool) {
 	case int64:
 		return n, true
 	case uint64:
+		// Above int64, a conversion would wrap (2^64-8 would read as -8,
+		// EdDSA), so such a value is no integer label value here.
+		if n > math.MaxInt64 {
+			return 0, false
+		}
 		return int64(n), true
 	case int:
 		return int64(n), true

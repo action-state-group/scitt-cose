@@ -42,6 +42,7 @@ from .cose_sign1 import (
     HDR_ALG,
     HDR_CRIT,
     CoseError,
+    _check_critical_headers,
     sign_sign1,
     strict_decode,
     verify_sign1,
@@ -505,6 +506,17 @@ def _verify_receipt(
     vds = protected.get(HDR_VDS)
     if type(vds) is not int:
         vds = None
+    # RFC 9052 §3.1 crit is a structural check: it runs before any proof is
+    # read, as in the Rust and Go verifiers, so a bad crit fails at
+    # "structure" with no diagnostic root. verify_sign1 repeats it.
+    try:
+        _check_critical_headers(
+            protected,
+            _CCF_RECEIPT_UNDERSTOOD if vds == VDS_CCF_LEDGER_SHA256 else _RECEIPT_UNDERSTOOD,
+        )
+    except CoseError as exc:
+        result.errors.append(str(exc))
+        return result
     if HDR_ALG not in protected:
         result.errors.append("protected header missing alg (label 1)")
         return result
