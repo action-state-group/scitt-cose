@@ -362,7 +362,7 @@ self-consistency:
   inputs. CI runs it with `SCITT_REQUIRE_GO=1`, so the cross-check can never
   silently skip. (`tests/test_crosslang_go.py`)
 - **A second, receipt-only cross-language check: Rust.** `rust/scitt-cose`
-  (on `coset` + `ed25519-dalek`/`p256`, with its own clean-room RFC 9162
+  (on `ciborium` + `ed25519-dalek`/`p256`, with its own clean-room RFC 9162
   Merkle fold in `rust/scitt-cose/src/merkle.rs`) independently verifies
   receipts this library emits, including the `iat`/`grade` protected-header
   labels and the two booleans (`witness_time_established`,

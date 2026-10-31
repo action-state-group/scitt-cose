@@ -76,7 +76,7 @@ receipts, `receipt.error`).
 | `sub`            | CWT_Claims → claim **2**                                          |
 | `string_claims`  | every string-keyed/string-valued CWT claim, **verbatim**          |
 | `receipt.root`   | clean-room RFC 6962 fold of leaf + inclusion proof                |
-| receipt sig      | go-cose verify of the log's COSE_Sign1 over the reconstructed root|
+| receipt sig      | go-cose verifier over the receipt's Sig_structure with the reconstructed root|
 
 The CWT_Claims map is read by re-decoding the **raw protected bstr** with
 `fxamacker/cbor`, with defensive lookups across `int64`/`uint64`/`int` key
@@ -84,6 +84,13 @@ encodings — label **15** is the conformant value (NOT `13` / `kcwt`). The
 receipt's `vds` (verifiable-data-structure) is read **only** from the
 integrity-protected header (label 395); a `vds` placed in the unprotected header
 is ignored, defeating that downgrade.
+
+A receipt is read item by item, not through go-cose's `Sign1Message`, and its
+raw octets, protected header and every inclusion-proof blob must first meet the
+receipt encoding rule of agent-action-capsule's interop profile v1 §6.2.2
+(`encoding.go`), which the Python package and the Rust crate apply too. A
+header label the verifier does not read is ignored whatever its value, so long
+as the receipt meets the rule.
 
 ## Standards status
 
@@ -98,5 +105,5 @@ COSE*).
 
 ## Dependencies
 
-- `github.com/veraison/go-cose` — COSE_Sign1 decode + signature verification
+- `github.com/veraison/go-cose` — statement COSE_Sign1 decode + signature verification
 - `github.com/fxamacker/cbor/v2` — robust CBOR decode of the headers/proofs

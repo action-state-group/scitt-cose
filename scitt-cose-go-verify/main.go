@@ -9,7 +9,8 @@
 // statement payload as opaque bytes.
 //
 // It uses veraison/go-cose (the established Go COSE library) to verify
-// signatures and reads the CWT_Claims (RFC 9597, protected header label 15)
+// signatures, reads a receipt's items itself after the receipt encoding rule
+// (encoding.go), and reads the CWT_Claims (RFC 9597, protected header label 15)
 // directly from the protected bstr with fxamacker/cbor. The Merkle inclusion
 // proof is reconstructed clean-room (RFC 6962 / RFC 9162 §2.1.1) so the receipt
 // is verified WITHOUT trusting the log operator.
@@ -34,6 +35,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -45,6 +47,7 @@ import (
 // COSE protected-header labels (IANA COSE Header Parameters registry).
 const (
 	hdrAlg         = 1  // RFC 9052 §3.1
+	hdrCrit        = 2  // RFC 9052 §3.1
 	hdrContentType = 3  // RFC 9052 §3.1
 	hdrKID         = 4  // RFC 9052 §3.1
 	hdrCWTClaims   = 15 // RFC 9597 "CWT Claims" (NOT 13 / kcwt)
@@ -232,32 +235,58 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	}
 	logPub := loadPublicKey(logPubkeyPath)
 
-	// The signature must cover the root rebuilt from the leaf, which is set
-	// as the payload below. A Receipt's payload is detached; an attached one
-	// is refused rather than silently replaced. Only null (0xf6) is detached:
-	// the raw slot is read first, since go-cose refuses undefined (0xf7) only
-	// as a decode error (scitt-cose#104).
-	const attachedPayload = "receipt payload is attached; a receipt's payload must be detached"
+	// The receipt is read item by item rather than through go-cose's
+	// Sign1Message, which refuses header labels this verifier does not read
+	// (an integer kid, a content type of "abc"); those are ignored whatever
+	// their value, as the receipt encoding rule's other verifiers do.
 	var outer cbor.RawTag
 	var items []cbor.RawMessage
-	if cbor.Unmarshal(data, &outer) == nil && outer.Number == 18 &&
-		cbor.Unmarshal(outer.Content, &items) == nil &&
-		len(items) == 4 && !bytes.Equal(items[2], []byte{0xf6}) {
-		r.Error = attachedPayload
+	if err := cbor.Unmarshal(data, &outer); err != nil || outer.Number != 18 ||
+		cbor.Unmarshal(outer.Content, &items) != nil || len(items) != 4 {
+		r.Error = "decode receipt COSE_Sign1: not a tag-18 array of four items"
 		return r
 	}
 
-	var msg cose.Sign1Message
-	if err := msg.UnmarshalCBOR(data); err != nil {
-		r.Error = fmt.Sprintf("decode receipt COSE_Sign1: %v", err)
-		return r
-	}
-	if msg.Payload != nil {
-		r.Error = attachedPayload
+	// The signature must cover the root rebuilt from the leaf. A Receipt's
+	// payload is detached; an attached one is refused rather than silently
+	// replaced. Only null (0xf6) is detached (scitt-cose#104).
+	if !bytes.Equal(items[2], []byte{0xf6}) {
+		r.Error = "receipt payload is attached; a receipt's payload must be detached"
 		return r
 	}
 
-	prot := rawProtectedMap(msg.Headers.RawProtected)
+	// The receipt encoding rule then decides the octets, so this verifier
+	// accepts exactly what every verifier that applies the rule accepts. It
+	// runs before any header or proof is read; the checks above only name the
+	// more specific failure for a receipt it also refuses.
+	if err := checkEncoding(data, "the receipt", true); err != nil {
+		r.Error = "receipt rejected: " + err.Error()
+		return r
+	}
+	var protBytes, signature []byte
+	if items[0][0]>>5 != 2 || cbor.Unmarshal(items[0], &protBytes) != nil {
+		r.Error = "receipt protected header is not a byte string"
+		return r
+	}
+	if items[3][0]>>5 != 2 || cbor.Unmarshal(items[3], &signature) != nil {
+		r.Error = "receipt signature is not a byte string"
+		return r
+	}
+	if items[1][0]>>5 != 5 {
+		r.Error = "receipt unprotected header is not a map"
+		return r
+	}
+	var prot map[any]any
+	if len(protBytes) > 0 {
+		if err := checkEncoding(protBytes, "the protected header", false); err != nil {
+			r.Error = "receipt rejected: " + err.Error()
+			return r
+		}
+		if prot = rawAnyMap(protBytes); prot == nil {
+			r.Error = "receipt protected header is not a map"
+			return r
+		}
+	}
 
 	// vds MUST come from the protected (integrity-protected) header.
 	vds, ok := intAt(prot, hdrVDS)
@@ -270,12 +299,16 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		r.Error = "receipt protected header missing alg (label 1)"
 		return r
 	}
+	if err := checkCrit(prot, vds); err != nil {
+		r.Error = err.Error()
+		return r
+	}
 	// An alg this verifier cannot use fails the signature step, which for
 	// vds=1 runs after the proofs are read (see below).
 	algName, algErr := algNameFromCode(algCode)
 
 	// Decode the proof blob from the unprotected vdp map (shared by both vds paths).
-	unprot := rawAnyMap(msg.Headers.RawUnprotected)
+	unprot := rawAnyMap(items[1])
 	vdpAny, ok := mapGet(unprot, hdrVDP)
 	if !ok {
 		r.Error = "unprotected vdp (label 396) missing"
@@ -296,11 +329,19 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		r.Error = "vdp inclusion proofs is not a non-empty array"
 		return r
 	}
-	proofBlob, ok := proofs[0].([]byte)
-	if !ok {
-		r.Error = "inclusion proof entry is not a bstr"
-		return r
+	// Every blob meets the encoding rule, whichever structure reads it.
+	for _, entry := range proofs {
+		blob, ok := entry.([]byte)
+		if !ok {
+			r.Error = "inclusion proof entry is not a bstr"
+			return r
+		}
+		if err := checkEncoding(blob, "an inclusion proof", false); err != nil {
+			r.Error = "receipt rejected: " + err.Error()
+			return r
+		}
 	}
+	proofBlob := proofs[0].([]byte)
 
 	leafBytes, err := hex.DecodeString(leafEntryHex)
 	if err != nil {
@@ -356,8 +397,7 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 			if verifierErr != nil {
 				continue
 			}
-			msg.Payload = computed
-			if err := msg.Verify(nil, verifier); err != nil {
+			if err := verifier.Verify(sigStructure(protBytes, computed), signature); err != nil {
 				continue
 			}
 			r.TreeSize, r.LeafIndex = proof.size, proof.index
@@ -401,13 +441,12 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	}
 
 	// Verify the log's COSE_Sign1 over the reconstructed (detached) root.
-	msg.Payload = root
 	verifier, err := newVerifier(algName, logPub)
 	if err != nil {
 		r.Error = err.Error()
 		return r
 	}
-	if err := msg.Verify(nil, verifier); err != nil {
+	if err := verifier.Verify(sigStructure(protBytes, root), signature); err != nil {
 		r.Error = fmt.Sprintf("receipt signature did not verify over reconstructed root: %v", err)
 		return r
 	}
@@ -415,6 +454,66 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 	r.Ok = true
 	r.FailedAt = ""
 	return r
+}
+
+// sigStructure is the Signature1 Sig_structure over a detached payload with an
+// empty external AAD (RFC 9052 §4.4), the content go-cose's Verifier checks.
+func sigStructure(protected, payload []byte) []byte {
+	out, err := cbor.Marshal([]any{"Signature1", protected, []byte{}, payload})
+	if err != nil {
+		panic(err) // a fixed shape of strings and byte strings always encodes
+	}
+	return out
+}
+
+// checkCrit applies RFC 9052 §3.1: a protected crit (2) is a non-empty array
+// of integer or text labels, each present in the protected header and one
+// this verifier processes: alg (1), crit (2), CWT_Claims (15) and vds (395),
+// plus kid (4) and "ccf.v1" for a CCF receipt, as in the Python verifier.
+func checkCrit(prot map[any]any, vds int64) error {
+	critAny, ok := mapGet(prot, hdrCrit)
+	if !ok {
+		return nil
+	}
+	labels, ok := critAny.([]any)
+	if !ok || len(labels) == 0 {
+		return errors.New("crit (label 2) must be a non-empty array (RFC 9052 §3.1)")
+	}
+	understood := map[any]bool{int64(hdrAlg): true, int64(hdrCrit): true, int64(hdrCWTClaims): true, int64(hdrVDS): true}
+	if vds == vdsCCFLedgerSHA256 {
+		understood[int64(hdrKID)] = true
+		understood["ccf.v1"] = true
+	}
+	for _, label := range labels {
+		var key any
+		var present bool
+		switch l := label.(type) {
+		case int64:
+			key = l
+			_, present = mapGet(prot, l)
+		case uint64:
+			key = l
+			_, present = prot[l]
+		case string:
+			key = l
+			_, present = prot[l]
+		default:
+			return errors.New("crit lists a label that is not an integer or a text string")
+		}
+		if !present {
+			return errors.New("crit lists a header absent from the protected header")
+		}
+		if n, isUint := key.(uint64); isUint {
+			key = int64(-1) // above every understood label
+			if n <= 1<<63-1 {
+				key = int64(n)
+			}
+		}
+		if !understood[key] {
+			return errors.New("crit marks a header this verifier does not understand (RFC 9052 §3.1)")
+		}
+	}
+	return nil
 }
 
 // --- Merkle (clean-room RFC 6962 §2.1.1) ------------------------------------
@@ -526,6 +625,15 @@ func decodeInclusionProof(blob []byte) (int64, int64, [][]byte, error) {
 	var arr []cbor.RawMessage
 	if err := cbor.Unmarshal(blob, &arr); err != nil || len(arr) != 3 {
 		return 0, 0, nil, fmt.Errorf("inclusion proof must be [tree_size, leaf_index, [path]]")
+	}
+	// fxamacker reads CBOR null or undefined into an int64 or a slice as its
+	// zero value, so each item's major type is checked first: unsigned
+	// integers, then an array.
+	if len(arr[0]) == 0 || arr[0][0]>>5 != 0 || len(arr[1]) == 0 || arr[1][0]>>5 != 0 {
+		return 0, 0, nil, fmt.Errorf("inclusion proof tree_size and leaf_index must be unsigned integers")
+	}
+	if len(arr[2]) == 0 || arr[2][0]>>5 != 4 {
+		return 0, 0, nil, fmt.Errorf("inclusion proof path must be an array")
 	}
 	var treeSize, leafIndex int64
 	if err := cbor.Unmarshal(arr[0], &treeSize); err != nil {

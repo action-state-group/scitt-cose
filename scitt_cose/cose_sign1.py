@@ -286,6 +286,10 @@ def _check_critical_headers(protected: dict, understood_labels) -> None:
     if not isinstance(crit, (list, tuple)) or len(crit) == 0:
         raise CoseError("crit (label 2) must be a non-empty array (RFC 9052 §3.1)")
     for label in crit:
+        # RFC 9052 labels are integers or text. type(), not isinstance: true
+        # would otherwise compare equal to the alg label 1.
+        if type(label) not in (int, str):
+            raise CoseError("crit lists a label that is not an integer or a text string")
         if label not in protected:
             raise CoseError(
                 f"crit lists header {label!r} which is absent from the protected header"
@@ -355,7 +359,7 @@ def verify_sign1(
     signature = bytes(signature)
 
     alg = protected.get(HDR_ALG)
-    if not isinstance(alg, int):
+    if type(alg) is not int:
         raise CoseError("protected header has no integer alg (label 1)")
 
     # RFC 9052 §3.1: reject any header marked critical that we do not understand.

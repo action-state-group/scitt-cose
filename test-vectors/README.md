@@ -64,6 +64,16 @@ v1/<vector-id>/
   expected.json        every value a verifier needs + the expected verdict
 ```
 
+### Shared receipt vectors
+
+`cll-receipt/receipt-vectors.json` is a pinned copy of
+checkpointed-local-log's receipt vectors (see `cll-receipt/PROVENANCE.md`):
+receipts that agent-action-capsule's receipt encoding rule accepts or refuses.
+The Python, Rust and Go verifiers each decide every case as pinned
+(`tests/test_receipt_encoding_rule.py`,
+`rust/scitt-cose/tests/cll_receipt_vectors.rs`,
+`scitt-cose-go-verify/receipt_encoding_test.go`).
+
 ### The vectors
 
 | id | result | failure_code |

@@ -47,3 +47,4 @@ d59f6a7b6eb5cabacb776e9f7a8e02d0f21b7f75356510efa7f150b66502bd15  v1/fail-zero-s
 08b6e9ec3bd002da4e21976b6dc1411567d30acb30d671161583b3d8351e7692  v1/fail-zero-size-proof/payload.bin
 a6265644a5316cad92f1d1446c6512fa187580eaca47945def94b60e04dd76d9  v1/fail-zero-size-proof/receipt.cose
 a6dd4523ffdda1754c234acf209bdde758db7d30438468700a7bf6c01e800e3a  v1/fail-zero-size-proof/statement.cose
+abed8aed10ba9e32563d639b2451f01ca9ff99d9723c27e5486f9647089593d3  cll-receipt/receipt-vectors.json
