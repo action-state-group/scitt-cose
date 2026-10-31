@@ -16,6 +16,7 @@
 //! }
 //! ```
 
+pub mod encoding;
 pub mod merkle;
 pub mod receipt;
 

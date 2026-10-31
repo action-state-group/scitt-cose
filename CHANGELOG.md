@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Receipt verification follows agent-action-capsule's receipt encoding
+  rule** (#106). `verify_receipt` in Python, the Rust crate
+  `scitt-cose-receipt` and the Go verifier check the COSE_Sign1, its
+  protected header and every inclusion-proof blob on their raw octets under
+  the rule of agent-action-capsule's interop profile v1 §6.2.2
+  (agent-action-capsule#523): no trailing octet, definite lengths, shortest
+  arguments, no repeated map key, integer or text map keys, valid UTF-8,
+  integers from -2^63 to 2^64 - 1, no float, no simple value but `false`,
+  `true` and `null`, no tag but the outer tag 18, and at most 16 levels of
+  nesting. A receipt that breaks it is refused with `failed_at` of
+  `structure`, whatever its signature, including one whose offending value
+  sits under a header label the verifier does not read. Before, the three
+  verifiers decided such receipts differently from each other and from
+  agent-action-capsule: of checkpointed-local-log's 90 shared receipt
+  vectors, Python decided 23 differently, Rust 36 and Go 35 (Rust and Go
+  each also refused 2 or 3 receipts the rule accepts).
+- A protected `crit` label must be an integer or a text string, so
+  `crit: [true]` is no longer read as the `alg` label 1, and a protected
+  header label of any other type is refused, so a `true` key no longer
+  answers for `alg` (Python, for any COSE_Sign1). The Rust crate and the Go
+  verifier now apply RFC 9052 §3.1 `crit` to receipts at all: an empty,
+  absent, unknown or non-integer, non-text label is refused. All three check
+  a receipt's `crit` before reading any proof, so a bad `crit` fails at
+  `structure` with no diagnostic root. A `vds` of `true` is no longer read
+  as 1 (Python).
+- The Rust crate and the Go verifier refuse a receipt over 10,485,760
+  octets, as Python already did. Go no longer reads an integer above 2^63 - 1
+  as a wrapped negative one (an `alg` of 2^64 - 8 was read as EdDSA), and no
+  longer refuses a receipt with an array or map of more than 131,072 items,
+  fxamacker's default cap. The Rust crate reports no `iat` for a value
+  beyond i64 instead of truncating it, and Python likewise reports no `iat`
+  outside -2^63 to 2^63 - 1.
+- **Rust crate `scitt-cose-receipt`** reads the receipt with `ciborium`
+  instead of `coset`, which refused header labels the crate does not read (an
+  integer `kid`, a content type of `"abc"`, `crit` naming CWT_Claims or
+  `vds`); `coset` is no longer a dependency. The Go verifier likewise reads
+  the receipt item by item instead of through go-cose's `Sign1Message`, and
+  refuses a null `tree_size`, `leaf_index` or path in an inclusion proof,
+  which it read as zero.
+- New vector set `test-vectors/cll-receipt/`: a pinned copy of
+  checkpointed-local-log's `receipt-vectors.json`, which all three
+  verifiers now decide as pinned.
+
 ### Fixed
 
 - **Rust crate `scitt-cose-receipt`**: a receipt whose payload is CBOR

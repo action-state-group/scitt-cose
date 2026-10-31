@@ -96,10 +96,11 @@ cargo clippy --all-targets -- -D warnings
 `tests/vectors.rs` runs both `../../test-vectors/v1/` (shared with Python/Go;
 `valid-ccf-vds2` is intentionally asserted *rejected*, not `VALID`, here — see
 above) and `../../test-vectors/receipt-v1/` (the `iat`/`grade` set).
+`tests/cll_receipt_vectors.rs` runs `../../test-vectors/cll-receipt/`.
 
 ## Dependencies
 
-- [`coset`](https://crates.io/crates/coset) — COSE_Sign1 CBOR structure
+- [`ciborium`](https://crates.io/crates/ciborium) — CBOR decoding of the COSE_Sign1 items, after the crate's own receipt encoding rule check (`src/encoding.rs`)
 - [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) — EdDSA signature verification
 - [`p256`](https://crates.io/crates/p256) / [`ecdsa`](https://crates.io/crates/ecdsa) — ES256 (P-256 ECDSA) signature verification
 - [`sha2`](https://crates.io/crates/sha2) — the Merkle fold's SHA-256

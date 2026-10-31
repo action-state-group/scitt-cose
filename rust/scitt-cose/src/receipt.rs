@@ -27,12 +27,15 @@
 //! corresponding value is present *and* the receipt's signature verifies --
 //! never inferred, never true on a failed verify.
 
-use coset::cbor::value::Value as CborValue;
-use coset::iana::EnumI64 as _;
-use coset::{CoseSign1, RegisteredLabelWithPrivate, TaggedCborSerializable};
+use ciborium::value::Value as CborValue;
 use ecdsa::signature::Verifier as _;
 
+use crate::encoding;
 use crate::merkle::{expected_inclusion_path_len, root_from_inclusion_proof, MAX_TREE_SIZE};
+
+/// Protected-header labels for alg and crit (RFC 9052 §3.1).
+const HDR_ALG: i64 = 1;
+const HDR_CRIT: i64 = 2;
 
 /// COSE algorithm code point for EdDSA (RFC 9053).
 const ALG_EDDSA: i64 = -8;
@@ -59,6 +62,10 @@ const CWT_CLAIM_IAT: i64 = 6;
 /// string. Provisional by bilateral convention (see module docs), not an
 /// IANA registration.
 const HDR_GRADE: i64 = -65537;
+
+/// The receipt encoding rule's octet limit, the Python package's
+/// `MAX_MESSAGE_BYTES`.
+pub const MAX_RECEIPT_OCTETS: usize = 10 * 1024 * 1024;
 
 /// A receipt carries one inclusion proof per leaf; an array longer than this
 /// is hostile padding, capped before any per-element work (same ceiling as
@@ -163,7 +170,7 @@ impl ReceiptResult {
 
 fn decode_inclusion_proof(blob: &[u8]) -> Result<(u64, u64, Vec<[u8; 32]>), ReceiptError> {
     let mut reader = blob;
-    let value: CborValue = coset::cbor::de::from_reader(&mut reader)
+    let value: CborValue = ciborium::de::from_reader(&mut reader)
         .map_err(|e| malformed(format!("inclusion proof is not valid CBOR: {e:?}")))?;
     if !reader.is_empty() {
         return Err(malformed("inclusion proof has trailing CBOR bytes"));
@@ -219,10 +226,11 @@ fn decode_inclusion_proof(blob: &[u8]) -> Result<(u64, u64, Vec<[u8; 32]>), Rece
     Ok((tree_size, leaf_index, path))
 }
 
-/// Whether the payload item of a tagged COSE_Sign1 that coset has already
-/// decoded is CBOR null (`0xf6`), the only detached form. Skips the tag and
-/// array heads, lets ciborium consume the protected and unprotected items,
-/// and reads the next byte.
+/// Whether the payload item of a tagged COSE_Sign1 is CBOR null (`0xf6`),
+/// the only detached form. Skips the tag and array heads, lets ciborium
+/// consume the protected and unprotected items, and reads the next byte.
+/// ciborium reads CBOR undefined (0xf7) as null too, so only the raw slot
+/// tells them apart (scitt-cose#104).
 fn payload_slot_is_null(receipt: &[u8]) -> bool {
     // Length of a tag or array head: the initial byte plus 0, 1, 2, 4 or 8
     // argument bytes (31 is an indefinite-length array with none).
@@ -241,33 +249,100 @@ fn payload_slot_is_null(receipt: &[u8]) -> bool {
         }
     }
     for _ in 0..2 {
-        if coset::cbor::de::from_reader::<CborValue, _>(&mut rest).is_err() {
+        if ciborium::de::from_reader::<CborValue, _>(&mut rest).is_err() {
             return false;
         }
     }
     rest.first() == Some(&0xf6)
 }
 
-/// Read the protected header's integer-labeled entries into a lookup map,
-/// tolerating both `Label::Int` (registered) and any other label shape by
-/// simply skipping it -- callers here only ever look up known int labels.
-fn protected_map(sign1: &CoseSign1) -> Vec<(i64, CborValue)> {
-    sign1
-        .protected
-        .header
-        .rest
-        .iter()
-        .filter_map(|(label, v)| match label {
-            coset::Label::Int(i) => Some((*i, v.clone())),
-            coset::Label::Text(_) => None,
-        })
-        .collect()
+/// The four items of a tagged COSE_Sign1.
+struct Sign1 {
+    protected: Vec<u8>,
+    unprotected: Vec<(CborValue, CborValue)>,
+    payload: CborValue,
+    signature: Vec<u8>,
 }
 
-fn find_label(map: &[(i64, CborValue)], label: i64) -> Option<CborValue> {
+/// Read a tag-18 COSE_Sign1 `[protected bstr, unprotected map, payload,
+/// signature bstr]` with nothing after it. Only the item types are checked
+/// here; the header labels are read by the caller, so a label this verifier
+/// does not read is ignored whatever its value.
+fn parse_sign1(receipt: &[u8]) -> Result<Sign1, String> {
+    let mut reader = receipt;
+    let value: CborValue =
+        ciborium::de::from_reader(&mut reader).map_err(|e| format!("not valid CBOR: {e:?}"))?;
+    if !reader.is_empty() {
+        return Err("trailing bytes after the COSE_Sign1".into());
+    }
+    let items = match value {
+        CborValue::Tag(18, inner) => match *inner {
+            CborValue::Array(items) if items.len() == 4 => items,
+            _ => return Err("tag 18 does not hold a four-item array".into()),
+        },
+        _ => return Err("not a tag-18 COSE_Sign1".into()),
+    };
+    let mut items = items.into_iter();
+    let (protected, unprotected, payload, signature) = (
+        items.next().unwrap(),
+        items.next().unwrap(),
+        items.next().unwrap(),
+        items.next().unwrap(),
+    );
+    Ok(Sign1 {
+        protected: protected
+            .into_bytes()
+            .map_err(|_| "protected header is not a byte string")?,
+        unprotected: unprotected
+            .into_map()
+            .map_err(|_| "unprotected header is not a map")?,
+        payload,
+        signature: signature
+            .into_bytes()
+            .map_err(|_| "signature is not a byte string")?,
+    })
+}
+
+/// Protected-header labels this verifier processes, for RFC 9052 §3.1 `crit`:
+/// alg (1), crit (2) itself, CWT_Claims (15) and vds (395). The Python
+/// verifier's RFC 9162 set is the same.
+const UNDERSTOOD_LABELS: [i64; 4] = [HDR_ALG, HDR_CRIT, HDR_CWT_CLAIMS, HDR_VDS];
+
+/// RFC 9052 §3.1: a protected `crit` is a non-empty array of integer or text
+/// labels, each present in the protected header and understood here.
+fn check_crit(protected: &[(CborValue, CborValue)]) -> Result<(), String> {
+    let Some(crit) = find_label(protected, HDR_CRIT) else {
+        return Ok(());
+    };
+    let labels = match crit.as_array() {
+        Some(labels) if !labels.is_empty() => labels,
+        _ => return Err("crit (label 2) must be a non-empty array (RFC 9052 §3.1)".into()),
+    };
+    for label in labels {
+        if !label.is_integer() && !label.is_text() {
+            return Err("crit lists a label that is not an integer or a text string".into());
+        }
+        if !protected.iter().any(|(k, _)| k == label) {
+            return Err("crit lists a header absent from the protected header".into());
+        }
+        let understood = label
+            .as_integer()
+            .and_then(|n| i64::try_from(n).ok())
+            .is_some_and(|n| UNDERSTOOD_LABELS.contains(&n));
+        if !understood {
+            return Err(
+                "crit marks a header this verifier does not understand (RFC 9052 §3.1)".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The value under integer `label` in a decoded CBOR map.
+fn find_label(map: &[(CborValue, CborValue)], label: i64) -> Option<&CborValue> {
     map.iter()
-        .find(|(l, _)| *l == label)
-        .map(|(_, v)| v.clone())
+        .find(|(k, _)| k.as_integer() == Some(label.into()))
+        .map(|(_, v)| v)
 }
 
 /// Finding added when the signature fails: the protected-header claims are
@@ -287,60 +362,74 @@ pub fn verify_receipt(
 ) -> ReceiptResult {
     let mut result = ReceiptResult::default();
 
-    let sign1 = match CoseSign1::from_tagged_slice(receipt) {
+    if receipt.is_empty() || receipt.len() > MAX_RECEIPT_OCTETS {
+        return result.fail(format!(
+            "receipt size is not 1 to {MAX_RECEIPT_OCTETS} octets"
+        ));
+    }
+    let sign1 = match parse_sign1(receipt) {
         Ok(s) => s,
-        Err(e) => return result.fail(format!("receipt is not a COSE_Sign1 message: {e:?}")),
+        Err(e) => return result.fail(format!("receipt is not a COSE_Sign1 message: {e}")),
     };
 
     // The signature must cover the root rebuilt from the leaf, so the payload
     // is detached; an attached one is refused before any proof is read.
-    // coset reads CBOR undefined (0xf7) as an absent payload too, so the raw
-    // slot must also be null (scitt-cose#104).
-    if sign1.payload.is_some() || !payload_slot_is_null(receipt) {
+    if !sign1.payload.is_null() || !payload_slot_is_null(receipt) {
         return result.fail(
             "receipt carries an attached payload; this verifier only accepts the detached form",
         );
     }
 
-    let prot = protected_map(&sign1);
+    // The receipt encoding rule then decides the octets, so this verifier
+    // accepts exactly what every verifier that applies the rule accepts. It
+    // runs before any header or proof is read; the checks above only name the
+    // more specific failure for a receipt it also refuses.
+    if let Err(e) = encoding::check(receipt, "the receipt", true) {
+        return result.fail(format!("receipt rejected: {e}"));
+    }
+    let prot = if sign1.protected.is_empty() {
+        Vec::new()
+    } else {
+        if let Err(e) = encoding::check(&sign1.protected, "the protected header", false) {
+            return result.fail(format!("receipt rejected: {e}"));
+        }
+        match ciborium::de::from_reader::<CborValue, _>(sign1.protected.as_slice())
+            .ok()
+            .and_then(|v| v.into_map().ok())
+        {
+            Some(m) => m,
+            None => return result.fail("protected header is not a map"),
+        }
+    };
+    if let Err(e) = check_crit(&prot) {
+        return result.fail(e);
+    }
 
     // vds MUST come from the protected (integrity-protected) header.
-    let vds = match find_label(&prot, HDR_VDS)
-        .as_ref()
-        .and_then(CborValue::as_integer)
-    {
+    let vds = match find_label(&prot, HDR_VDS).and_then(CborValue::as_integer) {
         Some(v) => i128::from(v),
         None => return result.fail("protected header missing vds (label 395)"),
     };
 
-    let alg_code = match &sign1.protected.header.alg {
-        Some(RegisteredLabelWithPrivate::Assigned(a)) => a.to_i64(),
-        Some(RegisteredLabelWithPrivate::PrivateUse(i)) => *i,
+    let alg_code = match find_label(&prot, HDR_ALG) {
         None => return result.fail("protected header missing alg (label 1)"),
-        _ => return result.fail("protected header alg is not an integer code point"),
+        Some(v) => match v.as_integer().and_then(|n| i64::try_from(n).ok()) {
+            Some(code) => code,
+            None => return result.fail("protected header alg is not an integer code point"),
+        },
     };
 
     // Read iat/grade from the PROTECTED header into locals; they are copied
     // onto the result only after the signature verifies (never on failure).
     let mut iat: Option<i64> = None;
     let mut grade: Option<String> = None;
-    if let Some(claims) = find_label(&prot, HDR_CWT_CLAIMS)
-        .as_ref()
-        .and_then(CborValue::as_map)
-    {
-        if let Some((_, v)) = claims
-            .iter()
-            .find(|(k, _)| k.as_integer().map(i128::from) == Some(CWT_CLAIM_IAT as i128))
-        {
-            if let Some(n) = v.as_integer() {
-                iat = Some(i128::from(n) as i64);
-            }
+    if let Some(claims) = find_label(&prot, HDR_CWT_CLAIMS).and_then(CborValue::as_map) {
+        if let Some(n) = find_label(claims, CWT_CLAIM_IAT).and_then(CborValue::as_integer) {
+            // An iat beyond i64 is not reported rather than truncated.
+            iat = i64::try_from(n).ok();
         }
     }
-    if let Some(g) = find_label(&prot, HDR_GRADE)
-        .as_ref()
-        .and_then(CborValue::as_text)
-    {
+    if let Some(g) = find_label(&prot, HDR_GRADE).and_then(CborValue::as_text) {
         grade = Some(g.to_string());
     }
 
@@ -350,23 +439,11 @@ pub fn verify_receipt(
         );
     }
 
-    let vdp = match sign1
-        .unprotected
-        .rest
-        .iter()
-        .find(|(label, _)| *label == coset::Label::Int(HDR_VDP))
-        .map(|(_, v)| v)
-        .and_then(CborValue::as_map)
-    {
+    let vdp = match find_label(&sign1.unprotected, HDR_VDP).and_then(CborValue::as_map) {
         Some(m) => m,
         None => return result.fail("unprotected vdp (label 396) missing or not a map"),
     };
-    let proofs = match vdp
-        .iter()
-        .find(|(k, _)| k.as_integer().map(i128::from) == Some(VDP_INCLUSION_PROOFS as i128))
-        .map(|(_, v)| v)
-        .and_then(CborValue::as_array)
-    {
+    let proofs = match find_label(vdp, VDP_INCLUSION_PROOFS).and_then(CborValue::as_array) {
         Some(p) if !p.is_empty() => p,
         _ => return result.fail("vdp has no inclusion proofs (key -1)"),
     };
@@ -384,6 +461,9 @@ pub fn verify_receipt(
             Some(b) => b,
             None => return result.fail("inclusion proof entry is not a byte string"),
         };
+        if let Err(e) = encoding::check(blob, "an inclusion proof", false) {
+            return result.fail(format!("receipt rejected: {e}"));
+        }
         match decode_inclusion_proof(blob) {
             Ok(candidate) => candidates.push(candidate),
             Err(e) => return result.fail(e.to_string()),
@@ -434,12 +514,12 @@ pub fn verify_receipt(
 }
 
 fn verify_signature(
-    sign1: &CoseSign1,
+    sign1: &Sign1,
     alg_code: i64,
     public_key_pem: &str,
     detached_payload: &[u8; 32],
 ) -> Result<(), ReceiptError> {
-    let tbs = sign1.tbs_detached_data(detached_payload, &[]);
+    let tbs = sig_structure(&sign1.protected, detached_payload);
     match alg_code {
         ALG_EDDSA => {
             use ed25519_dalek::pkcs8::DecodePublicKey;
@@ -476,6 +556,20 @@ fn verify_signature(
     }
 }
 
+/// The `Signature1` Sig_structure over a detached payload with an empty
+/// external AAD (RFC 9052 §4.4).
+fn sig_structure(protected: &[u8], payload: &[u8]) -> Vec<u8> {
+    let value = CborValue::Array(vec![
+        CborValue::Text("Signature1".into()),
+        CborValue::Bytes(protected.to_vec()),
+        CborValue::Bytes(Vec::new()),
+        CborValue::Bytes(payload.to_vec()),
+    ]);
+    let mut out = Vec::new();
+    ciborium::ser::into_writer(&value, &mut out).expect("writing to a Vec cannot fail");
+    out
+}
+
 #[cfg(test)]
 mod proof_shape_tests {
     use super::*;
@@ -495,7 +589,7 @@ mod proof_shape_tests {
                 CborValue::Array(vec![CborValue::Bytes(vec![0; 32]); count]),
             ]);
             let mut bytes = Vec::new();
-            coset::cbor::ser::into_writer(&value, &mut bytes).unwrap();
+            ciborium::ser::into_writer(&value, &mut bytes).unwrap();
             assert!(matches!(
                 decode_inclusion_proof(&bytes),
                 Err(ReceiptError::Malformed(_))
@@ -509,5 +603,143 @@ mod proof_shape_tests {
             decode_inclusion_proof(&[0x83, 1, 0, 0x80, 0]),
             Err(ReceiptError::Malformed(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use super::*;
+    use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
+    use ed25519_dalek::Signer;
+    use sha2::{Digest, Sha256};
+
+    fn encode(value: &CborValue) -> Vec<u8> {
+        let mut out = Vec::new();
+        ciborium::ser::into_writer(value, &mut out).unwrap();
+        out
+    }
+
+    /// A one-leaf EdDSA receipt over leaf 0xaa with exactly `protected` as
+    /// its header and `extra` added to its unprotected header, and the PEM
+    /// key it verifies under.
+    fn signed(
+        protected: Vec<(CborValue, CborValue)>,
+        extra: Vec<(CborValue, CborValue)>,
+    ) -> (Vec<u8>, String) {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let protected = encode(&CborValue::Map(protected));
+        let root: [u8; 32] = Sha256::new().chain_update([0x00, 0xaa]).finalize().into();
+        let signature = key.sign(&sig_structure(&protected, &root));
+        let proof = encode(&CborValue::Array(vec![
+            1.into(),
+            0.into(),
+            CborValue::Array(vec![]),
+        ]));
+        let mut unprotected = vec![(
+            HDR_VDP.into(),
+            CborValue::Map(vec![(
+                VDP_INCLUSION_PROOFS.into(),
+                CborValue::Array(vec![CborValue::Bytes(proof)]),
+            )]),
+        )];
+        unprotected.extend(extra);
+        let receipt = encode(&CborValue::Tag(
+            18,
+            Box::new(CborValue::Array(vec![
+                CborValue::Bytes(protected),
+                CborValue::Map(unprotected),
+                CborValue::Null,
+                CborValue::Bytes(signature.to_bytes().to_vec()),
+            ])),
+        ));
+        let pem = key
+            .verifying_key()
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap();
+        (receipt, pem)
+    }
+
+    fn eddsa() -> Vec<(CborValue, CborValue)> {
+        vec![
+            (HDR_ALG.into(), ALG_EDDSA.into()),
+            (HDR_VDS.into(), 1.into()),
+        ]
+    }
+
+    #[test]
+    fn a_long_array_under_an_unread_label_is_accepted() {
+        let long = CborValue::Array(vec![0.into(); 131_073]);
+        let wide = CborValue::Map((0..131_073).map(|i| (i.into(), 0.into())).collect());
+        let (receipt, pem) = signed(
+            eddsa(),
+            vec![((-70000).into(), long), ((-70001).into(), wide)],
+        );
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(r.ok, "{:?}", r.errors);
+    }
+
+    #[test]
+    fn octet_limit() {
+        let padded = |n: usize| {
+            signed(
+                eddsa(),
+                vec![((-70000).into(), CborValue::Bytes(vec![0; n]))],
+            )
+        };
+        let base = padded(70_000).0.len();
+        let pad = MAX_RECEIPT_OCTETS - base + 70_000;
+        let (receipt, pem) = padded(pad);
+        assert_eq!(receipt.len(), MAX_RECEIPT_OCTETS);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(r.ok, "{:?}", r.errors);
+        let (receipt, pem) = padded(pad + 1);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(!r.ok);
+        assert_eq!(r.failed_at, Some(FailedAt::Structure));
+    }
+
+    #[test]
+    fn an_alg_above_int64_is_not_eddsa() {
+        let (receipt, pem) = signed(eddsa(), vec![]);
+        assert!(verify_receipt(&receipt, &[0xaa], &pem).ok);
+        let (receipt, pem) = signed(
+            vec![
+                (HDR_ALG.into(), (u64::MAX - 7).into()),
+                (HDR_VDS.into(), 1.into()),
+            ],
+            vec![],
+        );
+        assert!(!verify_receipt(&receipt, &[0xaa], &pem).ok);
+    }
+
+    #[test]
+    fn an_iat_beyond_i64_is_not_truncated() {
+        let mut protected = eddsa();
+        protected.push((
+            HDR_CWT_CLAIMS.into(),
+            CborValue::Map(vec![(CWT_CLAIM_IAT.into(), (1u64 << 63).into())]),
+        ));
+        let (receipt, pem) = signed(protected, vec![]);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(r.ok, "{:?}", r.errors);
+        assert_eq!(r.iat, None);
+    }
+
+    #[test]
+    fn a_bad_crit_fails_before_any_proof_is_read() {
+        let mut protected = eddsa();
+        protected.push((HDR_CRIT.into(), CborValue::Array(vec![99.into()])));
+        protected.push((99.into(), 0.into()));
+        let (receipt, pem) = signed(protected, vec![]);
+        let r = verify_receipt(&receipt, &[0xaa], &pem);
+        assert!(!r.ok);
+        assert_eq!(r.failed_at, Some(FailedAt::Structure));
+        assert_eq!(r.root, None);
+        assert!(
+            r.errors.iter().any(|e| e.contains("does not understand")),
+            "{:?}",
+            r.errors
+        );
     }
 }

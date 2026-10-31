@@ -36,12 +36,13 @@ from typing import Union
 
 import cbor2
 
-from . import merkle
+from . import _encoding_rule, merkle
 from .cose_sign1 import (
     COSE_SIGN1_TAG,
     HDR_ALG,
     HDR_CRIT,
     CoseError,
+    _check_critical_headers,
     sign_sign1,
     strict_decode,
     verify_sign1,
@@ -425,6 +426,11 @@ def verify_receipt(
       root computed by SHA-256 over the CCF leaf formula then walked up an
       RFC 6962–style sibling path; COSE_Sign1 (ES384) verified over that root.
 
+    The receipt's octets, its protected header and every inclusion-proof
+    blob must meet the receipt encoding rule of agent-action-capsule's
+    interop profile v1 §6.2.2 (see ``scitt_cose._encoding_rule``); a header
+    label this function does not read is otherwise ignored.
+
     Never raises — failures land in :attr:`ReceiptResult.errors`, and
     :attr:`ReceiptResult.failed_at` names the step that failed.
     """
@@ -467,7 +473,25 @@ def _verify_receipt(
     if payload_slot is not None:
         result.errors.append("receipt payload is attached; a receipt's payload must be detached")
         return result
+    # The receipt encoding rule (see _encoding_rule) then decides the octets,
+    # so this verifier accepts exactly what every verifier that applies the
+    # rule accepts. It runs before any header or proof is read; the checks
+    # above only name the more specific failure for a receipt it also refuses.
+    try:
+        _encoding_rule.check(bytes(receipt), "the receipt", outer_tag=True)
+    except CoseError as exc:
+        result.errors.append(f"receipt rejected: {exc}")
+        return result
     unprotected = _plain(unprotected)
+    if not isinstance(protected_bstr, (bytes, bytearray)):
+        result.errors.append("protected header is not a byte string")
+        return result
+    try:
+        if protected_bstr:
+            _encoding_rule.check(bytes(protected_bstr), "the protected header")
+    except CoseError as exc:
+        result.errors.append(f"receipt rejected: {exc}")
+        return result
     try:
         protected = _plain(cbor2.loads(protected_bstr)) if protected_bstr else {}
     except Exception as exc:  # noqa: BLE001 - name only, never echo input bytes
@@ -477,8 +501,22 @@ def _verify_receipt(
         result.errors.append("protected header is not a map")
         return result
 
-    # vds MUST come from the protected (integrity-protected) header.
+    # vds MUST come from the protected (integrity-protected) header. type(),
+    # not isinstance: a CBOR true would otherwise compare equal to vds 1.
     vds = protected.get(HDR_VDS)
+    if type(vds) is not int:
+        vds = None
+    # RFC 9052 §3.1 crit is a structural check: it runs before any proof is
+    # read, as in the Rust and Go verifiers, so a bad crit fails at
+    # "structure" with no diagnostic root. verify_sign1 repeats it.
+    try:
+        _check_critical_headers(
+            protected,
+            _CCF_RECEIPT_UNDERSTOOD if vds == VDS_CCF_LEDGER_SHA256 else _RECEIPT_UNDERSTOOD,
+        )
+    except CoseError as exc:
+        result.errors.append(str(exc))
+        return result
     if HDR_ALG not in protected:
         result.errors.append("protected header missing alg (label 1)")
         return result
@@ -503,9 +541,18 @@ def _verify_receipt(
     # would make bytes(int) allocate a multi-gigabyte zero buffer from a tiny
     # receipt. Require an actual byte string first.
     first_proof = inclusion_proofs[0]
-    if not isinstance(first_proof, (bytes, bytearray)):
-        result.errors.append("inclusion proof entry is not a byte string")
-        return result
+    # Every blob meets the encoding rule, whichever structure reads it, so a
+    # proof the verifier would skip cannot carry a form another verifier reads
+    # differently.
+    for proof in inclusion_proofs:
+        if not isinstance(proof, (bytes, bytearray)):
+            result.errors.append("inclusion proof entry is not a byte string")
+            return result
+        try:
+            _encoding_rule.check(bytes(proof), "an inclusion proof")
+        except CoseError as exc:
+            result.errors.append(f"receipt rejected: {exc}")
+            return result
 
     if vds == VDS_RFC9162_SHA256:
         # Parse every candidate before verifying: a valid proof must not hide a
@@ -601,7 +648,9 @@ def _verify_receipt(
     cwt_claims = protected.get(HDR_CWT_CLAIMS)
     if isinstance(cwt_claims, dict):
         iat_val = cwt_claims.get(CWT_CLAIM_IAT)
-        if isinstance(iat_val, int) and not isinstance(iat_val, bool):
+        # Within int64 only, as the Rust crate reports it; a larger iat is
+        # not reported.
+        if type(iat_val) is int and -(2**63) <= iat_val < 2**63:
             result.iat = iat_val
         iss_val = cwt_claims.get(CWT_CLAIM_ISS)
         if isinstance(iss_val, str):

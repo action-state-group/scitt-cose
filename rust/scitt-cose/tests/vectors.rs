@@ -322,7 +322,7 @@ fn receipt_v1_attached_payload_reports_nothing() {
 
 #[test]
 fn receipt_v1_undefined_payload_rejected() {
-    // scitt-cose#104: coset reads a payload of CBOR undefined (0xf7) as
+    // scitt-cose#104: CBOR libraries read a payload of undefined (0xf7) as
     // absent, so only the raw payload slot tells it from null.
     assert_matches("fail-undefined-payload");
 }
@@ -331,8 +331,9 @@ fn receipt_v1_undefined_payload_rejected() {
 fn receipt_v1_undefined_payload_is_the_only_defect() {
     // The same bytes with the payload slot set back to null verify, so the
     // vector fails on the payload alone. The slot sits just before the
-    // 64-byte signature and its two-byte head. Re-encoding the tag and array
-    // heads non-minimally or indefinitely must not change the verdict either.
+    // 64-byte signature and its two-byte head. Tag and array heads re-encoded
+    // non-minimally or indefinitely break the receipt encoding rule
+    // (scitt-cose#106), but an undefined payload is still reported as such.
     let (expected, _) = run_receipt_v1("fail-undefined-payload");
     let dir = repo_root().join("test-vectors/receipt-v1/fail-undefined-payload");
     let mut receipt = std::fs::read(dir.join("receipt.cose")).unwrap();
@@ -347,12 +348,25 @@ fn receipt_v1_undefined_payload_is_the_only_defect() {
     let mut long_heads = vec![0xd8, 0x12, 0x98, 0x04];
     long_heads.extend_from_slice(&receipt[2..]);
     let result = scitt_cose_receipt::verify_receipt(&long_heads, &leaf, &log_pub);
-    assert!(result.ok, "{:?}", result.errors);
+    assert!(!result.ok);
+    assert!(
+        result.errors.iter().any(|e| e.contains("shortest form")),
+        "{:?}",
+        result.errors
+    );
     let mut indefinite = vec![0xd2, 0x9f];
     indefinite.extend_from_slice(&receipt[2..]);
     indefinite.push(0xff);
     let result = scitt_cose_receipt::verify_receipt(&indefinite, &leaf, &log_pub);
-    assert!(result.ok, "{:?}", result.errors);
+    assert!(!result.ok);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("indefinite length")),
+        "{:?}",
+        result.errors
+    );
     indefinite[slot] = 0xf7;
     let result = scitt_cose_receipt::verify_receipt(&indefinite, &leaf, &log_pub);
     assert!(!result.ok);
