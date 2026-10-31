@@ -648,7 +648,9 @@ def _verify_receipt(
     cwt_claims = protected.get(HDR_CWT_CLAIMS)
     if isinstance(cwt_claims, dict):
         iat_val = cwt_claims.get(CWT_CLAIM_IAT)
-        if isinstance(iat_val, int) and not isinstance(iat_val, bool):
+        # Within int64 only, as the Rust crate reports it; a larger iat is
+        # not reported.
+        if type(iat_val) is int and -(2**63) <= iat_val < 2**63:
             result.iat = iat_val
         iss_val = cwt_claims.get(CWT_CLAIM_ISS)
         if isinstance(iss_val, str):

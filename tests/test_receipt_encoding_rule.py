@@ -237,3 +237,13 @@ def test_a_boolean_protected_label_is_not_the_alg_label(eddsa_keys):
     msg = cbor2.dumps(cbor2.CBORTag(18, [protected_bstr, {}, b"x", signature]))
     with pytest.raises(CoseError, match="not an integer or a text string"):
         verify_sign1(msg, public_key_pem=pub)
+
+
+def test_an_iat_beyond_int64_is_not_reported():
+    """As in the Rust crate, whose iat is an i64."""
+    key, pem = _key()
+    leaf = "aa"
+    for iat, reported in ((2**63 - 1, 2**63 - 1), (2**63, None)):
+        r = verify_receipt(_signed({1: -8, 15: {6: iat}, 395: 1}, leaf, key), leaf_entry_hex=leaf, log_public_key_pem=pem)
+        assert r.ok, r.errors
+        assert r.iat == reported

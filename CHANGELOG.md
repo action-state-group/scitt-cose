@@ -36,7 +36,8 @@ All notable changes to this project will be documented in this file.
   as a wrapped negative one (an `alg` of 2^64 - 8 was read as EdDSA), and no
   longer refuses a receipt with an array or map of more than 131,072 items,
   fxamacker's default cap. The Rust crate reports no `iat` for a value
-  beyond i64 instead of truncating it.
+  beyond i64 instead of truncating it, and Python likewise reports no `iat`
+  outside -2^63 to 2^63 - 1.
 - **Rust crate `scitt-cose-receipt`** reads the receipt with `ciborium`
   instead of `coset`, which refused header labels the crate does not read (an
   integer `kid`, a content type of `"abc"`, `crit` naming CWT_Claims or
