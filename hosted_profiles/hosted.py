@@ -1151,7 +1151,7 @@ function _pemToDer(pem){
   var b64=String(pem).replace(/-----BEGIN [^-]+-----/,"").replace(/-----END [^-]+-----/,"").replace(/\\s+/g,"");
   return _b64StdToBytes(b64);
 }
-var COSE_ALG_EDDSA=-8,COSE_SIGN1_TAG=18;
+var COSE_ALG_EDDSA=-8,COSE_ALG_ED25519=-19,COSE_SIGN1_TAG=18;
 /* Verify a COSE_Sign1 statement for real, in-browser -- returns true/false,
  * throws on anything structurally wrong (unsupported alg, malformed CBOR,
  * detached payload) so the caller can fold "couldn't verify" and "verified
@@ -1171,7 +1171,7 @@ async function verifyStatementEd25519(statementBytes,pubkeyPem){
     var ph=_cborDecode(protectedBstr,0).value;
     if(ph instanceof Map)alg=ph.get(1);
   }
-  if(alg!==COSE_ALG_EDDSA)throw new Error("unsupported alg (browser check only verifies EdDSA/-8)");
+  if(alg!==COSE_ALG_EDDSA&&alg!==COSE_ALG_ED25519)throw new Error("unsupported alg (browser check only verifies Ed25519: EdDSA/-8 or -19)");
   var tbs=_sigStructureBytes(protectedBstr,payloadSlot);
   var key=await crypto.subtle.importKey("spki",_pemToDer(pubkeyPem),{name:"Ed25519"},false,["verify"]);
   return crypto.subtle.verify({name:"Ed25519"},key,signature,tbs);

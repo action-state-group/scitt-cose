@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **alg -19 (RFC 9864 fully-specified Ed25519) is accepted** for Signed
+  Statements and Receipts, verified exactly as -8 on an Ed25519 key; `-8`
+  is unchanged. `sign_sign1` and `build_receipt` take `alg="Ed25519"`, and
+  the hosted verifier and its in-browser check accept both. Fixes the hosted
+  `/verify` rejection of the IETF 127 hackathon objects (#108). The Go and
+  Rust cross-verifiers still accept -8 only.
+
 ### Changed
 
 - **Receipt verification follows agent-action-capsule's receipt encoding

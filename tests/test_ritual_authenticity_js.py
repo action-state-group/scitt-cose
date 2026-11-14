@@ -54,7 +54,7 @@ def _run_js(capsule_js_path, op: dict):
     return json.loads(result.stdout)
 
 
-def _signed_capsule() -> tuple[dict, bytes]:
+def _signed_capsule(alg: str = "EdDSA") -> tuple[dict, bytes]:
     """A capsule carrying a genuine, self-asserted-key COSE_Sign1 statement."""
     key = ed25519.Ed25519PrivateKey.generate()
     priv_pem = key.private_bytes(
@@ -67,7 +67,7 @@ def _signed_capsule() -> tuple[dict, bytes]:
     capsule = {"capsule_id": capsule_id, "action_type": "decide"}
     payload = json.dumps(capsule, sort_keys=True, separators=(",", ":")).encode()
     stmt = build_signed_statement(
-        payload, alg="EdDSA", private_key_pem=priv_pem, issuer="acme",
+        payload, alg=alg, private_key_pem=priv_pem, issuer="acme",
         subject=capsule_id, content_type="application/json",
     )
     capsule["signed_statement"] = {
@@ -112,6 +112,19 @@ def test_js_tampered_signature_fails_not_skips(capsule_js_path):
     r = _run_js(capsule_js_path, {"fn": "checkAuthenticity", "capsules": [capsule]})
     assert r["status"] == "fail", "tampered signature must fail, not skip"
     assert r["status"] != "skip"
+
+
+@pytestmark_node
+def test_js_alg_19_verifies_and_tamper_fails(capsule_js_path):
+    """RFC 9864 Ed25519 (-19) takes the same real-WebCrypto path as -8."""
+    capsule, stmt = _signed_capsule("Ed25519")
+    r = _run_js(capsule_js_path, {"fn": "checkAuthenticity", "capsules": [capsule]})
+    assert r["status"] == "skip" and "unaltered since signing" in r["detail"]
+    tampered = bytearray(stmt)
+    tampered[-1] ^= 0xFF
+    capsule["signed_statement"]["statement_b64"] = base64.b64encode(bytes(tampered)).decode()
+    r = _run_js(capsule_js_path, {"fn": "checkAuthenticity", "capsules": [capsule]})
+    assert r["status"] == "fail"
 
 
 @pytestmark_node

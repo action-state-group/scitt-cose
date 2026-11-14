@@ -11,6 +11,8 @@ wrong.
 Supported algorithms (RFC 9053):
 
 * ``EdDSA`` — code point ``-8``; signature is the raw Ed25519 signature.
+* ``Ed25519`` — code point ``-19`` (RFC 9864 fully-specified Ed25519); the
+  same key type and raw signature as ``EdDSA``, verified identically.
 * ``ES256`` — code point ``-7``; COSE carries the signature as raw ``r || s``
   (64 bytes), *not* DER. We convert to/from DER on the :mod:`cryptography`
   boundary via :func:`encode_dss_signature` / :func:`decode_dss_signature`.
@@ -50,6 +52,9 @@ MAX_MESSAGE_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 #: COSE algorithm code points (RFC 9053).
 COSE_ALG_EDDSA = -8
+#: RFC 9864 fully-specified Ed25519; verifies exactly like EdDSA (-8) on an
+#: Ed25519 key.
+COSE_ALG_ED25519 = -19
 COSE_ALG_ES256 = -7
 #: ES384: ECDSA with P-384 curve and SHA-384; used by CCF service keys.
 COSE_ALG_ES384 = -35
@@ -57,6 +62,7 @@ COSE_ALG_ES384 = -35
 #: Map of the algorithm names this module can sign/verify to code points.
 ALG_NAME_TO_CODE = {
     "EdDSA": COSE_ALG_EDDSA,
+    "Ed25519": COSE_ALG_ED25519,
     "ES256": COSE_ALG_ES256,
     "ES384": COSE_ALG_ES384,
 }
@@ -115,7 +121,7 @@ def sign_sign1(
 ) -> bytes:
     """Produce a COSE_Sign1 message (CBOR tag-18) over ``payload``.
 
-    ``alg`` is ``"EdDSA"``, ``"ES256"`` or ``"ES384"``, and the key must match
+    ``alg`` is ``"EdDSA"``, ``"Ed25519"``, ``"ES256"`` or ``"ES384"``, and the key must match
     it (Ed25519, P-256, P-384); its code point is forced into
     ``protected[1]`` regardless of any caller-supplied value, so the signed
     protected header always declares the algorithm actually used. Any other
@@ -137,9 +143,9 @@ def sign_sign1(
 
     key = serialization.load_pem_private_key(_as_bytes(private_key_pem), password=None)
 
-    if alg == "EdDSA":
+    if alg in ("EdDSA", "Ed25519"):
         if not isinstance(key, ed25519.Ed25519PrivateKey):
-            raise CoseError("alg EdDSA requires an Ed25519 private key")
+            raise CoseError(f"alg {alg} requires an Ed25519 private key")
         signature = key.sign(tbs)
     else:
         curve, digest, width = _ECDSA[ALG_NAME_TO_CODE[alg]]
@@ -376,9 +382,11 @@ def verify_sign1(
         raise CoseError(f"could not load public key: {exc}") from exc
 
     try:
-        if alg == COSE_ALG_EDDSA:
+        if alg in (COSE_ALG_EDDSA, COSE_ALG_ED25519):
             if not isinstance(pubkey, ed25519.Ed25519PublicKey):
-                raise CoseError("alg is EdDSA (-8) but the public key is not Ed25519")
+                raise CoseError(
+                    f"alg is {ALG_CODE_TO_NAME[alg]} ({alg}) but the public key is not Ed25519"
+                )
             pubkey.verify(signature, tbs)
         elif alg in _ECDSA:
             # RFC 9053 §2.1 fixes the curve with the algorithm: ES256 is
@@ -417,6 +425,7 @@ __all__ = [
     "HDR_ALG",
     "HDR_CRIT",
     "COSE_ALG_EDDSA",
+    "COSE_ALG_ED25519",
     "COSE_ALG_ES256",
     "COSE_ALG_ES384",
     "ALG_NAME_TO_CODE",
