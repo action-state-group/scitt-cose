@@ -236,8 +236,9 @@ finding-by-finding resolutions, and the consciously-accepted items.
 
 ### Algorithms
 
-`sign_sign1` / statements support `"EdDSA"` (code point −8) and `"ES256"`
-(−7). For ES256, COSE carries the signature as **raw `r || s`** (64 bytes), not
+`sign_sign1` / statements support `"EdDSA"` (code point −8), `"Ed25519"`
+(−19, RFC 9864's fully-specified Ed25519; verified identically to −8) and
+`"ES256"` (−7). For ES256, COSE carries the signature as **raw `r || s`** (64 bytes), not
 DER; the conversion happens at the `cryptography` boundary. ML-DSA code points
 (RFC 9964) are *recognized* in the status notice but signing is **not**
 implemented here.
@@ -327,6 +328,8 @@ verified against the RFC Editor / IANA registries):
 - **RFC 9052** — *CBOR Object Signing and Encryption (COSE): Structures and
   Process* (COSE_Sign1, Sig_structure).
 - **RFC 9053** — *COSE: Initial Algorithms* (EdDSA −8, ES256 −7).
+- **RFC 9864** — *Fully-Specified Algorithms for JOSE and COSE* (Ed25519 −19,
+  accepted for verification alongside EdDSA −8).
 - **RFC 9162** — *Certificate Transparency Version 2* (SHA-256 Merkle tree;
   inclusion and consistency proofs; reuses the RFC 6962 tree hash).
 - **RFC 9597** — *CBOR Web Token (CWT) Claims in COSE Headers* — the **CWT Claims**
