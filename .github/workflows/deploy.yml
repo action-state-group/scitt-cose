@@ -126,11 +126,14 @@ jobs:
           want = sys.argv[2]
           label = svc["metadata"].get("labels", {}).get("git-sha")
           latest = svc["status"]["latestReadyRevisionName"]
-          traffic = {t.get("revisionName", t.get("latestRevision")): t.get("percent", 0) for t in svc["status"]["traffic"]}
+          traffic = {}
+          for t in svc["status"]["traffic"]:
+              key = t.get("revisionName") or (latest if t.get("latestRevision") else None)
+              traffic[key] = traffic.get(key, 0) + t.get("percent", 0)
           tmpl = svc["spec"]["template"]["metadata"].get("labels", {}).get("git-sha")
           if label != want or tmpl != want:
               sys.exit(f"service label is {label!r} and revision template label {tmpl!r}, expected {want}")
-          if traffic.get(latest) != 100 and traffic.get(True) != 100:
+          if traffic.get(latest) != 100:
               sys.exit(f"revision {latest} does not take all traffic ({traffic}); the service is pinned to an older revision, "
                        "move it with: gcloud run services update-traffic scitt-verifier --to-latest")
           PY
