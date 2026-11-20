@@ -108,7 +108,7 @@ for account in $(printf '%s\n' "$build_sa" "$runtime_sa" | sort -u); do
 done
 run gcloud iam service-accounts add-iam-policy-binding "$SA" --project "$PROJECT" \
   --role roles/iam.workloadIdentityUser \
-  --member "principalSet://iam.googleapis.com/projects/$number/locations/global/workloadIdentityPools/$POOL/attribute.repository_id/$REPO_ID"
+  --member "principalSet://iam.googleapis.com/projects/$number/locations/global/workloadIdentityPools/$POOL/attribute.workflow_ref/$REPO/.github/workflows/deploy.yml@refs/heads/main"
 
 cat <<VARS
 
