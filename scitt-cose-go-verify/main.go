@@ -86,14 +86,30 @@ type receiptOut struct {
 	// FailedAt names the step a failed verify stopped at, as the Python and
 	// Rust verifiers do (scitt-cose#93): failedAtSignature when a proof
 	// rebuilt a root and the signature step failed, failedAtStructure on any
-	// earlier failure, and omitted when Ok.
+	// earlier failure, failedAtTreeHead when a trusted tree head was supplied
+	// and no verifying proof matches it, and omitted when Ok.
 	FailedAt string `json:"failed_at,omitempty"`
+	// PositionAuthenticated is true only when a trusted tree head was
+	// supplied (--tree-head-root and --tree-head-size) and the proof used
+	// has exactly that size and rebuilds exactly that root (scitt-cose#110).
+	// Ok authenticates inclusion under the signed root only: RFC 9942 carries
+	// tree_size and leaf_index outside the signed bytes, so they are
+	// unauthenticated unless this is true.
+	PositionAuthenticated bool `json:"position_authenticated"`
+}
+
+// treeHead is a trusted (root, tree_size) pair the caller authenticated for
+// the RFC 9162 tree a receipt belongs to.
+type treeHead struct {
+	root []byte
+	size int64
 }
 
 // Values of receiptOut.FailedAt.
 const (
 	failedAtStructure = "structure"
 	failedAtSignature = "signature"
+	failedAtTreeHead  = "tree_head"
 )
 
 // result is the JSON shape printed to stdout. It is PROFILE-OPAQUE: only generic
@@ -132,6 +148,8 @@ func main() {
 	receiptPath := flag.String("receipt", "", "path to a COSE Receipt (CBOR bytes); optional")
 	logPubkeyPath := flag.String("log-pubkey", "", "path to PEM public key of the transparency log (with --receipt)")
 	leafEntryHex := flag.String("leaf-entry-hex", "", "hex of the leaf entry the receipt proves (with --receipt)")
+	headRoot := flag.String("tree-head-root", "", "hex of a trusted RFC 9162 tree head root (with --tree-head-size)")
+	headSize := flag.Int64("tree-head-size", 0, "tree size of the trusted tree head (with --tree-head-root)")
 	flag.Parse()
 
 	if *statementPath == "" && *receiptPath == "" {
@@ -154,7 +172,15 @@ func main() {
 		if *logPubkeyPath == "" || *leafEntryHex == "" {
 			fail("--receipt requires --log-pubkey and --leaf-entry-hex")
 		}
-		out.Receipt = verifyReceipt(*receiptPath, *logPubkeyPath, *leafEntryHex)
+		var head *treeHead
+		if *headRoot != "" || *headSize != 0 {
+			rootBytes, err := hex.DecodeString(*headRoot)
+			if err != nil || len(rootBytes) != 32 || *headSize <= 0 {
+				fail("--tree-head-root (32-byte hex) and --tree-head-size (positive) must be given together")
+			}
+			head = &treeHead{rootBytes, *headSize}
+		}
+		out.Receipt = verifyReceiptWithHead(*receiptPath, *logPubkeyPath, *leafEntryHex, head)
 		if !out.Receipt.Ok {
 			out.Valid = false
 		}
@@ -221,6 +247,14 @@ func verifyStatement(out *result, statementPath, pubkeyPath, algName string) {
 // it reconstructs the Merkle root from the leaf + inclusion proof (clean-room),
 // then checks the log's COSE_Sign1 over that reconstructed root.
 func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut {
+	return verifyReceiptWithHead(receiptPath, logPubkeyPath, leafEntryHex, nil)
+}
+
+// verifyReceiptWithHead is verifyReceipt with an optional trusted tree head:
+// the proof used must have exactly its size and rebuild exactly its root, else
+// the receipt fails at failedAtTreeHead. A head for a later, larger tree does
+// not authenticate an earlier receipt (that needs a consistency proof).
+func verifyReceiptWithHead(receiptPath, logPubkeyPath, leafEntryHex string, head *treeHead) *receiptOut {
 	r := &receiptOut{}
 	// Failures in the signature step set failedAtSignature where they occur;
 	// every other failure stopped earlier.
@@ -390,6 +424,7 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 		if verifierErr == nil {
 			verifier, verifierErr = newVerifier(algName, logPub)
 		}
+		headMismatch := false
 		for _, proof := range candidates {
 			computed, ok := rootFromInclusionProof(leafBytes, proof.index, proof.size, proof.path)
 			if !ok {
@@ -405,13 +440,23 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 			if err := verifier.Verify(sigStructure(protBytes, computed), signature); err != nil {
 				continue
 			}
+			if head != nil && (head.size != proof.size || !bytes.Equal(head.root, computed)) {
+				headMismatch = true
+				continue
+			}
 			r.TreeSize, r.LeafIndex = proof.size, proof.index
 			r.Root = hex.EncodeToString(computed)
+			r.PositionAuthenticated = head != nil
 			r.Ok = true
 			return r
 		}
 		if r.Root != "" {
 			r.FailedAt = failedAtSignature
+		}
+		if headMismatch {
+			r.FailedAt = failedAtTreeHead
+			r.Error = "no inclusion proof matches the trusted tree head (tree_size and root must both match)"
+			return r
 		}
 		if verifierErr != nil {
 			r.Error = verifierErr.Error()
@@ -422,6 +467,11 @@ func verifyReceipt(receiptPath, logPubkeyPath, leafEntryHex string) *receiptOut 
 
 	case vdsCCFLedgerSHA256:
 		// --- vds=2: CCF ccf.v1 Merkle receipt ---
+		if head != nil {
+			r.FailedAt = failedAtTreeHead
+			r.Error = "tree head binding is not supported for ccf.v1"
+			return r
+		}
 		var ccfErr error
 		root, ccfErr = verifyCCFV1Proof(proofBlob, leafBytes)
 		if ccfErr != nil {

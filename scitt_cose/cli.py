@@ -88,6 +88,7 @@ def _verify_receipt(args) -> dict | None:
         "tree_size": result.tree_size,
         "leaf_index": result.leaf_index,
         "failed_at": result.failed_at,
+        "position_authenticated": result.position_authenticated,
         "errors": list(result.errors),
     }
 
@@ -152,8 +153,9 @@ def _print_human(report) -> None:
         print("  Receipt")
         print(f"    ok             : {r.get('ok')}")
         print(f"    root           : {r.get('root')}")
-        print(f"    tree_size      : {r.get('tree_size')}")
-        print(f"    leaf_index     : {r.get('leaf_index')}")
+        unauth = "" if r.get("position_authenticated") else " (unauthenticated)"
+        print(f"    tree_size      : {r.get('tree_size')}{unauth}")
+        print(f"    leaf_index     : {r.get('leaf_index')}{unauth}")
         for e in r.get("errors", []):
             print(f"    [ERR] {e}")
     print("-" * 72)

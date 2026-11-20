@@ -58,9 +58,15 @@ verifies. Generic (profile-opaque) output:
   "iss": "https://issuer.example",
   "sub": "urn:anything:goes",
   "string_claims": { "profile_thing": "abc" },
-  "receipt": { "ok": true, "root": "fe14…", "tree_size": 5, "leaf_index": 2 }
+  "receipt": { "ok": true, "root": "fe14…", "tree_size": 5, "leaf_index": 2, "position_authenticated": false }
 }
 ```
+
+`tree_size` and `leaf_index` are not authenticated by a verified receipt, so
+`position_authenticated` is `false`. Pass a signed tree head you verified
+yourself with `--tree-head-root <hex> --tree-head-size <n>` and the receipt must
+be for exactly that size and root (then it is `true`), or it fails at
+`tree_head`.
 
 On any failure it exits non-zero with `"valid": false` and an `"error"` (and, for
 receipts, `receipt.error`).

@@ -189,6 +189,16 @@ class ReceiptResult:
     not verify. Compare against ``"signature"`` rather than ``"structure"``,
     so that a finer split of the earlier steps stays compatible. The Rust
     crate and the Go verifier report the same.
+
+    Added by scitt-cose#110:
+
+    ``ok`` authenticates inclusion under the signed root only. RFC 9942 carries
+    ``tree_size`` and ``leaf_index`` outside the signed bytes, and more than one
+    size and position can rebuild the same root from the same path, so they are
+    authenticated only when ``position_authenticated`` is ``True``. That happens
+    only when the caller passed ``trusted_tree_head`` and the proof used has
+    exactly that size and rebuilds exactly that root. A tree head that does not
+    match fails the receipt with ``failed_at == "tree_head"``.
     """
 
     ok: bool = False
@@ -201,6 +211,18 @@ class ReceiptResult:
     subject: str | None = None
     protected_header_ext: dict = field(default_factory=dict)
     failed_at: str | None = None
+    position_authenticated: bool = False
+
+
+@dataclass(frozen=True)
+class TreeHead:
+    """A trusted ``(root, tree_size)`` pair for the RFC 9162 tree a receipt
+    belongs to. The caller authenticates it first, by whatever scheme the log
+    uses for its signed tree head; this library has no checkpoint format of
+    its own. ``root_hex`` is the 32-byte root as hex."""
+
+    root_hex: str
+    tree_size: int
 
 
 def _encode_inclusion_proof(tree_size: int, leaf_index: int, audit_path_hex: list[str]) -> bytes:
@@ -413,6 +435,7 @@ def verify_receipt(
     *,
     leaf_entry_hex: str,
     log_public_key_pem: PemLike,
+    trusted_tree_head: TreeHead | None = None,
 ) -> ReceiptResult:
     """Verify a COSE Receipt for ``leaf_entry_hex``.
 
@@ -431,11 +454,24 @@ def verify_receipt(
     interop profile v1 §6.2.2 (see ``scitt_cose._encoding_rule``); a header
     label this function does not read is otherwise ignored.
 
+    ``ok: True`` authenticates inclusion under the signed root only. The
+    result's ``tree_size`` and ``leaf_index`` are authenticated only when
+    ``position_authenticated`` is true, which requires ``trusted_tree_head``:
+    the caller's already-verified ``(root, tree_size)`` for the same RFC 9162
+    tree. The proof used must then have exactly that size and rebuild exactly
+    that root, else the receipt fails at ``"tree_head"``. A head for a later,
+    larger tree does not authenticate an earlier receipt (that needs a
+    consistency proof, which this library does not check). A head with a CCF
+    receipt fails closed.
+
     Never raises — failures land in :attr:`ReceiptResult.errors`, and
     :attr:`ReceiptResult.failed_at` names the step that failed.
     """
     result = _verify_receipt(
-        receipt, leaf_entry_hex=leaf_entry_hex, log_public_key_pem=log_public_key_pem
+        receipt,
+        leaf_entry_hex=leaf_entry_hex,
+        log_public_key_pem=log_public_key_pem,
+        trusted_tree_head=trusted_tree_head,
     )
     if not result.ok and result.failed_at is None:
         result.failed_at = "structure"
@@ -447,6 +483,7 @@ def _verify_receipt(
     *,
     leaf_entry_hex: str,
     log_public_key_pem: PemLike,
+    trusted_tree_head: TreeHead | None = None,
 ) -> ReceiptResult:
     """:func:`verify_receipt` without the default ``failed_at``: the
     signature-step failures set ``"signature"``, and every other failure is
@@ -573,6 +610,7 @@ def _verify_receipt(
         # 0.4.1 and as the CCF branch does: callers tell a malformed receipt
         # from one signed by a key they do not hold by checking ``root``.
         diagnostic = None
+        head_mismatch = False
         for tree_size, leaf_index, audit_path_hex in candidates:
             try:
                 reconstructed = _reconstruct_root(leaf_entry_hex, leaf_index, tree_size, audit_path_hex)
@@ -593,6 +631,13 @@ def _verify_receipt(
             except CoseError as exc:
                 last_error = exc
                 continue
+            if trusted_tree_head is not None and (
+                tree_size != trusted_tree_head.tree_size
+                or reconstructed != str(trusted_tree_head.root_hex).lower()
+            ):
+                head_mismatch = True
+                continue
+            result.position_authenticated = trusted_tree_head is not None
             result.tree_size = tree_size
             result.leaf_index = leaf_index
             result.root = reconstructed
@@ -601,12 +646,23 @@ def _verify_receipt(
             if diagnostic is not None:
                 result.tree_size, result.leaf_index, result.root = diagnostic
                 result.failed_at = "signature"
-            result.errors.append(f"receipt signature did not verify: {last_error}")
+            if head_mismatch:
+                result.failed_at = "tree_head"
+                result.errors.append(
+                    "no inclusion proof matches the trusted tree head "
+                    "(tree_size and root must both match)"
+                )
+            else:
+                result.errors.append(f"receipt signature did not verify: {last_error}")
             result.errors.append(_CLAIMS_WITHHELD)
             return result
 
     elif vds == VDS_CCF_LEDGER_SHA256:
         # --- vds=2: CCF ccf.v1 ---
+        if trusted_tree_head is not None:
+            result.failed_at = "tree_head"
+            result.errors.append("tree head binding is not supported for ccf.v1")
+            return result
         try:
             claim_digest = bytes.fromhex(leaf_entry_hex)
         except ValueError as exc:
@@ -682,6 +738,7 @@ def _reconstruct_root(
 
 __all__ = [
     "ReceiptResult",
+    "TreeHead",
     "build_receipt",
     "verify_receipt",
     "HDR_VDS",

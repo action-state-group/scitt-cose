@@ -20,4 +20,6 @@ pub mod encoding;
 pub mod merkle;
 pub mod receipt;
 
-pub use receipt::{verify_receipt, FailedAt, ReceiptError, ReceiptResult};
+pub use receipt::{
+    verify_receipt, verify_receipt_with_tree_head, FailedAt, ReceiptError, ReceiptResult, TreeHead,
+};

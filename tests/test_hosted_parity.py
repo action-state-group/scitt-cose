@@ -255,3 +255,60 @@ def test_capabilities_endpoint_states_not_a_transparency_service(fixtures):
     assert "transparency service" in does_not
     assert "store" in does_not or "retain" in does_not
     assert caps["retention"].startswith("nothing retained")
+
+
+def test_hosted_tree_head_cases_from_the_shared_vector():
+    """scitt-cose#110: /verify runs the same tree_head_cases every verifier runs."""
+    from pathlib import Path
+
+    d = Path(__file__).resolve().parent.parent / "test-vectors/receipt-v1/position-size-edit"
+    exp = json.loads((d / "expected.json").read_text())
+    for case in exp["tree_head_cases"]:
+        req = {
+            "receipt_b64": _b64((d / case["receipt"]).read_bytes()),
+            "log_pubkey_pem": (d / "log-key.pub").read_text(),
+            "leaf_entry_hex": exp["leaf_entry_hex"],
+        }
+        if case["tree_head"]:
+            req["tree_head_root_hex"] = case["tree_head"]["root"]
+            req["tree_head_size"] = case["tree_head"]["tree_size"]
+        out = verify_payload(req)
+        rcpt = out["receipt"]
+        assert rcpt["ok"] is case["ok"], (case["description"], out)
+        assert out["valid"] is case["ok"], case["description"]
+        assert rcpt["position_authenticated"] is case["position_authenticated"], case["description"]
+        assert rcpt["failed_at"] == case["failed_at"], case["description"]
+        assert rcpt["tree_size"] == case["tree_size"], case["description"]
+
+
+def test_hosted_rejects_a_half_given_tree_head():
+    d = __import__("pathlib").Path(__file__).resolve().parent.parent / "test-vectors/receipt-v1/position-size-edit"
+    exp = json.loads((d / "expected.json").read_text())
+    req = {
+        "receipt_b64": _b64((d / "receipt.cose").read_bytes()),
+        "log_pubkey_pem": (d / "log-key.pub").read_text(),
+        "leaf_entry_hex": exp["leaf_entry_hex"],
+        "tree_head_size": 34,
+    }
+    out = verify_payload(req)
+    assert out["valid"] is False and out["receipt"] == {"ok": False}
+    assert any("tree_head_root_hex" in r for r in out["reasons"])
+
+
+def test_hosted_ccf_receipt_with_a_tree_head_fails_closed():
+    import hashlib
+    from pathlib import Path
+
+    d = Path(__file__).resolve().parent.parent / "test-vectors/v1/valid-ccf-vds2"
+    out = verify_payload(
+        {
+            "receipt_b64": _b64((d / "receipt.cose").read_bytes()),
+            "log_pubkey_pem": (d / "log-key.pub").read_text(),
+            "leaf_entry_hex": hashlib.sha256((d / "statement.cose").read_bytes()).hexdigest(),
+            "tree_head_root_hex": "00" * 32,
+            "tree_head_size": 1,
+        }
+    )
+    assert out["valid"] is False
+    assert out["receipt"]["failed_at"] == "tree_head"
+    assert out["receipt"]["position_authenticated"] is False

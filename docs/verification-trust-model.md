@@ -37,6 +37,14 @@ encode the record as base64url **after** the `#`, so:
 You can confirm this yourself: open dev tools → Network, load a permalink,
 and watch — the fragment never appears in a request.
 
+## What a receipt's `ok: true` proves
+
+A receipt that verifies (`ok: true`) proves one thing: the statement is included in the log's Merkle tree under a root the log signed. RFC 9942 carries `tree_size` and `leaf_index` outside the signed bytes. More than one size and position can rebuild the same root from the same path, so on their own these values are not authenticated. The result reports them with `position_authenticated: false`.
+
+To authenticate them, verify the log's signed tree head yourself and pass its `(root, tree_size)` as the trusted tree head. Verification then requires the receipt's proof to be for exactly that size and to rebuild exactly that root. If it does, `position_authenticated` is `true`. If not, the receipt fails at `tree_head`. A head for a later, larger tree does not authenticate an earlier receipt. That needs a consistency proof, which this library does not check.
+
+This library has no checkpoint format of its own, so it cannot verify a signed tree head for you. A CCF (vds=2) receipt carries no size or index in the result and does not support a tree head: supplying one fails closed.
+
 ## What's checkable with zero network
 
 Both viewer pages run a "ritual" of independent stages, named and rendered

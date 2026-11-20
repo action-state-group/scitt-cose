@@ -51,6 +51,7 @@ to existing files.
 | `fail-malformed-proof` | false | — | — | false | false |
 | `fail-malformed-tail-proof` | false | — | — | false | false |
 | `fail-undefined-payload` | false | — | — | false | false |
+| `position-size-edit` | true | — | — | false | false |
 
 `trace-sept7-witness` is not synthetic: it is the real COSE Receipt bytes
 from the Action State Group's live TRACE-registry witness, captured
@@ -113,6 +114,18 @@ The last four (appended, scitt-cose#91) pin what a failed verify reports for
   reports nothing. Its leaf entry is that vector's 32-byte `entry_hash`, and
   `log-key.pub` is the witness's raw Ed25519 key as a PEM
   SubjectPublicKeyInfo. It carries `failed_at` in its own `expected.json`.
+
+`position-size-edit` (appended, scitt-cose#110) is a leaf-0 receipt issued at
+tree size 34 whose unprotected inclusion proof was edited to `tree_size` 33.
+The proof sits outside the signed bytes, so the signature still verifies and
+the same root rebuilds: with no tree head the receipt is `ok: true`, reports
+`tree_size` 33 and `position_authenticated: false`. `receipt.cose` is the
+edited receipt and `receipt-honest.cose` the unedited size-34 one; the
+`tree_head_cases` in its `expected.json` pin four runs, each naming the
+receipt, the trusted tree head `(root, tree_size)` passed (or none), and the
+`ok`, `failed_at`, `position_authenticated` and `tree_size` expected (a failed case still reports the proof's size as the diagnostic). A head
+that does not match the proof's size and rebuilt root fails at `"tree_head"`.
+An absent `position_authenticated` in any other `expected.json` means `false`.
 
 ## Failure stage (`failed-at.json`)
 

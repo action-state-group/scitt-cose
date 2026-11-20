@@ -44,7 +44,7 @@ from typing import Any
 
 from scitt_cose._status import DRAFT_TRACKING_NOTICE
 from scitt_cose.cose_sign1 import CoseError
-from scitt_cose.receipt import verify_receipt
+from scitt_cose.receipt import TreeHead, verify_receipt
 from scitt_cose.statement import parse_signed_statement
 
 # machine_mandate.py is this module's sibling in hosted_profiles/; the
@@ -381,7 +381,9 @@ VERIFY_JS = """\
       var r=v.receipt;
       html+="<div class='vcard'><h4>Receipt \\u00b7 inclusion proof</h4><dl class='kv'>"
         +row("inclusion",r.ok===true?"verified":"NOT verified",r.ok===true?"t":"f")
-        +row("root",r.root)+row("tree_size",r.tree_size)+row("leaf_index",r.leaf_index)
+        +row("root",r.root)
+        +row(r.position_authenticated===true?"tree_size":"tree_size (unauthenticated)",r.tree_size)
+        +row(r.position_authenticated===true?"leaf_index":"leaf_index (unauthenticated)",r.leaf_index)
         +"</dl></div>";
     }
     var reasons=(v.reasons||[]);
@@ -3976,6 +3978,25 @@ def _b64(value: str) -> bytes:
         return base64.b64decode(s + pad)
 
 
+def _tree_head_from_request(request: dict[str, Any]):
+    """The optional trusted tree head of a request: ``(head, error)``."""
+    root, size = request.get("tree_head_root_hex"), request.get("tree_head_size")
+    if root is None and size is None:
+        return None, None
+    if (
+        isinstance(root, str)
+        and len(root) == 64
+        and all(c in "0123456789abcdefABCDEF" for c in root)
+        and type(size) is int
+        and size > 0
+    ):
+        return TreeHead(root.lower(), size), None
+    return None, (
+        "tree_head_root_hex (64 hex characters) and tree_head_size "
+        "(positive integer) must be given together"
+    )
+
+
 def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
     """Verify a statement and/or receipt described by ``request`` (pure, stateless).
 
@@ -3987,6 +4008,10 @@ def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
     * ``receipt_b64``          — base64 of the COSE Receipt
     * ``log_pubkey_pem``       — PEM public key of the transparency log
     * ``leaf_entry_hex``       — hex of the leaf the receipt proves
+    * ``tree_head_root_hex`` / ``tree_head_size`` — optional, given together: a
+      trusted ``(root, tree_size)`` the caller already authenticated for the
+      log's RFC 9162 tree. The receipt's proof must then have exactly that
+      size and rebuild exactly that root, else the receipt fails.
 
     Returns a JSON-able verdict dict. Never raises for input problems — they land
     in ``reasons`` with ``valid: false``.
@@ -4038,19 +4063,30 @@ def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
     if has_receipt:
         log_pub = request.get("log_pubkey_pem")
         leaf = request.get("leaf_entry_hex")
+        head, head_error = _tree_head_from_request(request)
         if not log_pub or not leaf:
             receipt_report = {"ok": False}
             reasons.append("receipt requires log_pubkey_pem and leaf_entry_hex")
+        elif head_error:
+            receipt_report = {"ok": False}
+            reasons.append(head_error)
         else:
             try:
                 receipt = _b64(request["receipt_b64"])
                 log_bytes = log_pub.encode() if isinstance(log_pub, str) else log_pub
-                res = verify_receipt(receipt, leaf_entry_hex=leaf, log_public_key_pem=log_bytes)
+                res = verify_receipt(
+                    receipt,
+                    leaf_entry_hex=leaf,
+                    log_public_key_pem=log_bytes,
+                    trusted_tree_head=head,
+                )
                 receipt_report = {
                     "ok": res.ok,
                     "root": res.root,
                     "tree_size": res.tree_size,
                     "leaf_index": res.leaf_index,
+                    "position_authenticated": res.position_authenticated,
+                    "failed_at": res.failed_at,
                     "errors": list(res.errors),
                 }
                 if not res.ok:

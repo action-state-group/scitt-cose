@@ -175,6 +175,9 @@ receipt = build_receipt(
 )
 res = verify_receipt(receipt, leaf_entry_hex=entries[2], log_public_key_pem=pub)
 assert res.ok and res.root == root
+# res.tree_size / res.leaf_index are NOT authenticated: res.position_authenticated
+# is False. Pass trusted_tree_head=TreeHead(root_hex, tree_size) from a signed
+# tree head you verified yourself to authenticate them.
 
 # --- Transparent Statement = Signed Statement + Receipts ---
 transparent = attach_receipts(stmt, [receipt])
@@ -197,7 +200,7 @@ scitt-cose --statement stmt.cose --receipt receipt.cose \
 | COSE_Sign1 | `sign_sign1`, `verify_sign1`, `Sign1`, `CoseError` |
 | Statements | `build_signed_statement`, `parse_signed_statement`, `attach_receipts`, `extract_receipts` |
 | Merkle | `leaf_hash`, `merkle_root`, `inclusion_proof`, `verify_inclusion`, `consistency_proof`, `verify_consistency` |
-| Receipts | `build_receipt`, `verify_receipt`, `ReceiptResult` |
+| Receipts | `build_receipt`, `verify_receipt`, `ReceiptResult`, `TreeHead` |
 | CLL (`scitt_cose.cll`, its own namespace) | `verify_leaf_against_checkpoint`, `verify_checkpoint_chain`, `verify_range_against_checkpoint`, `witness_status_line`; the proof types `InclusionProof`, `ConsistencyProof`, `RangeProof`, `Checkpoint`; the MMR primitives (`leaf_hash`, `interior_hash`, `root_from_peaks`, `peaks`, `verify_inclusion`, `verify_consistency`, `verify_range`) |
 | Status | `DRAFT_TRACKING_NOTICE`, `RFC_SCITT_ARCHITECTURE`, `RFC_COSE_RECEIPTS`, `SUBSTRATE_RFCS` (`DRAFT_*` names kept as aliases) |
 
@@ -207,6 +210,14 @@ A verifier's behaviour on hostile and malformed input is part of its API, so it
 is spelled out here and enforced by tests (`tests/test_hardening.py`) and by
 continuous differential fuzzing (see below).
 
+- **A verified receipt does not authenticate `tree_size` or `leaf_index`.**
+  RFC 9942 carries them outside the signed bytes, and more than one size and
+  position can rebuild the same root, so `ReceiptResult.position_authenticated`
+  is `False` by default. Verify the log's signed tree head yourself and pass
+  its `(root, tree_size)` as `trusted_tree_head`; the receipt must then be for
+  exactly that size and root, or it fails at `tree_head`. A larger later head
+  does not authenticate an earlier receipt (that needs a consistency proof,
+  which this library does not check). See `docs/verification-trust-model.md`.
 - **`parse_signed_statement` and `verify_receipt` never raise on input.** Every
   outcome — bad signature, malformed CBOR, truncation, a hostile length or tree
   size — is reported in the returned value (`signature_verified` /

@@ -2,6 +2,7 @@
 """COSE Receipt build/verify (detached only; attached rejected) and negatives."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from scitt_cose.receipt import (
     HDR_VDP,
     HDR_VDS,
     VDS_RFC9162_SHA256,
+    TreeHead,
     build_receipt,
     verify_receipt,
 )
@@ -630,6 +632,7 @@ def test_frozen_receipt_v1_vectors_unchanged(vid):
         assert r.root == exp["root"]
     if "returned" in exp:
         assert {"root": r.root, "tree_size": r.tree_size, "leaf_index": r.leaf_index} == exp["returned"]
+    assert r.position_authenticated is exp.get("position_authenticated", False)
     if not exp["ok"]:
         assert any(exp["failure_contains"] in e for e in r.errors), r.errors
     # scitt-cose#93: every vector names its failure stage, in failed-at.json
@@ -686,3 +689,73 @@ def test_inclusion_proof_rejects_trailing_cbor():
 
     with pytest.raises(CoseError, match="trailing CBOR"):
         _decode_inclusion_proof(cbor2.dumps([1, 0, []]) + b"\x00")
+
+
+def test_position_size_edit_vector_tree_head_cases():
+    """scitt-cose#110: the same cases every verifier runs from expected.json."""
+    d = _RECEIPT_V1 / "position-size-edit"
+    exp = json.loads((d / "expected.json").read_text())
+    key = (d / "log-key.pub").read_bytes()
+    for case in exp["tree_head_cases"]:
+        head = case["tree_head"]
+        r = verify_receipt(
+            (d / case["receipt"]).read_bytes(),
+            leaf_entry_hex=exp["leaf_entry_hex"],
+            log_public_key_pem=key,
+            trusted_tree_head=TreeHead(head["root"], head["tree_size"]) if head else None,
+        )
+        assert r.ok is case["ok"], (case["description"], r.errors)
+        assert r.failed_at == case["failed_at"], case["description"]
+        assert r.position_authenticated is case["position_authenticated"], case["description"]
+        assert r.tree_size == case["tree_size"], case["description"]
+
+
+def test_position_is_unauthenticated_without_a_head(alg_keys):
+    alg, priv, pub = alg_keys
+    es = _entries(5)
+    receipt = build_receipt(
+        leaf_entry_hex=es[2], leaf_index=2, tree_entries_hex=es, alg=alg, log_private_key_pem=priv
+    )
+    r = verify_receipt(receipt, leaf_entry_hex=es[2], log_public_key_pem=pub)
+    assert r.ok and r.position_authenticated is False
+    head = TreeHead(merkle.merkle_root(es), 5)
+    r = verify_receipt(receipt, leaf_entry_hex=es[2], log_public_key_pem=pub, trusted_tree_head=head)
+    assert r.ok and r.position_authenticated is True
+    assert (r.tree_size, r.leaf_index) == (5, 2)
+
+
+def test_later_tree_head_does_not_authenticate_an_older_receipt(eddsa_keys):
+    priv, pub = eddsa_keys
+    es = _entries(5)
+    receipt = build_receipt(
+        leaf_entry_hex=es[1], leaf_index=1, tree_entries_hex=es, alg="EdDSA", log_private_key_pem=priv
+    )
+    later = TreeHead(merkle.merkle_root(_entries(8)), 8)
+    r = verify_receipt(receipt, leaf_entry_hex=es[1], log_public_key_pem=pub, trusted_tree_head=later)
+    assert not r.ok and r.failed_at == "tree_head" and r.position_authenticated is False
+
+
+def test_wrong_key_with_a_head_still_fails_at_signature(eddsa_keys, other_eddsa_keys):
+    priv, _ = eddsa_keys
+    _, other_pub = other_eddsa_keys
+    es = _entries(4)
+    receipt = build_receipt(
+        leaf_entry_hex=es[0], leaf_index=0, tree_entries_hex=es, alg="EdDSA", log_private_key_pem=priv
+    )
+    head = TreeHead(merkle.merkle_root(es), 4)
+    r = verify_receipt(receipt, leaf_entry_hex=es[0], log_public_key_pem=other_pub, trusted_tree_head=head)
+    assert not r.ok and r.failed_at == "signature"
+
+
+def test_ccf_receipt_with_a_tree_head_fails_closed():
+    """A CCF (vds=2) receipt carries no size to bind, so a supplied head is
+    refused at tree_head, never silently ignored (scitt-cose#110)."""
+    d = _RECEIPT_V1.parent / "v1" / "valid-ccf-vds2"
+    statement = (d / "statement.cose").read_bytes()
+    r = verify_receipt(
+        (d / "receipt.cose").read_bytes(),
+        leaf_entry_hex=hashlib.sha256(statement).hexdigest(),
+        log_public_key_pem=(d / "log-key.pub").read_bytes(),
+        trusted_tree_head=TreeHead("00" * 32, 1),
+    )
+    assert not r.ok and r.failed_at == "tree_head" and r.position_authenticated is False

@@ -100,13 +100,27 @@ constants (`BOUNDARY_TABLE`), pinned by `tests/test_hosted_page.py`.
   "statement_pubkey_pem": "…",   // optional: PEM key to check the signature
   "receipt_b64":          "…",   // optional: COSE Receipt
   "log_pubkey_pem":       "…",   // with receipt: PEM key of the log
-  "leaf_entry_hex":       "…"    // with receipt: hex of the proven leaf
+  "leaf_entry_hex":       "…",   // with receipt: hex of the proven leaf
+  "tree_head_root_hex":   "…",   // optional, with tree_head_size: trusted RFC 9162 root (64 hex)
+  "tree_head_size":       34     // optional, with tree_head_root_hex: that tree's size
 }
 ```
 
 At least one of `statement_b64` / `receipt_b64` is required. The response never
 echoes the submitted bytes back; for statements it returns only
 issuer/subject/content-type/alg/signature-verdict/`payload_len`.
+
+The `receipt` object in the response carries `position_authenticated`. A receipt
+that verifies (`ok: true`) proves inclusion under the log's signed root only:
+`tree_size` and `leaf_index` are outside the signed bytes and are authenticated
+only when `position_authenticated` is `true`, which needs the optional
+`tree_head_root_hex` and `tree_head_size` (a `(root, tree_size)` the caller
+already verified; see `docs/verification-trust-model.md`). With a head, the
+receipt's proof must have exactly that size and rebuild exactly that root, else
+the receipt is not `ok` and the reason names the tree head. The page labels the
+two rows `tree_size (unauthenticated)` / `leaf_index (unauthenticated)` unless
+the field is `true`. Giving only one of the two head fields is a failed receipt
+with a reason, not an error status.
 
 A `200` is returned for a well-formed request whose artifact is *invalid* — the
 verdict is in the `valid` boolean and `reasons[]`. Non-2xx is reserved for

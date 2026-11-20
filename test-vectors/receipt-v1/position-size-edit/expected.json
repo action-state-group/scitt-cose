@@ -1,0 +1,62 @@
+{
+  "description": "Leaf-0 receipt issued at tree size 34 whose unprotected inclusion proof was edited to tree_size 33. The proof sits outside the signed bytes, so the signature still verifies and the same root rebuilds (scitt-cose#110). receipt.cose is the edited receipt; receipt-honest.cose is the unedited size-34 receipt.",
+  "alg": "EdDSA",
+  "leaf_entry_hex": "000900",
+  "tree_size": 33,
+  "leaf_index": 0,
+  "ok": true,
+  "root": "a9d9148feff9d6c564c4c60036d67bb4a85d2cb1f5063e33262e6cc7ac3d8a05",
+  "iat": null,
+  "grade": null,
+  "witness_time_established": false,
+  "grade_cryptographically_bound": false,
+  "failed_at": null,
+  "position_authenticated": false,
+  "tree_head_cases": [
+    {
+      "description": "edited size 33, no head: ok, position unauthenticated",
+      "receipt": "receipt.cose",
+      "tree_head": null,
+      "ok": true,
+      "failed_at": null,
+      "position_authenticated": false,
+      "tree_size": 33
+    },
+    {
+      "description": "edited size 33 against the honest head (root, 34): fails at tree_head",
+      "receipt": "receipt.cose",
+      "tree_head": {
+        "root": "a9d9148feff9d6c564c4c60036d67bb4a85d2cb1f5063e33262e6cc7ac3d8a05",
+        "tree_size": 34
+      },
+      "ok": false,
+      "failed_at": "tree_head",
+      "position_authenticated": false,
+      "tree_size": 33
+    },
+    {
+      "description": "honest size 34 against head (root, 34): ok, position authenticated",
+      "receipt": "receipt-honest.cose",
+      "tree_head": {
+        "root": "a9d9148feff9d6c564c4c60036d67bb4a85d2cb1f5063e33262e6cc7ac3d8a05",
+        "tree_size": 34
+      },
+      "ok": true,
+      "failed_at": null,
+      "position_authenticated": true,
+      "tree_size": 34
+    },
+    {
+      "description": "honest size 34 against a head with the right size and a wrong root: fails at tree_head",
+      "receipt": "receipt-honest.cose",
+      "tree_head": {
+        "root": "0000000000000000000000000000000000000000000000000000000000000000",
+        "tree_size": 34
+      },
+      "ok": false,
+      "failed_at": "tree_head",
+      "position_authenticated": false,
+      "tree_size": 34
+    }
+  ]
+}
