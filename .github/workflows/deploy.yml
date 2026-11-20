@@ -1,22 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-# Deploys the standalone verifier (verify.agentactioncapsule.org, Cloud Run service scitt-verifier) to Cloud Run when a
-# release tag is chosen and Steven approves the run (RELEASING.md, "Deploy the hosted verifier"). Nothing here deploys on push.
+# Deploys the standalone verifier (verify.agentactioncapsule.org, Cloud Run service scitt-verifier) to Cloud Run when a release tag is chosen and Steven
+# approves the run (RELEASING.md, "Deploy the hosted verifier"). Nothing here deploys on push.
 #
-#   - Run by hand: Actions > deploy > Run workflow, with the tag to deploy
-#     (v0.5.0, never a branch or a bare commit).
-#   - The job runs in the `production` environment, whose required reviewer is
-#     Steven. The job starts only after his approve click.
+#   - Run by hand: Actions > deploy > Run workflow, from `main`, with the tag
+#     to deploy (v0.5.0, never a branch or a bare commit).
+#   - `resolve` runs first, without approval: it turns the tag into a commit,
+#     refuses a commit that is not on `main`, and prints both in the run
+#     summary, so the approver sees exactly what he approves.
+#   - `deploy` runs in the `production` environment, whose required reviewer is
+#     Steven. It starts only after his approve click, deploys exactly the
+#     commit `resolve` printed, and stops if the tag has moved since.
 #   - Google trusts the job through workload identity federation: the provider
 #     (deploy/wif-setup.sh) accepts only this repository, only `main`'s copy of
 #     this workflow and only the `production` environment, so the approval is
 #     what unlocks the deploy. No service-account key exists.
-#   - The deploy is `gcloud run deploy --source .` with no other flag, so the
-#     service keeps its configuration, and the deploy
-#     leaves IAM (public access) alone.
-#   - Afterwards the job asserts the service runs the tag's commit and that
-#     /health answers ok.
+#   - The deploy is `gcloud run deploy --source .` with only a commit label, so
+#     the service keeps its configuration and its public access.
+#   - Afterwards the job asserts that the latest revision carries the commit
+#     and takes all traffic, and that /health says ok.
 # Until an owner has run deploy/wif-setup.sh and set the two repository
-# variables it prints, the job is skipped.
+# variables it prints, the jobs are skipped.
 name: deploy
 
 on:
@@ -34,18 +37,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  resolve:
     if: github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_DEPLOY_SERVICE_ACCOUNT != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: production
+    timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write # the OIDC token workload identity federation exchanges
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
     env:
       TAG: ${{ inputs.tag }}
-      SERVICE: scitt-verifier
-      HOST: verify.agentactioncapsule.org
     steps:
       - name: Refuse anything but a release tag
         run: |
@@ -56,11 +57,43 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Record the commit being deployed
+      - name: Resolve the tag and require its commit to be on main
+        id: resolve
         run: |
-          echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "Deploying $TAG = $(git rev-parse HEAD)"
+          sha="$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$sha" origin/main \
+            || { echo "::error::$TAG ($sha) is not on main"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Approve deploying $TAG = $sha to scitt-verifier" >> "$GITHUB_STEP_SUMMARY"
+          git log -1 --format='%h %s' >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # the OIDC token workload identity federation exchanges
+    env:
+      TAG: ${{ inputs.tag }}
+      SHA: ${{ needs.resolve.outputs.sha }}
+      SERVICE: scitt-verifier
+      HOST: verify.agentactioncapsule.org
+    steps:
+      # The source goes in src/ so the credentials file the auth step writes
+      # into the workspace root is never part of the build upload.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: src
+          persist-credentials: false
+      - name: Stop if the tag moved after the commit was shown for approval
+        run: |
+          now="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$TAG" "refs/tags/$TAG^{}" | tail -n 1 | cut -f1)"
+          test "$now" = "$SHA" || { echo "::error::$TAG now points at '$now', not the approved $SHA"; exit 1; }
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -70,20 +103,34 @@ jobs:
         run: |
           gcloud run revisions list --service "$SERVICE" --region us-central1 --project fluxxom --limit 3
       - name: Check the source upload keeps the files the app reads at import
-        # A `--source .` upload drops gitignored files (RELEASING.md); the
-        # app reads these two bundles at import and never starts without them.
+        # A `--source .` upload drops gitignored files (see the 2026-09-18
+        # incident in capsule-anchor deploy/DEPLOY.md); the app reads these two
+        # bundles at import and never starts without them.
+        working-directory: src
         run: |
           files="$(gcloud meta list-files-for-upload .)"
           for f in viewer/dist/aac-crypto.js viewer/dist/witness-check.js; do
             printf '%s\n' "$files" | grep -qx "$f" || { echo "::error::$f is not in the upload"; exit 1; }
           done
       - name: Deploy to Cloud Run
+        working-directory: src
         run: |
           gcloud run deploy "$SERVICE" --source . --project fluxxom --region us-central1 \
             --labels "git-sha=${SHA:0:12}" --quiet
-      - name: Assert the service runs this commit and is healthy
+      - name: Assert the service runs this commit, on all traffic, with the same identity
         run: |
-          live="$(gcloud run services describe "$SERVICE" --project fluxxom --region us-central1 \
-            --format 'value(metadata.labels.git-sha)')"
-          test "$live" = "${SHA:0:12}" || { echo "::error::service label is '$live', expected ${SHA:0:12}"; exit 1; }
+          gcloud run services describe "$SERVICE" --project fluxxom --region us-central1 --format json > "$RUNNER_TEMP/service.json"
+          python3 - "$RUNNER_TEMP/service.json" "${SHA:0:12}" <<'PY'
+          import json, sys
+          svc = json.load(open(sys.argv[1]))
+          want = sys.argv[2]
+          label = svc["metadata"].get("labels", {}).get("git-sha")
+          latest = svc["status"]["latestReadyRevisionName"]
+          traffic = {t.get("revisionName", t.get("latestRevision")): t.get("percent", 0) for t in svc["status"]["traffic"]}
+          if label != want:
+              sys.exit(f"service label is {label!r}, expected {want}")
+          if traffic.get(latest) != 100 and traffic.get(True) != 100:
+              sys.exit(f"revision {latest} does not take all traffic ({traffic}); the service is pinned to an older revision, "
+                       "move it with: gcloud run services update-traffic scitt-verifier --to-latest")
+          PY
           curl -fsS "https://$HOST/health" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("ok") is True else 1)'

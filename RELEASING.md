@@ -77,8 +77,10 @@ If a publish fails after the tag exists:
 `.github/workflows/deploy.yml` deploys the Cloud Run service `scitt-verifier` (verify.agentactioncapsule.org) from a release tag. It never runs on push.
 
 1. Actions > deploy > Run workflow, from `main`, with the tag (`v0.5.0`).
-2. The job waits in the `production` environment until Steven approves. His approve click is the gate.
-3. The job checks out the tag, confirms the `--source .` upload still contains `viewer/dist/*.js` (see the gitignore incident in capsule-anchor `deploy/DEPLOY.md`), deploys with `gcloud run deploy scitt-verifier --source . --labels git-sha=<12 chars>`, and fails unless the service label is the tag's commit and `/health` says `"ok": true`.
+2. `resolve` turns the tag into a commit, refuses one that is not on `main`, and prints the commit in the run summary.
+3. The `deploy` job waits in the `production` environment until Steven approves. His approve click is the gate.
+4. It checks out exactly that commit (and stops if the tag moved meanwhile), confirms the `--source .` upload still contains `viewer/dist/*.js` (see the gitignore incident in capsule-anchor `deploy/DEPLOY.md`), and deploys with `gcloud run deploy scitt-verifier --source . --labels git-sha=<12 chars>`.
+5. It fails unless the latest revision carries the commit label and takes all traffic (move a rollback-pinned service with `update-traffic --to-latest` first) and `/health` says `"ok": true`.
 
 **One-time setup, by a `fluxxom` Owner.** Run `deploy/wif-setup.sh` (it prints the commands), then `deploy/wif-setup.sh --apply`, then set the two repository variables it prints. Create the `production` environment with Steven as required reviewer, accepting `main` and `v[0-9]*` tags only. Until the variables exist the job is skipped. The first dispatch is the check of the role set.
 

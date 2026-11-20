@@ -27,8 +27,8 @@ POOL=github
 PROVIDER=scitt-verifier
 SA_NAME=scitt-verifier-deploy
 SA="$SA_NAME@$PROJECT.iam.gserviceaccount.com"
-MAPPING='google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.environment=assertion.environment,attribute.job_workflow_ref=assertion.job_workflow_ref'
-CONDITION="assertion.repository_id == '$REPO_ID' && assertion.environment == 'production' && assertion.job_workflow_ref == '$REPO/.github/workflows/deploy.yml@refs/heads/main'"
+MAPPING='google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.environment=assertion.environment,attribute.workflow_ref=assertion.workflow_ref'
+CONDITION="assertion.repository_id == '$REPO_ID' && assertion.environment == 'production' && assertion.workflow_ref == '$REPO/.github/workflows/deploy.yml@refs/heads/main'"
 
 apply=0
 case "${1:-}" in
