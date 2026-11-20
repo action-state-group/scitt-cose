@@ -59,6 +59,9 @@ func TestVectorsReceiptV1(t *testing.T) {
 				Ok              bool    `json:"ok"`
 				Root            *string `json:"root"`
 				FailureContains string  `json:"failure_contains"`
+				// Absent means false: no vector but the tree-head cases of
+				// position-size-edit may report an authenticated position.
+				PositionAuthenticated bool `json:"position_authenticated"`
 				// Returned pins what is reported on vectors that carry it
 				// (scitt-cose#91); older vectors leave it out.
 				Returned *struct {
@@ -115,6 +118,9 @@ func TestVectorsReceiptV1(t *testing.T) {
 				if out.Receipt.FailedAt != want {
 					t.Errorf("failed_at %q, expected %q", out.Receipt.FailedAt, want)
 				}
+			}
+			if out.Receipt != nil && out.Receipt.PositionAuthenticated != exp.PositionAuthenticated {
+				t.Errorf("position_authenticated %v, expected %v", out.Receipt.PositionAuthenticated, exp.PositionAuthenticated)
 			}
 			if ret := exp.Returned; ret != nil {
 				// Go's coordinates are non-nullable: absent is an empty root
@@ -269,7 +275,7 @@ func TestPositionSizeEditTreeHead(t *testing.T) {
 		if r.Ok != c.Ok || r.FailedAt != want || r.PositionAuthenticated != c.PositionAuthenticated {
 			t.Errorf("%s: got ok=%v failed_at=%q position_authenticated=%v", c.Description, r.Ok, r.FailedAt, r.PositionAuthenticated)
 		}
-		if c.Ok && c.TreeSize != nil && r.TreeSize != *c.TreeSize {
+		if c.TreeSize != nil && r.TreeSize != *c.TreeSize {
 			t.Errorf("%s: tree_size %d, expected %d", c.Description, r.TreeSize, *c.TreeSize)
 		}
 	}

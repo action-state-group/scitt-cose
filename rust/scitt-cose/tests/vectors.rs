@@ -602,8 +602,6 @@ fn receipt_v1_position_size_edit_tree_head_cases() {
             "{d}: failed_at"
         );
         assert_eq!(r.position_authenticated, case.position_authenticated, "{d}");
-        if case.ok {
-            assert_eq!(r.tree_size, case.tree_size, "{d}: tree_size");
-        }
+        assert_eq!(r.tree_size, case.tree_size, "{d}: tree_size");
     }
 }

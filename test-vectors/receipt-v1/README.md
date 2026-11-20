@@ -123,7 +123,7 @@ the same root rebuilds: with no tree head the receipt is `ok: true`, reports
 edited receipt and `receipt-honest.cose` the unedited size-34 one; the
 `tree_head_cases` in its `expected.json` pin four runs, each naming the
 receipt, the trusted tree head `(root, tree_size)` passed (or none), and the
-`ok`, `failed_at`, `position_authenticated` and `tree_size` expected. A head
+`ok`, `failed_at`, `position_authenticated` and `tree_size` expected (a failed case still reports the proof's size as the diagnostic). A head
 that does not match the proof's size and rebuilt root fails at `"tree_head"`.
 An absent `position_authenticated` in any other `expected.json` means `false`.
 

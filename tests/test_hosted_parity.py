@@ -277,8 +277,8 @@ def test_hosted_tree_head_cases_from_the_shared_vector():
         assert rcpt["ok"] is case["ok"], (case["description"], out)
         assert out["valid"] is case["ok"], case["description"]
         assert rcpt["position_authenticated"] is case["position_authenticated"], case["description"]
-        if case["ok"]:
-            assert rcpt["tree_size"] == case["tree_size"], case["description"]
+        assert rcpt["failed_at"] == case["failed_at"], case["description"]
+        assert rcpt["tree_size"] == case["tree_size"], case["description"]
 
 
 def test_hosted_rejects_a_half_given_tree_head():
@@ -293,3 +293,22 @@ def test_hosted_rejects_a_half_given_tree_head():
     out = verify_payload(req)
     assert out["valid"] is False and out["receipt"] == {"ok": False}
     assert any("tree_head_root_hex" in r for r in out["reasons"])
+
+
+def test_hosted_ccf_receipt_with_a_tree_head_fails_closed():
+    import hashlib
+    from pathlib import Path
+
+    d = Path(__file__).resolve().parent.parent / "test-vectors/v1/valid-ccf-vds2"
+    out = verify_payload(
+        {
+            "receipt_b64": _b64((d / "receipt.cose").read_bytes()),
+            "log_pubkey_pem": (d / "log-key.pub").read_text(),
+            "leaf_entry_hex": hashlib.sha256((d / "statement.cose").read_bytes()).hexdigest(),
+            "tree_head_root_hex": "00" * 32,
+            "tree_head_size": 1,
+        }
+    )
+    assert out["valid"] is False
+    assert out["receipt"]["failed_at"] == "tree_head"
+    assert out["receipt"]["position_authenticated"] is False

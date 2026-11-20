@@ -4086,6 +4086,7 @@ def verify_payload(request: dict[str, Any]) -> dict[str, Any]:
                     "tree_size": res.tree_size,
                     "leaf_index": res.leaf_index,
                     "position_authenticated": res.position_authenticated,
+                    "failed_at": res.failed_at,
                     "errors": list(res.errors),
                 }
                 if not res.ok:

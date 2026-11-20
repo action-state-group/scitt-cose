@@ -2,6 +2,7 @@
 """COSE Receipt build/verify (detached only; attached rejected) and negatives."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -631,6 +632,7 @@ def test_frozen_receipt_v1_vectors_unchanged(vid):
         assert r.root == exp["root"]
     if "returned" in exp:
         assert {"root": r.root, "tree_size": r.tree_size, "leaf_index": r.leaf_index} == exp["returned"]
+    assert r.position_authenticated is exp.get("position_authenticated", False)
     if not exp["ok"]:
         assert any(exp["failure_contains"] in e for e in r.errors), r.errors
     # scitt-cose#93: every vector names its failure stage, in failed-at.json
@@ -705,8 +707,7 @@ def test_position_size_edit_vector_tree_head_cases():
         assert r.ok is case["ok"], (case["description"], r.errors)
         assert r.failed_at == case["failed_at"], case["description"]
         assert r.position_authenticated is case["position_authenticated"], case["description"]
-        if case["ok"]:
-            assert r.tree_size == case["tree_size"], case["description"]
+        assert r.tree_size == case["tree_size"], case["description"]
 
 
 def test_position_is_unauthenticated_without_a_head(alg_keys):
@@ -744,3 +745,17 @@ def test_wrong_key_with_a_head_still_fails_at_signature(eddsa_keys, other_eddsa_
     head = TreeHead(merkle.merkle_root(es), 4)
     r = verify_receipt(receipt, leaf_entry_hex=es[0], log_public_key_pem=other_pub, trusted_tree_head=head)
     assert not r.ok and r.failed_at == "signature"
+
+
+def test_ccf_receipt_with_a_tree_head_fails_closed():
+    """A CCF (vds=2) receipt carries no size to bind, so a supplied head is
+    refused at tree_head, never silently ignored (scitt-cose#110)."""
+    d = _RECEIPT_V1.parent / "v1" / "valid-ccf-vds2"
+    statement = (d / "statement.cose").read_bytes()
+    r = verify_receipt(
+        (d / "receipt.cose").read_bytes(),
+        leaf_entry_hex=hashlib.sha256(statement).hexdigest(),
+        log_public_key_pem=(d / "log-key.pub").read_bytes(),
+        trusted_tree_head=TreeHead("00" * 32, 1),
+    )
+    assert not r.ok and r.failed_at == "tree_head" and r.position_authenticated is False

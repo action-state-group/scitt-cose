@@ -32,7 +32,7 @@
       "ok": false,
       "failed_at": "tree_head",
       "position_authenticated": false,
-      "tree_size": null
+      "tree_size": 33
     },
     {
       "description": "honest size 34 against head (root, 34): ok, position authenticated",
@@ -56,7 +56,7 @@
       "ok": false,
       "failed_at": "tree_head",
       "position_authenticated": false,
-      "tree_size": null
+      "tree_size": 34
     }
   ]
 }
