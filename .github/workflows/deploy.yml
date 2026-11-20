@@ -14,8 +14,8 @@
 #     (deploy/wif-setup.sh) accepts only this repository, only `main`'s copy of
 #     this workflow and only the `production` environment, so the approval is
 #     what unlocks the deploy. No service-account key exists.
-#   - The deploy is `gcloud run deploy --source .` with only a commit label (no
-#     other flag), so the service keeps its configuration and public access.
+#   - The deploy is `gcloud run deploy --source .` with only a commit label (plus
+#     project, region and --quiet), so the service keeps its configuration and public access.
 #   - Afterwards the job asserts that the latest revision carries the commit
 #     and takes all traffic, and that /health says ok.
 # Until an owner has run deploy/wif-setup.sh and set the two repository
