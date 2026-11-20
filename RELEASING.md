@@ -72,6 +72,18 @@ If a publish fails after the tag exists:
 - **Environment.** `pypi` accepts deployments only from `v[0-9]*` tags.
 - **Tags.** The `release tags` ruleset lets only admins move or delete tags.
 
+## Deploy the hosted verifier
+
+`.github/workflows/deploy.yml` deploys the Cloud Run service `scitt-verifier` (verify.agentactioncapsule.org) from a release tag. It never runs on push.
+
+1. Actions > deploy > Run workflow, from `main`, with the tag (`v0.5.0`).
+2. `resolve` turns the tag into a commit, refuses one that is not on `main`, and prints the commit in the run summary.
+3. The `deploy` job waits in the `production` environment until Steven approves. His approve click is the gate.
+4. It checks out exactly that commit (and stops if the tag moved meanwhile), confirms the `--source .` upload still contains `viewer/dist/*.js` (see the gitignore incident in capsule-anchor `deploy/DEPLOY.md`), and deploys with `gcloud run deploy scitt-verifier --source . --labels git-sha=<12 chars>`.
+5. It fails unless the latest revision carries the commit label and takes all traffic (move a rollback-pinned service with `update-traffic --to-latest` first) and `/health` says `"ok": true`.
+
+**One-time setup, by a `fluxxom` Owner.** Run `deploy/wif-setup.sh` (it prints the commands), then `deploy/wif-setup.sh --apply`, then set the two repository variables it prints. Create the `production` environment with Steven as required reviewer, accepting the `main` branch only (runs start from `main`), with "Allow administrators to bypass" off, or an admin can skip his click. Until the variables exist the job is skipped. The first dispatch is the check of the role set.
+
 ## PyPI configuration
 
 The PyPI trusted publisher for `scitt-cose` names owner `action-state-group`,
