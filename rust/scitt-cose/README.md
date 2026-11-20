@@ -53,6 +53,14 @@ if result.ok {
 }
 ```
 
+`tree_size` and `leaf_index` are not authenticated by a verified receipt (RFC
+9942 carries them outside the signed bytes), so `position_authenticated` is
+`false`. Verify the log's signed tree head yourself and call
+`verify_receipt_with_tree_head` with its `TreeHead` (root, tree size): the
+proof must be for exactly that size and root, or the result fails at
+`FailedAt::TreeHead`. A later, larger head does not authenticate an earlier
+receipt.
+
 ## Usage (CLI)
 
 ```bash
@@ -70,6 +78,7 @@ Prints one JSON object to stdout and exits `0` iff the receipt verifies:
   "root": "fe14…",
   "tree_size": 5,
   "leaf_index": 2,
+  "position_authenticated": false,
   "iat": 1700000000,
   "grade": "mmr-verified",
   "witness_time_established": true,

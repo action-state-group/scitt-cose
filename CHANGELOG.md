@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Optional trusted tree head for receipt verification** (#110). Python
+  `verify_receipt(..., trusted_tree_head=TreeHead(root_hex, tree_size))`, Rust
+  `verify_receipt_with_tree_head`, Go `--tree-head-root` / `--tree-head-size`
+  and hosted `/verify` `tree_head_root_hex` / `tree_head_size`. The proof must
+  be for exactly that size and root, which sets `position_authenticated` to
+  `true`; otherwise the receipt fails at `tree_head`. New vector
+  `receipt-v1/position-size-edit`.
 - **alg -19 (RFC 9864 fully-specified Ed25519) is accepted** for Signed
   Statements and Receipts, verified exactly as -8 on an Ed25519 key; `-8`
   is unchanged. `sign_sign1` and `build_receipt` take `alg="Ed25519"`, and
@@ -15,6 +22,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`verify_receipt` reports `tree_size` and `leaf_index` as unauthenticated**
+  (#110). RFC 9942 carries them outside the signed bytes, so a verified receipt
+  no longer implies them: the new `position_authenticated` field (Python
+  `ReceiptResult`, Rust `ReceiptResult`, the Go and hosted verifiers' JSON) is
+  `false` unless a trusted tree head is supplied, and the hosted page labels
+  both rows "(unauthenticated)". See `docs/verification-trust-model.md`.
 - **Receipt verification follows agent-action-capsule's receipt encoding
   rule** (#106). `verify_receipt` in Python, the Rust crate
   `scitt-cose-receipt` and the Go verifier check the COSE_Sign1, its

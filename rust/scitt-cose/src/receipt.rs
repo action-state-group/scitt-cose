@@ -100,6 +100,19 @@ pub enum FailedAt {
     /// under every proof: a wrong key, an alg/key mismatch, an unsupported
     /// alg or a bad signature. Never evidence of anything.
     Signature,
+    /// The caller supplied a trusted [`TreeHead`] and no proof whose
+    /// signature verifies has exactly that size and rebuilds exactly that
+    /// root (scitt-cose#110).
+    TreeHead,
+}
+
+/// A trusted `(root, tree_size)` pair for the RFC 9162 tree a receipt belongs
+/// to. The caller authenticates it first, by whatever scheme the log uses for
+/// its signed tree head; this crate has no checkpoint format of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeHead {
+    pub root: [u8; 32],
+    pub tree_size: u64,
 }
 
 impl FailedAt {
@@ -108,6 +121,7 @@ impl FailedAt {
         match self {
             FailedAt::Structure => "structure",
             FailedAt::Signature => "signature",
+            FailedAt::TreeHead => "tree_head",
         }
     }
 }
@@ -129,6 +143,13 @@ impl FailedAt {
 /// step a failure stopped at and is `None` when `ok` is `true`; read it, not
 /// whether `root` is set, to tell a malformed receipt from one signed by a
 /// key the caller does not hold.
+///
+/// `ok: true` authenticates inclusion under the signed root only. RFC 9942
+/// carries `tree_size` and `leaf_index` outside the signed bytes, and more
+/// than one size and position can rebuild the same root from the same path,
+/// so they are authenticated only when `position_authenticated` is `true`.
+/// That happens only through [`verify_receipt_with_tree_head`], when the proof
+/// used has exactly the trusted head's size and rebuilds exactly its root.
 #[derive(Debug, Clone, Default)]
 pub struct ReceiptResult {
     pub ok: bool,
@@ -153,6 +174,9 @@ pub struct ReceiptResult {
     pub grade_cryptographically_bound: bool,
     /// The step a failed verify stopped at; `None` when `ok` is `true`.
     pub failed_at: Option<FailedAt>,
+    /// `true` only when a trusted [`TreeHead`] was supplied and matched, so
+    /// `tree_size` and `leaf_index` are authenticated. `false` otherwise.
+    pub position_authenticated: bool,
 }
 
 impl ReceiptResult {
@@ -162,6 +186,7 @@ impl ReceiptResult {
         self.grade = None;
         self.witness_time_established = false;
         self.grade_cryptographically_bound = false;
+        self.position_authenticated = false;
         self.failed_at.get_or_insert(FailedAt::Structure);
         self.errors.push(msg.into());
         self
@@ -360,6 +385,21 @@ pub fn verify_receipt(
     leaf_entry: &[u8],
     log_public_key_pem: &str,
 ) -> ReceiptResult {
+    verify_receipt_with_tree_head(receipt, leaf_entry, log_public_key_pem, None)
+}
+
+/// [`verify_receipt`] with an optional trusted [`TreeHead`]. With a head, the
+/// proof used must have `tree_size == head.tree_size` and rebuild
+/// `head.root`, on top of the signature check; then `position_authenticated`
+/// is `true`. Anything else fails at [`FailedAt::TreeHead`]. A head for a
+/// later, larger tree does not authenticate an earlier receipt (that needs a
+/// consistency proof, which this crate does not check).
+pub fn verify_receipt_with_tree_head(
+    receipt: &[u8],
+    leaf_entry: &[u8],
+    log_public_key_pem: &str,
+    tree_head: Option<&TreeHead>,
+) -> ReceiptResult {
     let mut result = ReceiptResult::default();
 
     if receipt.is_empty() || receipt.len() > MAX_RECEIPT_OCTETS {
@@ -470,6 +510,7 @@ pub fn verify_receipt(
         }
     }
     let mut matched = false;
+    let mut head_mismatch = false;
     let mut last_error = None;
     // When no proof's root verifies, the first proof's values stay as a
     // diagnostic (ok stays false): callers tell a malformed receipt from one
@@ -482,7 +523,13 @@ pub fn verify_receipt(
         if let Err(error) = verify_signature(&sign1, alg_code, log_public_key_pem, &reconstructed) {
             last_error = Some(error);
             diagnostic.get_or_insert((tree_size, leaf_index, reconstructed));
+        } else if tree_head
+            .is_some_and(|head| head.tree_size != tree_size || head.root != reconstructed)
+        {
+            head_mismatch = true;
+            diagnostic.get_or_insert((tree_size, leaf_index, reconstructed));
         } else {
+            result.position_authenticated = tree_head.is_some();
             result.tree_size = Some(tree_size);
             result.leaf_index = Some(leaf_index);
             result.root = Some(reconstructed);
@@ -496,6 +543,12 @@ pub fn verify_receipt(
             result.leaf_index = Some(leaf_index);
             result.root = Some(root);
             result.failed_at = Some(FailedAt::Signature);
+        }
+        if head_mismatch {
+            result.failed_at = Some(FailedAt::TreeHead);
+            return result
+                .fail("no inclusion proof matches the trusted tree head (tree_size and root must both match)")
+                .fail(CLAIMS_WITHHELD);
         }
         return result
             .fail(format!(

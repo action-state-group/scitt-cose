@@ -39,7 +39,7 @@ from .merkle import (
     verify_consistency,
     verify_inclusion,
 )
-from .receipt import ReceiptResult, build_receipt, verify_receipt
+from .receipt import ReceiptResult, TreeHead, build_receipt, verify_receipt
 from .statement import (
     attach_receipts,
     build_signed_statement,
@@ -87,4 +87,5 @@ __all__ = [
     "build_receipt",
     "verify_receipt",
     "ReceiptResult",
+    "TreeHead",
 ]

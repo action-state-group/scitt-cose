@@ -87,6 +87,11 @@
       "id": "fail-undefined-payload",
       "dir": "receipt-v1/fail-undefined-payload",
       "ok": false
+    },
+    {
+      "id": "position-size-edit",
+      "dir": "receipt-v1/position-size-edit",
+      "ok": true
     }
   ]
 }

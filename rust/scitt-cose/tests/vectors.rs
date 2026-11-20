@@ -121,6 +121,28 @@ struct ReceiptV1Expected {
     /// What the verifier must report for `root`/`tree_size`/`leaf_index`,
     /// on vectors that pin it (scitt-cose#91); older vectors leave it out.
     returned: Option<ReceiptV1Returned>,
+    /// scitt-cose#110: absent means `false`.
+    #[serde(default)]
+    position_authenticated: bool,
+    #[serde(default)]
+    tree_head_cases: Vec<TreeHeadCase>,
+}
+
+#[derive(Deserialize)]
+struct TreeHeadCase {
+    description: String,
+    receipt: String,
+    tree_head: Option<TreeHeadJson>,
+    ok: bool,
+    failed_at: Option<String>,
+    position_authenticated: bool,
+    tree_size: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct TreeHeadJson {
+    root: String,
+    tree_size: u64,
 }
 
 #[derive(Deserialize)]
@@ -166,6 +188,10 @@ fn assert_matches(id: &str) {
         "{id}: failed_at"
     );
     assert_eq!(result.ok, expected.ok, "{id}: errors={:?}", result.errors);
+    assert_eq!(
+        result.position_authenticated, expected.position_authenticated,
+        "{id}: position_authenticated"
+    );
     assert_eq!(
         result.witness_time_established, expected.witness_time_established,
         "{id}: witness_time_established"
@@ -540,4 +566,44 @@ fn candidate_verification_preserves_invalid_key_diagnostic() {
         "{:?}",
         result.errors
     );
+}
+
+#[test]
+fn receipt_v1_position_size_edit_tree_head_cases() {
+    // scitt-cose#110: an edited tree_size still verifies, but its position
+    // is unauthenticated, and a trusted tree head must match size and root.
+    let id = "position-size-edit";
+    assert_matches(id);
+    let dir = repo_root().join("test-vectors/receipt-v1").join(id);
+    let (expected, _) = run_receipt_v1(id);
+    assert_eq!(expected.tree_head_cases.len(), 4);
+    let log_pub = read_pem(&dir.join("log-key.pub"));
+    let leaf_entry = hex::decode(&expected.leaf_entry_hex).unwrap();
+    for case in &expected.tree_head_cases {
+        let receipt = std::fs::read(dir.join(&case.receipt)).unwrap();
+        let head = case
+            .tree_head
+            .as_ref()
+            .map(|h| scitt_cose_receipt::TreeHead {
+                root: hex::decode(&h.root).unwrap().try_into().unwrap(),
+                tree_size: h.tree_size,
+            });
+        let r = scitt_cose_receipt::verify_receipt_with_tree_head(
+            &receipt,
+            &leaf_entry,
+            &log_pub,
+            head.as_ref(),
+        );
+        let d = &case.description;
+        assert_eq!(r.ok, case.ok, "{d}: {:?}", r.errors);
+        assert_eq!(
+            r.failed_at.map(|f| f.as_str().to_owned()),
+            case.failed_at,
+            "{d}: failed_at"
+        );
+        assert_eq!(r.position_authenticated, case.position_authenticated, "{d}");
+        if case.ok {
+            assert_eq!(r.tree_size, case.tree_size, "{d}: tree_size");
+        }
+    }
 }

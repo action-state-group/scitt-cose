@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -213,5 +214,90 @@ func TestCCFFailedAt(t *testing.T) {
 		if r == nil || r.Ok != tc.ok || r.FailedAt != tc.want {
 			t.Errorf("%s: got %+v, expected ok=%v failed_at=%q", tc.name, r, tc.ok, tc.want)
 		}
+	}
+}
+
+// TestPositionSizeEditTreeHead runs the tree_head_cases of the
+// position-size-edit vector (scitt-cose#110): a receipt whose tree_size was
+// edited still verifies but reports an unauthenticated position, and a
+// trusted tree head must match the proof's size and rebuilt root.
+func TestPositionSizeEditTreeHead(t *testing.T) {
+	dir := filepath.Join(vectorsRoot, "receipt-v1", "position-size-edit")
+	rawExp, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+	if err != nil {
+		t.Fatalf("read expected.json: %v", err)
+	}
+	var exp struct {
+		LeafEntryHex string `json:"leaf_entry_hex"`
+		Cases        []struct {
+			Description string `json:"description"`
+			Receipt     string `json:"receipt"`
+			TreeHead    *struct {
+				Root     string `json:"root"`
+				TreeSize int64  `json:"tree_size"`
+			} `json:"tree_head"`
+			Ok                    bool    `json:"ok"`
+			FailedAt              *string `json:"failed_at"`
+			PositionAuthenticated bool    `json:"position_authenticated"`
+			TreeSize              *int64  `json:"tree_size"`
+		} `json:"tree_head_cases"`
+	}
+	if err := json.Unmarshal(rawExp, &exp); err != nil {
+		t.Fatalf("parse expected.json: %v", err)
+	}
+	if len(exp.Cases) != 4 {
+		t.Fatalf("expected 4 tree_head_cases, got %d", len(exp.Cases))
+	}
+	for _, c := range exp.Cases {
+		args := []string{
+			"--receipt", filepath.Join(dir, c.Receipt),
+			"--log-pubkey", filepath.Join(dir, "log-key.pub"),
+			"--leaf-entry-hex", exp.LeafEntryHex,
+		}
+		if c.TreeHead != nil {
+			args = append(args, "--tree-head-root", c.TreeHead.Root,
+				"--tree-head-size", strconv.FormatInt(c.TreeHead.TreeSize, 10))
+		}
+		r := runBinary(t, args...).Receipt
+		if r == nil {
+			t.Fatalf("%s: no receipt sub-result", c.Description)
+		}
+		want := ""
+		if c.FailedAt != nil {
+			want = *c.FailedAt
+		}
+		if r.Ok != c.Ok || r.FailedAt != want || r.PositionAuthenticated != c.PositionAuthenticated {
+			t.Errorf("%s: got ok=%v failed_at=%q position_authenticated=%v", c.Description, r.Ok, r.FailedAt, r.PositionAuthenticated)
+		}
+		if c.Ok && c.TreeSize != nil && r.TreeSize != *c.TreeSize {
+			t.Errorf("%s: tree_size %d, expected %d", c.Description, r.TreeSize, *c.TreeSize)
+		}
+	}
+}
+
+// TestCCFTreeHeadFailsClosed: a tree head with a CCF receipt is refused, never
+// silently ignored.
+func TestCCFTreeHeadFailsClosed(t *testing.T) {
+	dir := filepath.Join(vectorsRoot, "v1", "valid-ccf-vds2")
+	rawExp, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+	if err != nil {
+		t.Fatalf("read expected.json: %v", err)
+	}
+	var exp struct {
+		LeafEntry string `json:"leaf_entry"`
+	}
+	if err := json.Unmarshal(rawExp, &exp); err != nil {
+		t.Fatalf("parse expected.json: %v", err)
+	}
+	out := runBinary(t,
+		"--receipt", filepath.Join(dir, "receipt.cose"),
+		"--log-pubkey", filepath.Join(dir, "log-key.pub"),
+		"--leaf-entry-hex", exp.LeafEntry,
+		"--tree-head-root", strings.Repeat("00", 32),
+		"--tree-head-size", "1",
+	)
+	r := out.Receipt
+	if r == nil || r.Ok || r.FailedAt != failedAtTreeHead || r.PositionAuthenticated {
+		t.Errorf("got %+v, expected a tree_head failure", r)
 	}
 }
