@@ -3,8 +3,9 @@
 # Runs locally what CI runs on pull requests and main: every job in
 # .github/workflows/ci.yml, hostname-lint.yml, leak-lint.yml and
 # neutrality.yml's scanner self-test. Not run: neutrality.yml's scan itself,
-# which needs the NEUTRALITY_TERMS repository secret. Needs uv (it provides
-# Python 3.9 and 3.12), Go and a Rust toolchain with clippy.
+# which needs the NEUTRALITY_TERMS repository secret, and dco.yml's sign-off
+# check. Needs uv (it provides Python 3.9 and 3.12), Go and the current
+# stable Rust with clippy, as CI uses (`rustup update stable` if older).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -36,7 +37,7 @@ fi
 
 # ci.yml fuzz.
 uv venv -q -p 3.12 "$tmp/runtime"
-VIRTUAL_ENV="$tmp/runtime" uv pip install -q .
+VIRTUAL_ENV="$tmp/runtime" uv pip install -q --reinstall-package scitt-cose .
 (cd scitt-cose-go-verify && go build -o "$tmp/gv" .)
 "$tmp/runtime/bin/python" scripts/differential_fuzz.py \
   --go-binary "$tmp/gv" \
