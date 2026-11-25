@@ -6,6 +6,8 @@ changing library code.
 
 ## Commands
 
+Before every push, run `scripts/check.sh` (about 225 s on an Apple-silicon Mac). It runs what CI runs on pull requests and main, except the neutrality scan, which needs the `NEUTRALITY_TERMS` repository secret, and the DCO sign-off check. CI uses the current stable Rust, so run `rustup update stable` first if yours is older.
+
 ```bash
 pip install -e ".[dev,serve]"
 python3 -m pytest -q                       # unit + conformance suite
