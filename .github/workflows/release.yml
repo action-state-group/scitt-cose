@@ -14,6 +14,12 @@ on:
 permissions:
   contents: read
 
+# Every run step uses bash with -eo pipefail, so a failing command in a pipe
+# fails the step (an unset shell runs `bash -e` without pipefail).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   publish:
     # The package releases under bare v<version> tags. Other tags in this

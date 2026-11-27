@@ -36,6 +36,12 @@ concurrency:
   group: deploy-scitt-verifier
   cancel-in-progress: false
 
+# Every run step uses bash with -eo pipefail, so a failing command in a pipe
+# fails the step (an unset shell runs `bash -e` without pipefail).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   resolve:
     if: github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_DEPLOY_SERVICE_ACCOUNT != ''
@@ -110,7 +116,9 @@ jobs:
         run: |
           files="$(gcloud meta list-files-for-upload .)"
           for f in viewer/dist/aac-crypto.js viewer/dist/witness-check.js; do
-            printf '%s\n' "$files" | grep -qx "$f" || { echo "::error::$f is not in the upload"; exit 1; }
+            # A here-string, not a pipe: under pipefail, `grep -q` exiting at the
+            # first match could SIGPIPE the writer and fail a good upload.
+            grep -qx "$f" <<<"$files" || { echo "::error::$f is not in the upload"; exit 1; }
           done
       - name: Deploy to Cloud Run
         working-directory: src

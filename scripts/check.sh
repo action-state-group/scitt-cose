@@ -18,16 +18,13 @@ for py in 3.9 3.12; do
   VIRTUAL_ENV="$tmp/test-$py" uv pip install -q -e ".[dev,serve]"
   SCITT_REQUIRE_GO=1 SCITT_REQUIRE_RUST=1 "$tmp/test-$py/bin/python" -m pytest -q
   "$tmp/test-$py/bin/python" -m ruff check .
-  "$tmp/test-$py/bin/python" -m pytest -q .github/test_release.py
+  "$tmp/test-$py/bin/python" -m pytest -q .github/test_release.py .github/test_leak_lint.py
 done
 
 # ci.yml third-party-oracle.
 uv venv -q -p 3.12 "$tmp/oracle"
 VIRTUAL_ENV="$tmp/oracle" uv pip install -q -e ".[dev]" "cbor2<6"
-"$tmp/oracle/bin/python" -m pytest tests/test_thirdparty_cose.py -q -rs 2>&1 | tee "$tmp/oracle.txt"
-if grep -q "skipped" "$tmp/oracle.txt"; then
-  echo "the pycose oracle must run, not skip"; exit 1
-fi
+SCITT_REQUIRE_PYCOSE=1 "$tmp/oracle/bin/python" -m pytest tests/test_thirdparty_cose.py -q -rs
 
 # ci.yml go-verifier.
 (cd scitt-cose-go-verify && go vet ./... && go build -o "$tmp/gv-build" ./...)
@@ -52,8 +49,7 @@ VIRTUAL_ENV="$tmp/runtime" uv pip install -q --reinstall-package scitt-cose .
 (cd rust && cargo test --locked -p scitt-cose-receipt --test vectors)
 
 # ci.yml neutrality-gate.
-! grep -rn "goph""er_ai" --include='*.py' --include='*.go' . || {
-  echo "reserved/downstream code reference found"; exit 1; }
+scripts/neutrality_gate.sh .
 
 # hostname-lint.yml, leak-lint.yml, neutrality.yml scanner self-test.
 "$tmp/runtime/bin/python" .github/hostname_lint.py .

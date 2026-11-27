@@ -13,7 +13,7 @@ pip install -e ".[dev,serve]"
 python3 -m pytest -q                       # unit + conformance suite
 SCITT_REQUIRE_GO=1 python3 -m pytest -q    # also force the Go cross-check
 python3 -m ruff check .
-python3 -m pytest -q .github/test_release.py   # release helper
+python3 -m pytest -q .github/test_release.py .github/test_leak_lint.py   # release helper, leak lint
 (cd rust && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked)
 ```
 
