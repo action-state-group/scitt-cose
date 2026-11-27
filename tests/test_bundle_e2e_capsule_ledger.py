@@ -215,7 +215,7 @@ def test_raw_oss_bundle_renders_with_no_special_casing(real_bundle, js_paths):
 
 def test_hosted_route_renders_bundle_page_shell():
     html = render_bundle_page()
-    assert "Ledger bundle verifier" in html
+    assert "Evidence Bundle verifier" in html
 
 
 # ---------------------------------------------------------------------------
