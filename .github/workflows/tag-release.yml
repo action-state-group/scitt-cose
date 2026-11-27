@@ -23,6 +23,12 @@ permissions:
 # push would cancel a queued run carrying a version bump. Runs are independent,
 # since each looks only at its own push's before..after range.
 
+# Every run step uses bash with -eo pipefail, so a failing command in a pipe
+# fails the step (an unset shell runs `bash -e` without pipefail).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   tag:
     runs-on: ubuntu-latest

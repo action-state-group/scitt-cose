@@ -8,6 +8,19 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a pull request cancels that pull request's older run, so
+# superseded runs don't hold the org's shared runners. Runs on main are never
+# cancelled: each is grouped by its own commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+# Every run step uses bash with -eo pipefail, so a failing command in a pipe
+# fails the step (an unset shell runs `bash -e` without pipefail).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
     runs-on: ubuntu-24.04
@@ -35,8 +48,8 @@ jobs:
           SCITT_REQUIRE_RUST: "1"
       - name: Lint
         run: python -m ruff check .
-      - name: Release helper tests
-        run: python -m pytest -q .github/test_release.py
+      - name: Release helper and leak-lint tests
+        run: python -m pytest -q .github/test_release.py .github/test_leak_lint.py
 
   third-party-oracle:
     # The pycose oracle skips itself on cbor2>=6 (pycose 1.1 limitation). The
@@ -51,7 +64,9 @@ jobs:
       - name: Install with cbor2<6 (pycose-compatible)
         run: pip install -e ".[dev]" "cbor2<6"
       - name: pycose oracle must RUN (not skip)
-        run: python -m pytest tests/test_thirdparty_cose.py -q -rs 2>&1 | tee out.txt && ! grep -q "skipped" out.txt
+        run: python -m pytest tests/test_thirdparty_cose.py -q -rs
+        env:
+          SCITT_REQUIRE_PYCOSE: "1"
 
   go-verifier:
     runs-on: ubuntu-latest
@@ -162,8 +177,4 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: No downstream package references anywhere in the tree
-        run: |
-          # (pattern split so this workflow file doesn't match itself, in the
-          # tree or in `git grep` over history — see the launch checklist)
-          ! grep -rn "goph""er_ai" --include='*.py' --include='*.go' . || {
-            echo "reserved/downstream code reference found"; exit 1; }
+        run: scripts/neutrality_gate.sh .

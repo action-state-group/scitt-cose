@@ -12,6 +12,19 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels that pull request's older run, so
+# superseded runs don't hold the org's shared runners. Runs on main are never
+# cancelled: each is grouped by its own commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+# Every run step uses bash with -eo pipefail, so a failing command in a pipe
+# fails the step (an unset shell runs `bash -e` without pipefail).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   dco:
     runs-on: ubuntu-latest
@@ -24,20 +37,4 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          missing=()
-          while IFS= read -r sha; do
-            msg=$(git log --format=%B -n 1 "$sha")
-            if ! echo "$msg" | grep -qiE "^Signed-off-by: .+ <.+@.+>"; then
-              missing+=("$(git log --format='%h %s' -n 1 "$sha")")
-            fi
-          done < <(git rev-list "$BASE_SHA..$HEAD_SHA")
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "ERROR: Missing DCO Signed-off-by on the following commits:"
-            printf '  %s\n' "${missing[@]}"
-            echo
-            echo "Fix: git commit --amend -s  (for last commit)"
-            echo "     git rebase --signoff HEAD~N  (for N commits)"
-            exit 1
-          fi
-          echo "All commits signed off. ✓"
+        run: scripts/dco_check.sh "$BASE_SHA" "$HEAD_SHA"

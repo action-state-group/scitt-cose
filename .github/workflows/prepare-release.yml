@@ -31,6 +31,12 @@ concurrency:
   group: prepare-release
   cancel-in-progress: false
 
+# Every run step uses bash with -eo pipefail, so a failing command in a pipe
+# fails the step (an unset shell runs `bash -e` without pipefail).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   prepare:
     runs-on: ubuntu-latest

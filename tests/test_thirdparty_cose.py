@@ -17,8 +17,12 @@ Two directions, because a round-trip through one stack proves little:
    writer.
 
 SKIPS cleanly if pycose is not installed; CI installs it (``[dev]`` extra).
+Set ``SCITT_REQUIRE_PYCOSE=1`` (CI's third-party-oracle job and scripts/check.sh
+do) to turn every such skip into a failure, so the oracle must actually run.
 """
 from __future__ import annotations
+
+import os
 
 import cbor2
 import pytest
@@ -28,7 +32,21 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from scitt_cose import build_signed_statement, verify_sign1
 from scitt_cose.cose_sign1 import CoseError
 
-pycose = pytest.importorskip("pycose")
+_REQUIRE_PYCOSE = os.environ.get("SCITT_REQUIRE_PYCOSE") == "1"
+
+
+def _skip_or_fail(reason: str) -> None:
+    """SKIP normally; FAIL when SCITT_REQUIRE_PYCOSE=1 (the oracle must run)."""
+    if _REQUIRE_PYCOSE:
+        pytest.fail(f"SCITT_REQUIRE_PYCOSE=1 but the pycose oracle cannot run: {reason}",
+                    pytrace=False)
+    pytest.skip(reason, allow_module_level=True)
+
+
+try:
+    import pycose  # noqa: F401
+except ImportError as exc:
+    _skip_or_fail(f"pycose is not installed ({exc})")
 
 # pycose 1.1 parses COSE via cbor2's loads and is incompatible with cbor2>=6,
 # which returns immutable frozendict/tuple ("Bytes cannot be decoded as COSE
@@ -38,10 +56,7 @@ pycose = pytest.importorskip("pycose")
 from importlib.metadata import version as _pkg_version  # noqa: E402
 
 if tuple(int(p) for p in _pkg_version("cbor2").split(".")[:1]) >= (6,):
-    pytest.skip(
-        "pycose 1.1 is incompatible with cbor2>=6 (third-party oracle only)",
-        allow_module_level=True,
-    )
+    _skip_or_fail("pycose 1.1 is incompatible with cbor2>=6 (third-party oracle only)")
 
 from pycose.algorithms import EdDSA as PyEdDSA  # noqa: E402
 from pycose.headers import Algorithm, ContentType  # noqa: E402
